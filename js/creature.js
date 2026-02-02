@@ -160,11 +160,6 @@ export function addModule(state, type, rng){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
 
-  const bodyN = state?.body?.cells?.length || 12;
-  // As the body grows, allow longer appendages.
-  // This is important for late-game silhouettes and for base-thickening to actually trigger.
-  const sizeBonus = Math.max(0, Math.floor(bodyN / 18));
-
   let anchor = null;
   for (let tries=0; tries<60 && !anchor; tries++){
     const [ax,ay] = bodyCells[Math.floor(rng()*bodyCells.length)];
@@ -199,28 +194,27 @@ export function addModule(state, type, rng){
 
   if (type === "tail" || type === "tentacle"){
     movable = true;
-    targetLen = 3 + sizeBonus + Math.floor(rng()*8);
+    targetLen = 2 + Math.floor(rng()*6);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "limb"){
     movable = true;
-    targetLen = 3 + sizeBonus + Math.floor(rng()*7);
+    targetLen = 2 + Math.floor(rng()*5);
     const dir = rng()<0.65 ? [0,1] : baseDir;
     dirForGrowth = dir;
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "antenna"){
     movable = true;
-    targetLen = 3 + sizeBonus + Math.floor(rng()*7);
+    targetLen = 2 + Math.floor(rng()*5);
     const dir = rng()<0.7 ? [0,-1] : baseDir;
     dirForGrowth = dir;
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "spike"){
     movable = false;
-    // Keep spikes comparatively short, but let them grow a bit with size.
-    targetLen = 1 + Math.min(4, sizeBonus) + Math.floor(rng()*4);
+    targetLen = 1 + Math.floor(rng()*4);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
@@ -245,7 +239,7 @@ export function addModule(state, type, rng){
   } else if (type === "teeth"){
     // teeth: 1-wide line in front of face anchor, grows up to 6
     movable = false;
-    targetLen = 2 + Math.min(4, sizeBonus) + Math.floor(rng()*5);
+    targetLen = 2 + Math.floor(rng()*5);
     const fa = state.face?.anchor || anchor;
     const dir = [1,0];
     dirForGrowth = dir;
@@ -254,7 +248,7 @@ export function addModule(state, type, rng){
   } else if (type === "claw"){
     // claw: like a limb but more "hook"-like (grows longer)
     movable = true;
-    targetLen = 4 + sizeBonus + Math.floor(rng()*8);
+    targetLen = 3 + Math.floor(rng()*7);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
@@ -290,65 +284,6 @@ export function addModule(state, type, rng){
   return true;
 }
 
-function tryThickenBase(state, m, rng){
-  // Turn a "wire" appendage into something with a thicker base.
-  // We do this by actually adding extra cells into the module data (not just rendering),
-  // so collisions and invariants still make sense.
-  if (!m?.cells || m.cells.length < 8) return false;
-  if (!m.movable) return false;
-  if (m.thickened) return false;
-  if (!m.growDir) return false;
-
-  // Trigger probability: don't always thicken, but make it likely once it gets long.
-  const len = m.cells.length;
-  const p = len >= 12 ? 0.85 : (len >= 9 ? 0.45 : 0.15);
-  if (rng && rng() > p) return false;
-
-  const bodySet = bodyCellSet(state.body);
-
-  const dx = m.growDir[0];
-  const dy = m.growDir[1];
-  // A perpendicular direction to the growth direction.
-  let px = dy;
-  let py = -dx;
-  if (px === 0 && py === 0) { px = 1; py = 0; }
-
-  // Prefer placing thickness on the "outside" of the body.
-  // We test both perpendicular sides and choose the one that adds more valid cells.
-  const sides = [[px,py],[-px,-py]];
-  let best = null;
-  let bestAdd = [];
-
-  for (const [sx,sy] of sides){
-    const toAdd = [];
-    // Try thickening the first 2 segments near the body.
-    const baseCount = Math.min(2, m.cells.length);
-    for (let i=0;i<baseCount;i++){
-      const [x,y] = m.cells[i];
-      const nx = x + sx;
-      const ny = y + sy;
-      const kk = key(nx,ny);
-      if (bodySet.has(kk)) continue;
-      if (occupiedByModules(state, nx, ny)) continue;
-      toAdd.push([nx,ny]);
-    }
-    if (toAdd.length > bestAdd.length){
-      best = [sx,sy];
-      bestAdd = toAdd;
-    }
-  }
-
-  if (!bestAdd.length) return false;
-
-  for (const [x,y] of bestAdd){
-    m.cells.push([x,y]);
-    markAnim(state, x, y);
-  }
-
-  m.thickened = true;
-  return true;
-}
-
 export function growPlannedModules(state, rng){
   // Each call tries to extend growing modules by 1 segment.
   // If extension is impossible, we stop growth for that module.
@@ -372,9 +307,6 @@ export function growPlannedModules(state, rng){
     m.cells.push([nx, ny]);
     markAnim(state, nx, ny);
     grew++;
-
-    // Occasionally add thickness near the base for long movable appendages.
-    tryThickenBase(state, m, rng);
   }
   return grew;
 }

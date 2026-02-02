@@ -257,30 +257,6 @@ function computeMorphology(state){
   };
 }
 
-function upgradeExistingModule(state, type, rng){
-  // Instead of endlessly spawning new thin appendages, sometimes extend an existing one.
-  // This gives more readable silhouettes and enables "hybrid" mixes (fish+bug etc.).
-  if (!state?.modules?.length) return false;
-  const list = state.modules.filter(m => m?.type === type && m?.cells?.length);
-  if (!list.length) return false;
-
-  // Prefer the shortest (so the colony looks more balanced).
-  list.sort((a,b) => (a.growTo ?? a.cells.length) - (b.growTo ?? b.cells.length));
-  const m = list[0];
-
-  const bodyN = state?.body?.cells?.length || 12;
-  const sizeBonus = Math.max(0, Math.floor(bodyN / 18));
-
-  // Hard-ish cap so growth doesn't become absurdly long.
-  const cap = 10 + sizeBonus * 6;
-  const cur = (m.growTo ?? m.cells.length);
-  if (cur >= cap) return false;
-
-  const bump = 1 + Math.floor(rng()*3); // +1..+3
-  m.growTo = Math.min(cap, cur + bump);
-  return true;
-}
-
 export function applyMutation(state, momentSec){
   const rng = mulberry32(hash32(state.seed, momentSec | 0));
 
@@ -313,7 +289,9 @@ export function applyMutation(state, momentSec){
   // This is what makes new organs appear small and then extend gradually.
   // We do it BEFORE choosing the mutation, so growth is visible even if this tick picks body/palette.
   growPlannedModules(state, rng);
-  if (Array.isArray(state.buds)){
+  // Buds grow their planned modules during parent mutation ticks,
+  // but we DO NOT want buds to spawn their own sub-colonies.
+  if (!state._isBud && Array.isArray(state.buds)){
     for (const bud of state.buds){
       growPlannedModules(bud, rng);
     }
@@ -398,7 +376,9 @@ export function applyMutation(state, momentSec){
     const budBase = 0.05 + 0.20*pf + 0.10*(M.mobilityScore);
     // If parent is large enough, budding is easier/more successful in practice,
     // so we allow it to happen more often (and we'll also try harder to place it).
-    weights.push(["bud", budBase * (isBigForBud ? 2.0 : 1.0)]);
+    if (!state._isBud){
+      weights.push(["bud", budBase * (isBigForBud ? 2.0 : 1.0)]);
+    }
   }
 
   // After 350+ blocks: меньше антенн/щупалец, но появляются новые мутации.
@@ -472,14 +452,6 @@ export function applyMutation(state, momentSec){
   }
 
   // 4) Органы (tail/limb/antenna/spike/shell/eye)
-  // For movable appendages we often extend an existing organ instead of spawning a new one.
-  if (kind === "tail" || kind === "tentacle" || kind === "limb" || kind === "antenna" || kind === "claw"){
-    if (rng() < 0.60 && upgradeExistingModule(state, kind, rng)){
-      pushLog(state, `Мутация: орган (${organLabel(kind)}) стал длиннее.`, "mut_ok");
-      return;
-    }
-  }
-
   const added = addModule(state, kind, rng);
 
   if (added){

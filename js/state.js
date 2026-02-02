@@ -42,6 +42,24 @@ export function migrateOrNew(){
     org.palette = org.palette || pick(mulberry32(seed), PALETTES);
     org.body = org.body || makeSmallConnectedBody(seed, 9);
     org.modules = org.modules || [];
+    // normalize cells that might be saved as "x,y" strings in old versions
+    const normCells = (arr)=>{
+      if (!Array.isArray(arr)) return [];
+      const out = [];
+      for (const v of arr){
+        if (Array.isArray(v) && v.length >= 2){ out.push([v[0]|0, v[1]|0]); continue; }
+        if (typeof v === 'string'){
+          const m = /^(-?\d+)\s*,\s*(-?\d+)$/.exec(v.trim());
+          if (m){ out.push([m[1]|0, m[2]|0]); }
+        }
+      }
+      return out;
+    };
+    if (org.body){
+      org.body.cells = normCells(org.body.cells);
+      org.body.core = Array.isArray(org.body.core) ? [org.body.core[0]|0, org.body.core[1]|0] : [0,0];
+    }
+    for (const m of org.modules){ m.cells = normCells(m.cells); }
     org.face = org.face || { anchor: findFaceAnchor(org.body, seed) };
     org.cam = org.cam || { ox: org.body.core[0], oy: org.body.core[1] };
     if (org.active === undefined) org.active = null;
@@ -74,6 +92,9 @@ export function migrateOrNew(){
   for (let i=0; i<state.buds.length; i++){
     const b = state.buds[i];
     normalizeOrg(b, hash32(state.seed||1, i+1));
+    b._isBud = true; // used to disable budding from buds
+    if (!Number.isFinite(b.lastMutationAt)) b.lastMutationAt = state.lastMutationAt;
+    if (!Number.isFinite(b.lastSeen)) b.lastSeen = state.lastSeen;
     // inherit hue map by reference (same behavior as before)
     if (!b.partHue) b.partHue = state.partHue;
   }
@@ -85,11 +106,8 @@ export function migrateOrNew(){
 export function simulate(state, deltaSec){
   if (deltaSec <= 0) return { deltaSec: 0, mutations: 0 };
 
-  // Apply time to ALL organisms in the colony (parent + buds).
-  // Previously only the parent decayed/mutated, which made children feel "frozen"
-  // (no growth, no animation-related state changes, no needs changing).
-  function decayOrg(org){
-    if (!org?.bars) return;
+  const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+  for (const org of orgs){
     org.bars.food  = clamp(org.bars.food  - DECAY.food_per_sec  * deltaSec, 0, BAR_MAX);
     org.bars.clean = clamp(org.bars.clean - DECAY.clean_per_sec * deltaSec, 0, BAR_MAX);
     org.bars.mood  = clamp(org.bars.mood  - DECAY.mood_per_sec  * deltaSec, 0, BAR_MAX);
@@ -102,13 +120,7 @@ export function simulate(state, deltaSec){
     org.bars.hp = clamp(org.bars.hp - hpLoss, 0, BAR_MAX);
 
     const stress = clamp01((hungerFactor + dirtFactor + sadness + clamp01(1-org.bars.hp)) / 4);
-    if (!org.care) org.care = { feed:0, wash:0, heal:0, neglect:0 };
     org.care.neglect += deltaSec * (0.00012 * (0.5 + stress));
-  }
-
-  decayOrg(state);
-  if (Array.isArray(state.buds)){
-    for (const b of state.buds) decayOrg(b);
   }
 
   const intervalSec = Math.max(60, Math.floor(state.evoIntervalMin * 60));
@@ -121,40 +133,27 @@ export function simulate(state, deltaSec){
     state.carrotTick.used = 0;
   }
   const MAX_MUTATIONS_PER_TICK = EVO.maxMutationsPerTick;
-  // Colony-wide cap: parent still respects MAX_MUTATIONS_PER_TICK (variant A),
-  // but we also allow a small amount of progress for buds each tick.
-  const budsN = Array.isArray(state.buds) ? state.buds.length : 0;
-  const MAX_MUTATIONS_COLONY = MAX_MUTATIONS_PER_TICK + Math.min(4, budsN);
   let mutations = 0;
 
   const upTo = state.lastSeen + deltaSec;
 
-  // Parent mutations (kept strict: variant A)
+  // parent ticks (includes carrots)
   while ((state.lastMutationAt + intervalSec) <= upTo && mutations < MAX_MUTATIONS_PER_TICK){
     state.lastMutationAt += intervalSec;
-
-    // Feeding/shape tick: eat carrots if reachable; otherwise set a temporary growth target.
     processCarrotsTick(state);
-
     applyMutation(state, state.lastMutationAt);
     mutations++;
   }
 
-  // Bud mutations (lightweight, limited per colony tick)
-  if (Array.isArray(state.buds) && mutations < MAX_MUTATIONS_COLONY){
+  // buds get their own small evolution (no carrots, no budding)
+  if (Array.isArray(state.buds)){
     for (const bud of state.buds){
-      if (mutations >= MAX_MUTATIONS_COLONY) break;
-      if (!bud) continue;
-
-      const budInterval = Math.max(60, Math.floor((bud.evoIntervalMin || state.evoIntervalMin || 12) * 60));
-      const budLast = bud.lastMutationAt || bud.createdAt || (state.createdAt || state.lastSeen);
-      if (!bud.lastMutationAt) bud.lastMutationAt = budLast;
-
-      // allow at most 1 mutation per bud per simulate call
-      if ((bud.lastMutationAt + budInterval) <= upTo){
-        bud.lastMutationAt += budInterval;
+      const budUpTo = bud.lastSeen + deltaSec;
+      let budSteps = 0;
+      while ((bud.lastMutationAt + intervalSec) <= budUpTo && budSteps < 1){
+        bud.lastMutationAt += intervalSec;
         applyMutation(bud, bud.lastMutationAt);
-        mutations++;
+        budSteps++;
       }
     }
   }

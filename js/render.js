@@ -745,31 +745,28 @@ export function renderGrid(state, canvas, gridEl, view){
     }
   }
 
-// Carrots (7x3 blocks, orange + green top)
-if (Array.isArray(state.carrots)){
-  const sPx = view.blockPx;
-  for (const car of state.carrots){
-    for (let yy=0; yy<3; yy++){
-      for (let xx=0; xx<7; xx++){
-        const wx = (car.x|0) + xx;
-        const wy = (car.y|0) + yy;
-        const p = worldToScreenPx(state.cam, wx, wy, view);
-
-        let m = 0;
-        if (yy > 0) m |= 1;
-        if (xx < 6) m |= 2;
-        if (yy < 2) m |= 4;
-        if (xx > 0) m |= 8;
-
-		const color = (yy === 0)
-		? (xx === 3 ? "#22c55e" : "#4ade80") // середина темнее
-		: "#fb923c";
-
-        drawBlock(ctx, p.x, p.y, sPx, color, false, m);
+  // Carrots (7x3 blocks, orange)
+  if (Array.isArray(state.carrots)){
+    const sPx = view.blockPx;
+    for (const car of state.carrots){
+      for (let yy=0; yy<3; yy++){
+        for (let xx=0; xx<7; xx++){
+          const wx = (car.x|0) + xx;
+          const wy = (car.y|0) + yy;
+          const p = worldToScreenPx(state.cam, wx, wy, view);
+          // Important: carrots are a 7x3 connected rectangle. If we pass neighMask=0,
+          // corner smoothing can erase the entire 4x4 cell and we end up seeing the dark background.
+          // Compute neighbor mask within the carrot rect so shading/smoothing behaves like for bodies.
+          let m = 0;
+          if (yy > 0) m |= 1;   // N
+          if (xx < 6) m |= 2;   // E
+          if (yy < 2) m |= 4;   // S
+          if (xx > 0) m |= 8;   // W
+          drawBlock(ctx, p.x, p.y, sPx, "#fb923c", false, m);
+        }
       }
     }
   }
-}
 
   const baseSeed = state.seed || 12345;
 
@@ -831,6 +828,12 @@ export function renderLegend(state, legendEl){
     { part:"limb",     title:organLabel("limb"),     desc:"Опора/движение (коричневый)." },
     { part:"spike",    title:organLabel("spike"),    desc:"Защита (коралловый), кончики мигают." },
     { part:"shell",    title:organLabel("shell"),    desc:"Жёсткая защита (серо-синий)." },
+
+    // поздние органы (добавлены в PARTS)
+    { part:"teeth",    title:organLabel("teeth"),    desc:"Атака (зубы)." },
+    { part:"claw",     title:organLabel("claw"),     desc:"Схватить/рубить (клешня)." },
+    { part:"mouth",    title:organLabel("mouth"),    desc:"Питание/атака (рот)." },
+    { part:"fin",      title:organLabel("fin"),      desc:"Плавание/манёвр (плавник)." },
   ];
 
   legendEl.innerHTML = items.map(it => {

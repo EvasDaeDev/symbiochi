@@ -207,10 +207,12 @@ export function attachActions(view, els, toast, rerenderAll){
  * Drag/pan с ограниченной скоростью.
  * PAN_SENS = 0.33 => ~в 3 раза медленнее, питомец не “улетает”.
  */
-export function attachDragPan(view, els){
+export function attachDragPan(view, els, onTap){
   const PAN_SENS = 0.33;
 
-  const drag = { on:false, sx:0, sy:0, ox:0, oy:0 };
+  // IMPORTANT: не берём pointer-capture сразу — иначе обычный клик
+  // (для выделения организма) может “съедаться” drag-pan.
+  const drag = { on:false, moved:false, pid:null, sx:0, sy:0, ox:0, oy:0 };
   const grid = els.grid;
 
   const getCellDelta = (dxPix, dyPix) => {
@@ -226,12 +228,13 @@ export function attachDragPan(view, els){
     // Pointer-capture on the grid would swallow the click, so disable drag-pan in this mode.
     if (view.mode === "carrot") return;
     drag.on = true;
+    drag.moved = false;
+    drag.pid = e.pointerId;
     grid.classList.add("dragging");
     drag.sx = e.clientX;
     drag.sy = e.clientY;
     drag.ox = view.state.cam.ox;
     drag.oy = view.state.cam.oy;
-    grid.setPointerCapture?.(e.pointerId);
   };
 
   const onMove = (e)=>{
@@ -239,6 +242,13 @@ export function attachDragPan(view, els){
 
     const dx = e.clientX - drag.sx;
     const dy = e.clientY - drag.sy;
+
+    // начинаем именно “перетаскивание” только после небольшого порога
+    if (!drag.moved){
+      if ((dx*dx + dy*dy) < 16) return; // 4px
+      drag.moved = true;
+      grid.setPointerCapture?.(drag.pid);
+    }
     const [dcx, dcy] = getCellDelta(dx, dy);
 
     view.state.cam.ox = drag.ox - dcx * PAN_SENS;
@@ -247,10 +257,18 @@ export function attachDragPan(view, els){
     // clampCamera теперь вызывается из render (buildFrame), тут не обязательно
   };
 
-  const onUp = ()=>{
+  const onUp = (e)=>{
     if (!drag.on) return;
+    const wasMove = drag.moved;
     drag.on = false;
+    drag.moved = false;
+    drag.pid = null;
     grid.classList.remove("dragging");
+
+    // если это был просто клик (не drag) — передаём наверх, чтобы выделить организм
+    if (!wasMove && typeof onTap === 'function'){
+      onTap(e);
+    }
   };
 
   grid.addEventListener("pointerdown", onDown);

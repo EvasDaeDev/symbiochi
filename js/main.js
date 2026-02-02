@@ -147,12 +147,6 @@ function autoTick(){
 
   const sim = simulate(state, delta);
   state.lastSeen = now;
-  // keep child organisms in sync with global time (they simulate with the same delta)
-  if (Array.isArray(state.buds)){
-    for (const b of state.buds){
-      if (b) b.lastSeen = now;
-    }
-  }
   saveGame(state);
 
   rerenderAll(delta);
@@ -215,7 +209,7 @@ function occHas(org, wx, wy){
 }
 
 function screenToWorld(e){
-  const rect = els.canvas.getBoundingClientRect();
+  const rect = els.grid.getBoundingClientRect();
   const px = (e.clientX - rect.left);
   const py = (e.clientY - rect.top);
 
@@ -232,7 +226,7 @@ function screenToWorld(e){
 }
 
 function attachZoomWheel(){
-  els.canvas.addEventListener("wheel", (e)=>{
+  els.grid.addEventListener("wheel", (e)=>{
     if (!view.state) return;
     e.preventDefault();
     const dir = e.deltaY > 0 ? -1 : 1; // wheel up -> zoom in
@@ -242,7 +236,8 @@ function attachZoomWheel(){
 }
 
 function attachPickOrganism(){
-  els.canvas.addEventListener("click", (e)=>{
+  // listen on grid (wrapper), so drag-pan/canvas layout doesn't swallow clicks
+  els.grid.addEventListener("click", (e)=>{
     if (!view.state) return;
 
     const [wx, wy] = screenToWorld(e);
@@ -277,10 +272,7 @@ function attachPickOrganism(){
       return; // do not change selection
     }
 
-    // Prefer exact hit on occupied cell.
-    // IMPORTANT: check buds FIRST. In some edge cases (recent budding / overlaps),
-    // a bud's blocks can still be close to (or even touch) the parent, and we want
-    // the click to select the child, not the parent.
+    // Prefer exact hit on CHILD first, then parent (otherwise parent “steals” clicks)
     const buds = Array.isArray(s.buds) ? s.buds : [];
     let picked = null; // -1 parent, or bud index
 
