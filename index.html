@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Symbiochi</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="wrap" class="wrap2">
+    <div id="centerCol">
+      <div class="panel" id="statusPanel">
+        <div class="hud">
+          <div class="hudLeft">
+            <div class="hudName">
+              <div class="nm" id="hudName">—</div>
+              <div class="stage" id="hudStage">—</div>
+            </div>
+            <div class="hudBars" id="hudMeta"></div>
+            <div class="hudBars" id="hudMeta2">
+              <span class="pill">морк: <input id="carrotHudInput" class="miniInput" type="number" min="0" step="1" value="0" /></span>
+              <span class="pill" id="lifePill">жизнь: 00:00:00</span>
+            </div>
+          </div>
+          <div class="hudRight">
+            <button class="iconBtn" id="settingsBtn" title="Настройки">⚙</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="mainPanel">
+        <div class="viewportFull">
+          <div class="gridWrap">
+            <div class="grid" id="grid"><canvas id="canvas"></canvas></div>
+          </div>
+        </div>
+
+        <div class="controlsOverlay">
+          <div class="actions">
+            <button class="smallbtn" id="feed">КОРМ</button>
+            <button class="smallbtn" id="wash">МЫТЬ</button>
+            <button class="smallbtn" id="heal">ЛЕЧ</button>
+          </div>
+          <div class="footerNote" id="footerInfo">—</div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+
+        <div id="startOverlay">
+          <div class="startBox">
+            <h1>SYMBIOCHI</h1>
+            <p>Авто-обновление каждые 2 сек.<br>Перетаскивай питомца мышью.</p>
+            <button class="btn" id="playBtn">ИГРАТЬ!</button>
+          </div>
+        </div>
+
+        <div id="settingsOverlay">
+          <div class="modal">
+            <h2>Настройки</h2>
+            <div class="field">
+              <div>Seed</div>
+              <input id="seedInput" type="number" step="1" />
+            </div>
+            <div class="field">
+              <div>Интервал мутации (минуты мирового времени)</div>
+              <input id="evoInput" type="number" min="1" step="1" />
+              <div class="hint">Чем меньше число — тем чаще мутации.</div>
+            </div>
+            <div class="field">
+              <div>Приоритет длины отростков (0% новые → 100% удлинять)</div>
+              <input id="lenPrio" type="range" min="0" max="100" step="1" />
+            </div>
+            <div class="field">
+              <div>Морковок в запасе</div>
+              <input id="carrotsInput" type="number" min="0" step="1" />
+              <div class="hint">Клик по полю в режиме «КОРМ» бросает морковку 7×3. Лимит: 2/тик.</div>
+            </div>
+            <div class="modalBtns">
+              <button class="smallbtn" id="newCreature">НОВОЕ СУЩ.</button>
+              <button class="smallbtn" id="saveSettings">СОХР</button>
+              <button class="smallbtn" id="closeSettings">ЗАКР</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="infoPanel">
+      <div class="hdr">
+        <div class="t">ИНФОРМАЦИЯ</div>
+        <div class="s">Организм • легенда • журнал • правила роста.</div>
+      </div>
+      <div class="tabs" id="infoTabs">
+        <button class="tabBtn isActive" data-tab="org">ОРГАНИЗМ</button>
+        <button class="tabBtn" data-tab="legend">ЛЕГЕНДА</button>
+        <button class="tabBtn" data-tab="log">ЖУРНАЛ</button>
+        <button class="tabBtn" data-tab="rules">ПРАВИЛА</button>
+      </div>
+      <div class="tabBody isActive" id="tab-org">
+        <div class="orgInfo" id="orgInfo"></div>
+      </div>
+      <div class="tabBody" id="tab-legend">
+        <div class="legendBody" id="legendBody"></div>
+        <div class="huePicker" id="huePicker" style="display:none;">
+          <div class="hueTitle" id="hueTitle">Цвет</div>
+          <input id="hueRange" type="range" min="0" max="360" step="1" />
+          <div class="hint">Клик по цвету в легенде → меняешь тональность.</div>
+        </div>
+      </div>
+      <div class="tabBody" id="tab-log">
+        <div class="logBody" id="logBody"></div>
+        <div class="hdr" style="border-top:1px solid var(--border); border-bottom:none;">
+          <div class="s" id="logFooter" style="margin:0;">—</div>
+        </div>
+      </div>
+      <div class="tabBody" id="tab-rules">
+        <div class="rulesBody" id="rulesBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
