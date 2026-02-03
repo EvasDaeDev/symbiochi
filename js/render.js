@@ -336,14 +336,12 @@ function moduleDir(cells){
 
 function perpOf([dx,dy]){ return [-dy, dx]; }
 
-function windOffset(i, len){
-  if (i < 3) return 0;
+function windOffsetPx(i, len, blockPx){
+  if (i < 2) return 0;
   const t = Date.now()/1000;
-  const omega = 2*Math.PI/5; // 5 sec period
-  const phase = omega*t + i*0.55;
-  const denom = Math.max(1, len-3);
-  const amp = Math.min(1, (i-2)/denom);
-  return Math.round(Math.sin(phase)*amp); // -1/0/1 blocks
+  const phase = t*2 + i*0.55;
+  const amp01 = Math.min(1, (i-1)/Math.max(1,len-2));
+  return Math.sin(phase) * blockPx * 0.65 * amp01;
 }
 
 // growth animation: org.anim["x,y"] = {t0, dur}
@@ -544,9 +542,10 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
   const bodyColor = org?.palette?.body || "#60a5fa";
   const bodyCells = org?.body?.cells || [];
   for (const [wx,wy] of bodyCells){
-    const p = worldToScreenPx(cam, wx, wy, view);
-    const x = p.x;
-    const y = p.y + breathY;
+    const p0 = worldToScreenPx(cam, wx, wy, view);
+	const offPx = windOffsetPx(i, len, s);
+	const x = p0.x + perp[0] * offPx;
+	const y = p0.y + breathY + perp[1] * offPx;
 
     const nm = neighMaskAt(occ, wx, wy);
     const kGrow = animProgress(org, wx, wy);

@@ -154,11 +154,12 @@ function autoTick(){
     return;
   }
 
-  const sim = simulate(state, delta);
-  state.lastSeen = now;
-  saveGame(state);
+const sim = simulate(state, delta);
+rerenderAll(delta);
 
-  rerenderAll(delta);
+if (delta >= 15 && sim.dueSteps > 0){
+  showOfflineSummary(delta, sim);
+}
 
   if (sim.mutations > 0){
     toast(`Мутаций: <b>${sim.mutations}</b>.`);
@@ -338,6 +339,39 @@ function startGame(){
   rerenderAll(0);
   autoTick();
   startLoops();
+}
+
+function showOfflineSummary(deltaSec, sim){
+  let el = document.getElementById("offlineSummary");
+  if (!el){
+    el = document.createElement("div");
+    el.id = "offlineSummary";
+    el.style.position = "fixed";
+    el.style.inset = "0";
+    el.style.background = "rgba(0,0,0,0.6)";
+    el.style.display = "flex";
+    el.style.alignItems = "center";
+    el.style.justifyContent = "center";
+    el.style.zIndex = "9999";
+    el.innerHTML = `
+      <div style="background:#111;border-radius:14px;padding:16px;width:min(520px,92vw)">
+        <div style="font-weight:900;margin-bottom:8px">Пока тебя не было…</div>
+        <div id="offlineText"></div>
+        <button style="margin-top:12px" id="offlineOk">OK</button>
+      </div>`;
+    document.body.appendChild(el);
+    el.querySelector("#offlineOk").onclick = ()=> el.remove();
+  }
+
+  const mins = Math.round(deltaSec/60);
+  const lines = [];
+  lines.push(`Отсутствие: <b>${mins} мин</b>`);
+  if (sim.mutations) lines.push(`Мутаций: <b>${sim.mutations}</b>`);
+  if (sim.budMutations) lines.push(`Мутаций у почек: <b>${sim.budMutations}</b>`);
+  if (sim.eaten) lines.push(`Съедено морковок: <b>${sim.eaten}</b>`);
+  if (sim.skipped) lines.push(`<span style="opacity:.6">Пропущено тиков: ${sim.skipped}</span>`);
+
+  el.querySelector("#offlineText").innerHTML = lines.join("<br>");
 }
 
 els.playBtn.addEventListener("click", startGame);
