@@ -36,6 +36,16 @@ export function migrateOrNew(){
     if (!org) return;
     const seed = (org.seed ?? fallbackSeed ?? 1) | 0;
     org.seed = seed;
+	// ----- per-organism "development plan" (for shape diversity) -----
+    if (!org.plan || typeof org.plan !== "object"){
+      const prng = mulberry32(hash32(seed, 60606));
+      org.plan = {
+        axisDir: pick(prng, [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]),
+        symmetry: prng(),
+        wiggle: prng(),
+        ecotype: pick(prng, ["crawler","swimmer","sentinel","tank"])
+      };
+    }
     org.version = 6;
     org.care = org.care || { feed:0, wash:0, heal:0, neglect:0 };
     org.bars = org.bars || { food:1, clean:1, hp:1, mood:1 };
@@ -73,6 +83,7 @@ export function migrateOrNew(){
   state.log = state.log || [];
   state.evoIntervalMin = state.evoIntervalMin || 12;
   state.lastMutationAt = state.lastMutationAt || (state.createdAt || nowSec());
+  if (!Number.isFinite(state.mutationDebt)) state.mutationDebt = 0;
   state.lastSeen = state.lastSeen || nowSec();
 
   // Feeding / shaping system (carrots)
@@ -90,6 +101,7 @@ export function migrateOrNew(){
   // Otherwise the renderer falls back to dark/black colors.
   if (!Array.isArray(state.buds)) state.buds = [];
   for (let i=0; i<state.buds.length; i++){
+	if (!Number.isFinite(b.mutationDebt)) b.mutationDebt = 0;
     const b = state.buds[i];
     normalizeOrg(b, hash32(state.seed||1, i+1));
     b._isBud = true; // used to disable budding from buds
@@ -135,26 +147,41 @@ export function simulate(state, deltaSec){
   const MAX_MUTATIONS_PER_TICK = EVO.maxMutationsPerTick;
   let mutations = 0;
 
-  const upTo = state.lastSeen + deltaSec;
+const upTo = state.lastSeen + deltaSec;
 
-  // parent ticks (includes carrots)
-  while ((state.lastMutationAt + intervalSec) <= upTo && mutations < MAX_MUTATIONS_PER_TICK){
-    state.lastMutationAt += intervalSec;
-    processCarrotsTick(state);
-    applyMutation(state, state.lastMutationAt);
-    mutations++;
-  }
+// 1) Считаем, сколько тиков мутации “накопилось” (добавляем в долг)
+const dueSteps = Math.floor((upTo - state.lastMutationAt) / intervalSec);
+if (dueSteps > 0){
+  state.mutationDebt = (state.mutationDebt || 0) + dueSteps;
+}
+
+// 2) Выплачиваем долг постепенно (не больше 2 мутаций за один simulate)
+while ((state.mutationDebt || 0) > 0 && mutations < MAX_MUTATIONS_PER_TICK){
+  state.lastMutationAt += intervalSec;
+  state.mutationDebt--;
+
+  processCarrotsTick(state);
+  applyMutation(state, state.lastMutationAt);
+  mutations++;
+}
 
   // buds get their own small evolution (no carrots, no budding)
   if (Array.isArray(state.buds)){
     for (const bud of state.buds){
       const budUpTo = bud.lastSeen + deltaSec;
       let budSteps = 0;
-      while ((bud.lastMutationAt + intervalSec) <= budUpTo && budSteps < 1){
-        bud.lastMutationAt += intervalSec;
-        applyMutation(bud, bud.lastMutationAt);
-        budSteps++;
-      }
+const budDue = Math.floor((budUpTo - bud.lastMutationAt) / intervalSec);
+if (budDue > 0){
+  bud.mutationDebt = (bud.mutationDebt || 0) + budDue;
+}
+
+while ((bud.mutationDebt || 0) > 0 && budSteps < 1){
+  bud.lastMutationAt += intervalSec;
+  bud.mutationDebt--;
+
+  applyMutation(bud, bud.lastMutationAt);
+  budSteps++;
+}
     }
   }
 
@@ -174,7 +201,8 @@ function buildOcc(org){
 
 function carrotCells(car){
   const out = [];
-  const w = car.w || 7, h = car.h || 3;
+  const w = (car.w ?? CARROT.w ?? 7);
+  const h = (car.h ?? CARROT.h ?? 3);
   for (let dy=0; dy<h; dy++){
     for (let dx=0; dx<w; dx++){
       out.push([car.x + dx, car.y + dy]);

@@ -61,15 +61,27 @@ export function newGame(){
   const body = makeSmallConnectedBody(seed, 12);
   const face = findFaceAnchor(body, seed);
 
+ const plan = {
+    // предпочитаемое направление роста (силуэт)
+    axisDir: pick(rng, DIR8),
+    // 0..1: стремление к симметрии (парные органы)
+    symmetry: rng(),
+    // 0..1: насколько "кривые" будут отростки (прямые/зигзаг/дуга)
+    wiggle: rng(),
+    // простой "экотип" — даёт разный стиль тела
+    ecotype: pick(rng, ["crawler","swimmer","sentinel","tank"])
+  };
   const state = {
     version: 6,
     seed,
     createdAt: Math.floor(Date.now()/1000),
     lastSeen: Math.floor(Date.now()/1000),
     lastMutationAt: Math.floor(Date.now()/1000),
+	mutationDebt: 0,
     evoIntervalMin: 12,
     name: pick(rng, ["Пип", "Зуз", "Крош", "Мок", "Люм", "Флин", "Бип", "Руф", "Тик", "Нок"]),
     palette: pal,
+	plan,
     care: { feed: 0, wash: 0, heal: 0, neglect: 0 },
     bars: { food: 1.00, clean: 1.00, hp: 1.00, mood: 1.00 },
     body,
@@ -273,14 +285,67 @@ export function addModule(state, type, rng){
     grad: (rng()*0.10) - 0.05    // -0.05..+0.05 (along length)
   };
 
+ // ----- growth style (straight / zigzag / curve) -----
+  const wiggle = state?.plan?.wiggle ?? 0.0;
+  let growStyle = "straight";
+  if (movable || type === "spike" || type === "teeth"){
+    if (wiggle > 0.66) growStyle = "curve";
+    else if (wiggle > 0.33) growStyle = "zigzag";
+  }
+
+  const styleParams = {
+    baseDir: dirForGrowth ? [dirForGrowth[0], dirForGrowth[1]] : null,
+    growStyle,
+    growStep: 0,
+    zigzagSign: rng() < 0.5 ? 1 : -1,
+    curveSign: rng() < 0.5 ? 1 : -1,
+    turnChance: 0.15 + 0.35 * wiggle // чем выше wiggle, тем чаще повороты
+  };
+  
   state.modules.push({
     type,
     movable,
     cells,
     growTo: targetLen || cells.length,
     growDir: dirForGrowth,
-    pigment
+    pigment,
+    ...styleParams
   });
+    // ----- symmetry: sometimes spawn a mirrored twin organ -----
+  const sym = state?.plan?.symmetry ?? 0;
+  const canMirror = sym > 0.75 && rng() < 0.45;
+  const linear = (type==="tail" || type==="tentacle" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth" || type==="claw");
+
+  if (canMirror && linear && dirForGrowth){
+    const [cx,cy] = state.body.core;
+    const ax2 = (2*cx - ax);
+    const ay2 = ay;
+
+    // mirrored anchor must exist on body
+    if (bodySet.has(key(ax2, ay2))){
+      const dir2 = [-dirForGrowth[0], dirForGrowth[1]];
+      const full2 = buildLineFrom([ax2, ay2], dir2, targetLen, state, bodySet);
+      const cells2 = full2.slice(0, Math.min(1, full2.length));
+
+      if (cells2.length){
+        for (const [x,y] of cells2) markAnim(state, x, y);
+        state.modules.push({
+          type,
+          movable,
+          cells: cells2,
+          growTo: targetLen || cells2.length,
+          growDir: dir2,
+          pigment: { ...pigment, tone: pigment.tone * 0.8 }, // чуть отличим
+          baseDir: [dir2[0], dir2[1]],
+          growStyle,
+          growStep: 0,
+          zigzagSign: -(styleParams.zigzagSign || 1),
+          curveSign: -(styleParams.curveSign || 1),
+          turnChance: styleParams.turnChance
+        });
+      }
+    }
+  }
   return true;
 }
 
@@ -289,6 +354,20 @@ export function growPlannedModules(state, rng){
   // If extension is impossible, we stop growth for that module.
   if (!state?.modules?.length) return 0;
   const bodySet = bodyCellSet(state.body);
+  function rotateDir45(dir, sign){
+    // вращаем по DIR8 на 1 шаг
+    let idx = DIR8.findIndex(d => d[0]===dir[0] && d[1]===dir[1]);
+    if (idx < 0) idx = 0;
+    idx = (idx + (sign>0 ? 1 : -1) + DIR8.length) % DIR8.length;
+    return DIR8[idx];
+  }
+
+  function perpDir(dir, sign){
+    // перпендикуляр (для зигзага)
+    const dx = dir[0], dy = dir[1];
+    // (dx,dy) -> (dy,-dx) или (-dy,dx)
+    return (sign > 0) ? [dy, -dx] : [-dy, dx];
+  }
   let grew = 0;
 
   for (const m of state.modules){
@@ -296,9 +375,25 @@ export function growPlannedModules(state, rng){
     if (!m.cells || m.cells.length >= target) continue;
     if (!m.growDir){ m.growTo = m.cells.length; continue; }
 
-    const last = m.cells[m.cells.length - 1];
-    const nx = last[0] + m.growDir[0];
-    const ny = last[1] + m.growDir[1];
+const last = m.cells[m.cells.length - 1];
+
+    // choose direction based on style
+    let dir = m.growDir;
+
+    if (m.growStyle === "zigzag" && m.baseDir){
+      const step = (m.growStep || 0);
+      dir = (step % 2 === 0) ? m.baseDir : perpDir(m.baseDir, m.zigzagSign || 1);
+      m.growStep = step + 1;
+    } else if (m.growStyle === "curve"){
+      // occasionally turn left/right by 45°
+      if (rng() < (m.turnChance ?? 0.25)){
+        dir = rotateDir45(dir, m.curveSign || 1);
+        m.growDir = dir; // фиксируем поворот
+      }
+    }
+
+    const nx = last[0] + dir[0];
+    const ny = last[1] + dir[1];
     const kk = key(nx, ny);
 
     if (bodySet.has(kk)) { m.growTo = m.cells.length; continue; }

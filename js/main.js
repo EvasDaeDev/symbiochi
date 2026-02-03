@@ -19,7 +19,8 @@ import {
   attachDragPan,
   attachInfoTabs,
   attachLegendHuePicker,
-  attachCarrotHudInput
+  attachCarrotHudInput,
+  attachLogFlash
 } from "./ui.js";
 
 const els = {
@@ -226,7 +227,7 @@ function screenToWorld(e){
 }
 
 function attachZoomWheel(){
-  els.grid.addEventListener("wheel", (e)=>{
+  els.canvas.addEventListener("wheel", (e)=>{
     if (!view.state) return;
     e.preventDefault();
     const dir = e.deltaY > 0 ? -1 : 1; // wheel up -> zoom in
@@ -236,7 +237,6 @@ function attachZoomWheel(){
 }
 
 function attachPickOrganism(){
-  // listen on grid (wrapper), so drag-pan/canvas layout doesn't swallow clicks
   els.grid.addEventListener("click", (e)=>{
     if (!view.state) return;
 
@@ -272,16 +272,17 @@ function attachPickOrganism(){
       return; // do not change selection
     }
 
-    // Prefer exact hit on CHILD first, then parent (otherwise parent “steals” clicks)
+    // Prefer exact hit on occupied cell
     const buds = Array.isArray(s.buds) ? s.buds : [];
     let picked = null; // -1 parent, or bud index
 
+    // IMPORTANT: check buds first, иначе родитель "перехватывает" клики по перекрывающимся клеткам
     for (let i=0;i<buds.length;i++){
       if (occHas(buds[i], wx, wy)){ picked = i; break; }
     }
     if (picked === null && occHas(s, wx, wy)) picked = -1;
 
-    // If no exact hit, pick nearest core within 2 blocks
+// If no exact hit, pick nearest core within 2 blocks
     if (picked === null){
       let best = { d: Infinity, which: null };
       const core = s.body?.core;
@@ -325,6 +326,7 @@ function startGame(){
   attachActions(view, els, toast, rerenderAll);
   attachDragPan(view, els); // drag uses els.grid size + view.gridW/H
   attachInfoTabs(els);
+  attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);
   attachCarrotHudInput(view, els, rerenderAll);
   attachZoomWheel();

@@ -3,6 +3,7 @@ import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { organLabel } from "./mods/labels.js";
 import { PARTS } from "./mods/parts.js";
 import { CRYSTAL_GLOW } from "./mods/glow.js";
+import { CARROT } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 
@@ -492,7 +493,7 @@ function computeEyeSideBlocks(org, bodyBlocks){
 // =====================
 // Selection glow
 // =====================
-function drawSelectionGlow(ctx, rects){
+function drawSelectionGlow(ctx, rects, strength=1){
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
   for (let i = GLOW_PX; i >= 1; i--){
@@ -501,6 +502,23 @@ function drawSelectionGlow(ctx, rects){
     ctx.shadowColor = "rgba(90,255,140,0.70)";
     ctx.shadowBlur = i * 2.2;
     ctx.strokeStyle = "rgba(90,255,140,0.55)";
+    ctx.lineWidth = 1;
+
+    for (const r of rects){
+      ctx.strokeRect(r.x - i, r.y - i, r.w + i*2, r.h + i*2);
+    }
+  }
+  ctx.restore();
+}
+function drawFlashGlow(ctx, rects){
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  for (let i = GLOW_PX; i >= 1; i--){
+    const alpha = 0.10 + (i / GLOW_PX) * 0.18;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = "rgba(255,255,255,0.85)";
+    ctx.shadowBlur = i * 2.6;
+    ctx.strokeStyle = "rgba(255,255,255,0.75)";
     ctx.lineWidth = 1;
 
     for (const r of rects){
@@ -700,6 +718,58 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
 
   return boundaryRects;
 }
+function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
+  if (!org) return [];
+  const s = view.blockPx;
+
+  // дыхание должно совпадать с тем, как рисуется организм
+  const breathY = breathYOffsetPx(org, orgId, baseSeed);
+
+  // какие клетки подсвечиваем
+  const set = new Set();
+
+  // 1) если указан индекс модуля — подсвечиваем только этот модуль
+  if (flash.mi !== null && Number.isFinite(flash.mi)){
+    const m = (org.modules || [])[flash.mi];
+    if (m && Array.isArray(m.cells)){
+      for (const [x,y] of m.cells) set.add(`${x},${y}`);
+    }
+  } else {
+    // 2) иначе по part: "body" — тело; иначе — все модули нужного типа
+    if (flash.part === "body"){
+      for (const [x,y] of (org.body?.cells || [])) set.add(`${x},${y}`);
+    } else if (flash.part){
+      for (let mi=0; mi<(org.modules||[]).length; mi++){
+        const m = org.modules[mi];
+        if (!m || m.type !== flash.part) continue;
+        for (const [x,y] of (m.cells || [])) set.add(`${x},${y}`);
+      }
+    }
+  }
+
+  if (set.size === 0) return [];
+
+  // boundary относительно подсвеченного набора
+  const rects = [];
+  for (const key of set){
+    const [wxS, wyS] = key.split(",").map(n=>parseInt(n,10));
+    if (!Number.isFinite(wxS) || !Number.isFinite(wyS)) continue;
+
+    // boundary если рядом нет подсвеченной клетки
+    let m = 0;
+    if (set.has(`${wxS},${wyS-1}`)) m |= 1;
+    if (set.has(`${wxS+1},${wyS}`)) m |= 2;
+    if (set.has(`${wxS},${wyS+1}`)) m |= 4;
+    if (set.has(`${wxS-1},${wyS}`)) m |= 8;
+    const boundary = (m & 1) === 0 || (m & 2) === 0 || (m & 4) === 0 || (m & 8) === 0;
+    if (!boundary) continue;
+
+    const p = worldToScreenPx(cam, wxS, wyS, view);
+    rects.push({ x: p.x, y: p.y + breathY, w: s, h: s });
+  }
+
+  return rects;
+}
 
 // =====================
 // Main render entry
@@ -745,28 +815,32 @@ export function renderGrid(state, canvas, gridEl, view){
     }
   }
 
-  // Carrots (7x3 blocks, orange)
-  if (Array.isArray(state.carrots)){
-    const sPx = view.blockPx;
-    for (const car of state.carrots){
-      for (let yy=0; yy<3; yy++){
-        for (let xx=0; xx<7; xx++){
-          const wx = (car.x|0) + xx;
-          const wy = (car.y|0) + yy;
-          const p = worldToScreenPx(state.cam, wx, wy, view);
-          // Important: carrots are a 7x3 connected rectangle. If we pass neighMask=0,
-          // corner smoothing can erase the entire 4x4 cell and we end up seeing the dark background.
-          // Compute neighbor mask within the carrot rect so shading/smoothing behaves like for bodies.
-          let m = 0;
-          if (yy > 0) m |= 1;   // N
-          if (xx < 6) m |= 2;   // E
-          if (yy < 2) m |= 4;   // S
-          if (xx > 0) m |= 8;   // W
-          drawBlock(ctx, p.x, p.y, sPx, "#fb923c", false, m);
-        }
+  // Carrots (rect blocks, orange)
+if (Array.isArray(state.carrots)){
+  const sPx = view.blockPx;
+  const cw = (CARROT.w|0) || 7;
+  const ch = (CARROT.h|0) || 3;
+
+  for (const car of state.carrots){
+    for (let yy=0; yy<ch; yy++){
+      for (let xx=0; xx<cw; xx++){
+        const wx = (car.x|0) + xx;
+        const wy = (car.y|0) + yy;
+        const p = worldToScreenPx(state.cam, wx, wy, view);
+
+        // neighbor mask внутри прямоугольника морковки,
+        // чтобы сглаживание углов не "съедало" клетки
+        let m = 0;
+        if (yy > 0)      m |= 1; // N
+        if (xx < cw-1)   m |= 2; // E
+        if (yy < ch-1)   m |= 4; // S
+        if (xx > 0)      m |= 8; // W
+
+        drawBlock(ctx, p.x, p.y, sPx, "#fb923c", false, m);
       }
     }
   }
+}
 
   const baseSeed = state.seed || 12345;
 
@@ -787,8 +861,10 @@ export function renderGrid(state, canvas, gridEl, view){
   // buds
   if (Array.isArray(state.buds)){
     for (let i=0;i<state.buds.length;i++){
+      const bud = state.buds[i];
+      if (!bud) continue;
       const isSel = (selectedBudIndex === i);
-      boundaryRects.push(...renderOrg(ctx, state.cam, state.buds[i], view, i+1, baseSeed, isSel));
+      boundaryRects.push(...renderOrg(ctx, state.cam, bud, view, i+1, baseSeed, isSel));
     }
   }
 
@@ -800,7 +876,34 @@ export function renderGrid(state, canvas, gridEl, view){
       const k = `${r.x},${r.y},${r.w},${r.h}`;
       if (!uniq.has(k)) uniq.set(k, r);
     }
-    drawSelectionGlow(ctx, [...uniq.values()]);
+    drawSelectionGlow(ctx, [...uniq.values()], 1);
+  }
+  // Flash highlight from log click (white glow, 0.2s)
+  const fl = view.flash;
+  const now = Date.now()/1000;
+  if (fl && fl.until && fl.until > now){
+    let org = state;
+    let orgId = 0;
+
+    if (Number.isFinite(fl.org) && fl.org >= 0 && Array.isArray(state.buds) && fl.org < state.buds.length){
+      org = state.buds[fl.org];
+      orgId = fl.org + 1;
+    } else {
+      org = state;
+      orgId = 0;
+    }
+
+    const rects = collectFlashRects(state.cam, org, view, orgId, baseSeed, fl);
+
+    // чуть фильтруем дубликаты
+    const uniq2 = new Map();
+    for (const r of rects){
+      const k = `${r.x},${r.y},${r.w},${r.h}`;
+      if (!uniq2.has(k)) uniq2.set(k, r);
+    }
+    if (uniq2.size){
+      drawFlashGlow(ctx, [...uniq2.values()]);
+    }
   }
 }
 
@@ -808,26 +911,28 @@ export function renderGrid(state, canvas, gridEl, view){
 // HUD / Legend / Rules (unchanged interface)
 // =====================
 export function barStatus(org){
-  const bars = org.bars || {food:1,clean:1,hp:1,mood:1};
+  // Defensive: org can be null/undefined on some corrupted saves
+  // (e.g. buds array contains empty slots). In that case, treat as "good".
+  const bars = org?.bars || {food:1,clean:1,hp:1,mood:1};
   const minBar = Math.min(bars.food, bars.clean, bars.hp, bars.mood);
   if (minBar <= 0.15) return { txt:"критично", cls:"bad" };
   if (minBar <= 0.35) return { txt:"плохо", cls:"bad" };
-  if (minBar <= 0.65) return { txt:"норм", cls:"" };
+  if (minBar <= 0.65) return { txt:"норма", cls:"" };
   return { txt:"хорошо", cls:"ok" };
 }
 
 export function renderLegend(state, legendEl){
   const items = [
     { part:"body",    title:"Тело",    desc:"Блоки биоматериала (объём/тень)." },
-    { part:null,       title:"Ядро",    desc:"Растёт вместе с телом (до 10%), цвет = состояние." },
+    { part:null,       title:"Ядро",    desc:"Центр жизненной активности. Цвет отражает текущее состояние организма." },
     { part:"eye",     title:"Глаза",   desc:"Растут вместе с телом, рисуются поверх." },
 
-    { part:"antenna",  title:organLabel("antenna"),  desc:"Сенсорный отросток (серый)." },
-    { part:"tentacle", title:organLabel("tentacle"), desc:"Мягкий отросток (розовый)." },
-    { part:"tail",     title:organLabel("tail"),     desc:"Подвижный отросток (бирюзовый)." },
+    { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный отросток.	Формируется при попытках «лечить» и вмешиваться." },
+    { part:"tentacle", title:organLabel("tentacle"), desc:"Мягкая, подвижная структура." },
+    { part:"tail",     title:organLabel("tail"),     desc:"Чем лучше уход, тем дальше он тянется от тела." },
     { part:"limb",     title:organLabel("limb"),     desc:"Опора/движение (коричневый)." },
-    { part:"spike",    title:organLabel("spike"),    desc:"Защита (коралловый), кончики мигают." },
-    { part:"shell",    title:organLabel("shell"),    desc:"Жёсткая защита (серо-синий)." },
+    { part:"spike",    title:organLabel("spike"),    desc:"Защитная реакция.Возникают, когда организм испытывает давление или стресс." },
+    { part:"shell",    title:organLabel("shell"),    desc:"Закрытая форма. Тело пытается изолироваться." },
 
     // поздние органы (добавлены в PARTS)
     { part:"teeth",    title:organLabel("teeth"),    desc:"Атака (зубы)." },
@@ -854,23 +959,35 @@ export function renderLegend(state, legendEl){
 
 export function renderRules(rulesEl){
   rulesEl.innerHTML = `
-    <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Коротко: от чего что растёт</div>
+    <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Правила и управление (актуально)</div>
 
-    <div style="margin:6px 0;"><b>КОРМ</b> → чаще рост тела, <b>${escapeHtml(organLabel("tail"))}</b>, <b>${escapeHtml(organLabel("limb"))}</b>.</div>
-    <div style="margin:6px 0;"><b>МЫТЬ</b> → чаще <b>${escapeHtml(organLabel("shell"))}</b> и “аккуратный” рост.</div>
-    <div style="margin:6px 0;"><b>ЛЕЧ</b> → чаще <b>${escapeHtml(organLabel("antenna"))}</b> и глаза (сенсоры).</div>
+    <div class="rule"><b>Управление</b></div>
+    <div class="rule">• <b>Клик по существу</b> — выбрать (родитель/почка). <b>Клик по пустоте</b> — снять выбор.</div>
+    <div class="rule">• <b>Drag</b> мышью — панорама камеры. <b>Колесо</b> — зум (−3…+3).</div>
+    <div class="rule">• <b>Журнал</b>: клик по записи — короткая белая подсветка связанного органа.</div>
 
-    <div style="margin:8px 0; color:var(--muted);">
-      <b>Запущенность/стресс</b> → чаще <b>${escapeHtml(organLabel("spike"))}</b> и защита.
-    </div>
+    <div style="height:8px"></div>
+    <div class="rule"><b>Кормление морковками</b></div>
+    <div class="rule">• Нажми <b>КОРМ</b> → включится режим «брось морковку». Затем <b>кликни в поле</b>, чтобы поставить морковку.</div>
+    <div class="rule">• Морковки берутся из запаса (число справа в HUD). Можно менять запас в настройках/поле HUD.</div>
+    <div class="rule" style="color:var(--muted);">• Если морковка <b>близко</b> к телу — чаще растёт <b>тело</b>. Если <b>далеко</b> — чаще тянется <b>отросток</b> (мобильность).</div>
 
-    <div style="margin:8px 0; color:var(--muted);">
-      Форма тоже влияет: большой организм “учится двигаться”, слабая защита при стрессе → “обрастает” защитой.
-    </div>
+    <div style="height:8px"></div>
+    <div class="rule"><b>Уход и эволюция</b></div>
+    <div class="rule">• <b>МЫТЬ</b> — повышает чистоту, чаще помогает появлению <b>${escapeHtml(organLabel("shell"))}</b> и «аккуратного» роста.</div>
+    <div class="rule">• <b>ЛЕЧ</b> — повышает HP/настроение, чаще помогает сенсорам: <b>${escapeHtml(organLabel("antenna"))}</b> и глазам.</div>
+    <div class="rule" style="color:var(--muted);">• <b>Стресс/запущенность</b> — чаще даёт защиту: <b>${escapeHtml(organLabel("spike"))}</b> и панцирь.</div>
+    <div class="rule" style="color:var(--muted);">• <b>Ядро и глаза</b> растут вместе с организмом и стараются не занимать больше ~10% объёма (кроме ранней стадии).</div>
+    <div class="rule" style="color:var(--muted);">• Все параметры живут в диапазоне <b>0…140%</b> — “перекорм” возможен, но даёт стресс.</div>
 
-    <div style="margin:10px 0; color:var(--muted);">
-      <b>Почкование:</b> у больших организмов длинный хвост/лапа/антенна может отделиться и стать новым организмом рядом.
-    </div>
+    <div style="height:8px"></div>
+    <div class="rule"><b>Мутации и оффлайн</b></div>
+    <div class="rule">• Мутации происходят раз в <b>интервал мутации</b> минут (настраивается в «Настройках»).</div>
+    <div class="rule" style="color:var(--muted);">• За один тик — не более <b>2</b> мутаций. После долгого отсутствия «долг» догоняется постепенно.</div>
+
+    <div style="height:8px"></div>
+    <div class="rule"><b>Почкование (дети)</b></div>
+    <div class="rule" style="color:var(--muted);">• У крупных организмов длинный хвост/лапа/антенна может отделиться и стать <b>почкой</b> рядом. Почки живут и мутируют отдельно.</div>
   `;
 }
 

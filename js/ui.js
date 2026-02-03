@@ -25,21 +25,26 @@ export function makeToast(){
 
 export function renderLog(state, els){
   const log = state.log || [];
-  els.logBody.innerHTML = log.slice().reverse().map(e => {
-  const cls =
-    e.kind === "mut_ok" ? "logEntry good" :
-    e.kind === "bud_ok" ? "logEntry bud" :
-    e.kind === "mut_fail" ? "logEntry warn" :
-    "logEntry";
 
-  return `
-    <div class="${cls}">
-      <div class="when">${new Date(e.t*1000).toLocaleTimeString()} • ${escapeHtml(e.kind)}</div>
-      <div class="msg">${escapeHtml(e.msg)}</div>
-    </div>
-  `;
-}).join("");
+  els.logBody.innerHTML = log.slice().reverse().map((e) => {
+    const cls =
+      e.kind === "mut_ok" ? "logEntry good" :
+      e.kind === "bud_ok" ? "logEntry bud" :
+      e.kind === "mut_fail" ? "logEntry warn" :
+      "logEntry";
 
+    const meta = e.meta || {};
+    const org = Number.isFinite(meta.org) ? meta.org : "";
+    const mi = Number.isFinite(meta.mi) ? meta.mi : "";
+    const part = meta.part ? String(meta.part) : "";
+
+    return `
+      <div class="${cls}" data-org="${org}" data-mi="${mi}" data-part="${escapeHtml(part)}">
+        <div class="when">${new Date(e.t*1000).toLocaleTimeString()} • ${escapeHtml(e.kind)}</div>
+        <div class="msg">${escapeHtml(e.msg)}</div>
+      </div>
+    `;
+  }).join("");
 
   const total = 1e-6 + state.care.feed + state.care.wash + state.care.heal + state.care.neglect;
   const pf = state.care.feed/total, pw = state.care.wash/total, ph = state.care.heal/total, pn = state.care.neglect/total;
@@ -207,12 +212,10 @@ export function attachActions(view, els, toast, rerenderAll){
  * Drag/pan с ограниченной скоростью.
  * PAN_SENS = 0.33 => ~в 3 раза медленнее, питомец не “улетает”.
  */
-export function attachDragPan(view, els, onTap){
+export function attachDragPan(view, els){
   const PAN_SENS = 0.33;
 
-  // IMPORTANT: не берём pointer-capture сразу — иначе обычный клик
-  // (для выделения организма) может “съедаться” drag-pan.
-  const drag = { on:false, moved:false, pid:null, sx:0, sy:0, ox:0, oy:0 };
+  const drag = { on:false, sx:0, sy:0, ox:0, oy:0 };
   const grid = els.grid;
 
   const getCellDelta = (dxPix, dyPix) => {
@@ -228,13 +231,12 @@ export function attachDragPan(view, els, onTap){
     // Pointer-capture on the grid would swallow the click, so disable drag-pan in this mode.
     if (view.mode === "carrot") return;
     drag.on = true;
-    drag.moved = false;
-    drag.pid = e.pointerId;
     grid.classList.add("dragging");
     drag.sx = e.clientX;
     drag.sy = e.clientY;
     drag.ox = view.state.cam.ox;
     drag.oy = view.state.cam.oy;
+    grid.setPointerCapture?.(e.pointerId);
   };
 
   const onMove = (e)=>{
@@ -242,13 +244,6 @@ export function attachDragPan(view, els, onTap){
 
     const dx = e.clientX - drag.sx;
     const dy = e.clientY - drag.sy;
-
-    // начинаем именно “перетаскивание” только после небольшого порога
-    if (!drag.moved){
-      if ((dx*dx + dy*dy) < 16) return; // 4px
-      drag.moved = true;
-      grid.setPointerCapture?.(drag.pid);
-    }
     const [dcx, dcy] = getCellDelta(dx, dy);
 
     view.state.cam.ox = drag.ox - dcx * PAN_SENS;
@@ -257,21 +252,50 @@ export function attachDragPan(view, els, onTap){
     // clampCamera теперь вызывается из render (buildFrame), тут не обязательно
   };
 
-  const onUp = (e)=>{
+  const onUp = ()=>{
     if (!drag.on) return;
-    const wasMove = drag.moved;
     drag.on = false;
-    drag.moved = false;
-    drag.pid = null;
     grid.classList.remove("dragging");
-
-    // если это был просто клик (не drag) — передаём наверх, чтобы выделить организм
-    if (!wasMove && typeof onTap === 'function'){
-      onTap(e);
-    }
   };
 
   grid.addEventListener("pointerdown", onDown);
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
 }
+
+// Click a log entry to briefly highlight the organ that caused it.
+// Highlight uses the same outer glow as selection, but white and lasts 0.2s.
+
+
+
+export function attachLogFlash(view, els, rerender){
+  if (!els?.logBody) return;
+  if (els.logBody.__hasFlash) return;
+  els.logBody.__hasFlash = true;
+
+  els.logBody.addEventListener("click", (ev)=>{
+    const row = ev.target?.closest?.(".logEntry");
+    if (!row) return;
+    if (!view?.state) return;
+
+    // meta is optional; if it is missing we still flash the whole organism
+    const orgRaw = row.dataset.org;
+    const miRaw  = row.dataset.mi;
+    const part   = row.dataset.part || null;
+
+    const orgN = (orgRaw === "" || orgRaw == null) ? -1 : (parseInt(orgRaw, 10));
+    const miN  = (miRaw === ""  || miRaw  == null) ? null : (parseInt(miRaw, 10));
+
+    view.flash = {
+      org: Number.isFinite(orgN) ? orgN : -1,
+      mi: Number.isFinite(miN) ? miN : null,
+      part,
+      // brighter + longer is handled in renderer; keep duration 0.2s
+      until: Date.now()/1000 + 0.2,
+      strength: 2, // requested: ~2x brighter
+    };
+
+    rerender(0);
+  });
+}
+

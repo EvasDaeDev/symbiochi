@@ -81,7 +81,7 @@ function pickBuddingModule(state, rng){
     if (!m.movable) continue;
     if (m.type !== "tail" && m.type !== "tentacle" && m.type !== "limb" && m.type !== "antenna") continue;
     const len = m.cells.length;
-    if (len >= 24) candidates.push([i, len]);
+    if (len >= (BUD.minLen|0)) candidates.push([i, len]);
   }
   if (!candidates.length) return -1;
   // чаще выбираем самый длинный
@@ -194,6 +194,7 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
     seed: budSeed,
     createdAt: state.lastSeen,
     lastSeen: state.lastSeen,
+	mutationDebt: 0,
     lastMutationAt: state.lastSeen,
     evoIntervalMin: state.evoIntervalMin,
     name: pick(rng, ["Почка", "Отпрыск", "Доча", "Малыш", "Клон"]),
@@ -289,9 +290,7 @@ export function applyMutation(state, momentSec){
   // This is what makes new organs appear small and then extend gradually.
   // We do it BEFORE choosing the mutation, so growth is visible even if this tick picks body/palette.
   growPlannedModules(state, rng);
-  // Buds grow their planned modules during parent mutation ticks,
-  // but we DO NOT want buds to spawn their own sub-colonies.
-  if (!state._isBud && Array.isArray(state.buds)){
+  if (Array.isArray(state.buds)){
     for (const bud of state.buds){
       growPlannedModules(bud, rng);
     }
@@ -309,6 +308,38 @@ export function applyMutation(state, momentSec){
     ["shell",     0.06 + 0.85*pw + 0.25*stress],
     ["palette",   0.06 + 0.15*(pf+pw+ph+pn)]
   ];
+   // === PERSONAL PLAN (cheap but strong shape diversity) ===
+  const plan = state.plan || {};
+  const eco = plan.ecotype || "crawler";
+
+  function bump(key, add){
+    weights = weights.map(([k,w]) => (k===key ? [k, w + add] : [k,w]));
+  }
+  function mul(key, m){
+    weights = weights.map(([k,w]) => (k===key ? [k, w * m] : [k,w]));
+  }
+
+  // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
+  if (eco === "crawler"){
+    bump("limb", 0.30);
+    mul("tail", 0.90);
+    mul("antenna", 0.95);
+  } else if (eco === "swimmer"){
+    bump("tail", 0.30);
+    bump("fin", 0.18);     // появится только в late-game, но пусть вес уже будет
+    mul("limb", 0.85);
+  } else if (eco === "sentinel"){
+    bump("antenna", 0.30);
+    bump("eye", 0.20);
+    bump("spike", 0.10);
+    mul("grow_body", 0.90);
+  } else if (eco === "tank"){
+    bump("shell", 0.30);
+    bump("spike", 0.20);
+    bump("grow_body", 0.12);
+    mul("limb", 0.85);
+    mul("tail", 0.85);
+  }
 
   // === ЭКОЛОГИЯ (морфо-обратная связь) ===
   // Если тело крупнее, а "мобильность" слабая -> подталкиваем к лапам/хвостам
@@ -376,9 +407,7 @@ export function applyMutation(state, momentSec){
     const budBase = 0.05 + 0.20*pf + 0.10*(M.mobilityScore);
     // If parent is large enough, budding is easier/more successful in practice,
     // so we allow it to happen more often (and we'll also try harder to place it).
-    if (!state._isBud){
-      weights.push(["bud", budBase * (isBigForBud ? 2.0 : 1.0)]);
-    }
+    weights.push(["bud", budBase * (isBigForBud ? 2.0 : 1.0)]);
   }
 
   // After 350+ blocks: меньше антенн/щупалец, но появляются новые мутации.
@@ -406,15 +435,18 @@ export function applyMutation(state, momentSec){
       pushLog(state, grown
         ? `Мутация: почкование не удалось → тело выросло (+${addN}).`
         : `Мутация: почкование не удалось и рост тела не удался.`,
-        grown ? "mut_fail" : "mut_fail"
+        "mut_fail",
+        { part: "body" }
       );
       return;
     }
 
+    const budType = state.modules[idx]?.type || "tail";
+
     // Large parents get extra placement attempts (boosts "success" chance).
     const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
     if (ok){
-      pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok");
+      pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
     } else {
       const addN = 1 + Math.floor(rng()*2);
       const grown = growBodyConnected(state, addN, rng);
@@ -423,7 +455,8 @@ export function applyMutation(state, momentSec){
         grown
           ? `Мутация: почкование не поместилось → тело выросло (+${addN}).`
           : `Мутация: почкование не поместилось и рост тела не удался.`,
-        "mut_fail"
+        "mut_fail",
+        { part: budType }
       );
     }
     return;
@@ -433,12 +466,12 @@ export function applyMutation(state, momentSec){
   if (kind === "grow_body"){
     // Growth per mutation increased by ~1/3.
     const base = 1 + Math.floor(rng() * 3); // 1..3
-    const addN = Math.max(1, Math.round(base * (4/3)));
+    const addN = Math.max(1, Math.round(base * (EVO.bodyGrowMult || 1)));
     const target = Array.isArray(state.growthTarget) ? state.growthTarget : null;
     const grown = growBodyConnected(state, addN, rng, target);
 
-    if (grown) pushLog(state, `Мутация: тело выросло (+${addN}).`, "mut_ok");
-    else pushLog(state, `Мутация: рост тела не удался.`, "mut_fail");
+    if (grown) pushLog(state, `Мутация: тело выросло (+${addN}).`, "mut_ok", { part: "body" });
+    else pushLog(state, `Мутация: рост тела не удался.`, "mut_fail", { part: "body" });
     return;
   }
 
@@ -447,15 +480,18 @@ export function applyMutation(state, momentSec){
     const pal = pick(rng, PALETTES);
     const k = pick(rng, ["body", "accent", "eye", "core"]);
     state.palette[k] = pal[k];
-    pushLog(state, `Мутация: изменился цвет (${k}).`, "mut_ok");
+    pushLog(state, `Мутация: изменился цвет (${k}).`, "mut_ok", { part: "palette" });
     return;
   }
 
-  // 4) Органы (tail/limb/antenna/spike/shell/eye)
+  // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
+  const beforeN = (state.modules ? state.modules.length : 0);
   const added = addModule(state, kind, rng);
+  const afterN = (state.modules ? state.modules.length : 0);
+  const newMi = (added && afterN > beforeN) ? beforeN : null;
 
   if (added){
-    pushLog(state, `Мутация: появился орган (${organLabel(kind)}).`, "mut_ok");
+    pushLog(state, `Мутация: появился орган (${organLabel(kind)}).`, "mut_ok", { part: kind, mi: newMi });
     return;
   }
 
@@ -467,13 +503,15 @@ export function applyMutation(state, momentSec){
     pushLog(
       state,
       `Мутация: орган (${organLabel(kind)}) не поместился → тело выросло (+${addN}) для следующей попытки.`,
-      "mut_fail"
+      "mut_fail",
+      { part: kind }
     );
   } else {
     pushLog(
       state,
       `Мутация: орган (${organLabel(kind)}) не поместился и рост тела не удался.`,
-      "mut_fail"
+      "mut_fail",
+      { part: kind }
     );
   }
 }
