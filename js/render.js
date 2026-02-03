@@ -562,7 +562,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
   const bodyCells = org?.body?.cells || [];
   for (const [wx,wy] of bodyCells){
     const p0 = worldToScreenPx(cam, wx, wy, view);
-	const offPx = windOffsetPx(i, len, s);
+	const offPx = (type === "antenna") ? 0 : windOffsetPx(i, len, s);
 	const x = p0.x + perp[0] * offPx;
 	const y = p0.y + breathY + perp[1] * offPx;
 
