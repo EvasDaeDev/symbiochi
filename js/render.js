@@ -320,7 +320,7 @@ function breathYOffsetPx(org, orgId, baseSeed){
   const phase = hash01(tag) * Math.PI * 2;
   const t = (Date.now() / 1000);
   const s = Math.sin((t * (Math.PI * 2) / BREATH_PERIOD_SEC) + phase);
-  return Math.round(s * BREATH_AMPL_PX);
+  return (s * BREATH_AMPL_PX);
 }
 
 function spikeBlinkOn(){

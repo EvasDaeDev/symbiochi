@@ -166,24 +166,19 @@ function autoTick(){
 }
 
 function startLoops(){
-  // Smooth renderer: 60fps-ish via requestAnimationFrame
   const frame = ()=>{
     if (!view.state) return;
-
-    // canvas sync (cheap) + draw only the grid for smooth animations
-    syncToSize();
     renderGrid(view.state, els.canvas, els.grid, view);
-
     view.renderTimer = requestAnimationFrame(frame);
   };
 
   if (!view.renderTimer){
+    syncToSize();
     view.renderTimer = requestAnimationFrame(frame);
   }
 
-  // Simulation / HUD updates (can be slower)
   if (!view.autoTimer){
-    view.autoTimer = setInterval(autoTick, 1000); // было 2000, 1000 приятнее, но можно оставить 2000
+    view.autoTimer = setInterval(autoTick, 1000);
   }
 }
 
@@ -257,7 +252,7 @@ function attachPickOrganism(){
       }
 
       // max 2 carrots per feeding tick (same as mutation tick)
-      const intervalSec = Math.max(60, Math.floor(s.evoIntervalMin * 60));
+      const intervalSec = Math.max(60, Math.floor(Number(s.evoIntervalMin || 12) * 60));
       const tickId = Math.floor(nowSec() / intervalSec);
       s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
       if (s.carrotTick.id !== tickId){ s.carrotTick.id = tickId; s.carrotTick.used = 0; }

@@ -110,7 +110,18 @@ export function migrateOrNew(){
     // inherit hue map by reference (same behavior as before)
     if (!b.partHue) b.partHue = state.partHue;
   }
+// evo interval: prefer settings.evoIntervalMin (more stable on mobile), normalize & clamp
+{
+  const raw = (state.settings && state.settings.evoIntervalMin != null)
+    ? state.settings.evoIntervalMin
+    : state.evoIntervalMin;
 
+  const v = Number(raw);
+  state.evoIntervalMin = clamp(Number.isFinite(v) ? v : 12, 1, 240);
+
+  if (!state.settings) state.settings = {};
+  state.settings.evoIntervalMin = state.evoIntervalMin;
+}
   saveGame(state);
   return state;
 }
