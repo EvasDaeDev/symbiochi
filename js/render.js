@@ -7,6 +7,44 @@ import { CARROT } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 
+// =====================
+// VARIABLE THICKNESS HELPERS (visual only)
+// =====================
+
+function thicknessLevel(type, i, len){
+  if (type === "antenna") return 1;
+  if (len < 6) return 1;
+
+  const maxZone = Math.max(1, Math.floor(len * 0.25));
+  const midZone = Math.max(maxZone, Math.floor(len * (2/3)));
+
+  if (i < maxZone) return 3;
+  if (i < midZone) return 2;
+  return 1;
+}
+
+function tryDrawSupport(
+  occ, ctx, s,
+  wx0, wy0,
+  sx, sy,
+  dx, dy,
+  col, breathK, kGrow,
+  isSelected, boundaryRects
+){
+  const k = `${wx0 + dx},${wy0 + dy}`;
+  if (occ.has(k)) return false;
+
+  const bx = sx + dx * s;
+  const by = sy + dy * s;
+
+  drawBlockAnim(ctx, bx, by, s, col, breathK, 0, kGrow);
+
+  if (isSelected){
+    boundaryRects.push({ x: bx, y: by, w: s, h: s });
+  }
+  return true;
+}
+
 /**
  * Canvas pixel-block renderer (procedural, no sprites).
  * - 1 block = --cellSize CSS px (default 4)
@@ -714,12 +752,33 @@ const wy0 = cells[i][1];
 
 if (lvl === 2){
   // thick: one-sided support if possible
-  tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
-}
+tryDrawSupport(
+  occ, ctx, s,
+  wx0, wy0,
+  x, y,
+  perp[0], perp[1],
+  shade, breathK, kGrow,
+  isSelected, boundaryRects
+);
 else if (lvl === 3){
   // max thickness: try both sides; if blocked, it will draw only what fits
-  tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
-  tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
+tryDrawSupport(
+  occ, ctx, s,
+  wx0, wy0,
+  x, y,
+  perp[0], perp[1],
+  shade, breathK, kGrow,
+  isSelected, boundaryRects
+);
+
+tryDrawSupport(
+  occ, ctx, s,
+  wx0, wy0,
+  x, y,
+  -perp[0], -perp[1],
+  shade, breathK, kGrow,
+  isSelected, boundaryRects
+);
 }
   }
 
