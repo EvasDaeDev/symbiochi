@@ -228,15 +228,7 @@ function screenToWorld(e){
   return [wx, wy];
 }
 
-function attachZoomWheel(){
-  els.canvas.addEventListener("wheel", (e)=>{
-    if (!view.state) return;
-    e.preventDefault();
-    const dir = e.deltaY > 0 ? -1 : 1; // wheel up -> zoom in
-    view.zoom = clampZoom((view.zoom || 0) + dir);
-    rerenderAll(0);
-  }, { passive:false });
-}
+
 
 function attachPickOrganism(){
   els.grid.addEventListener("click", (e)=>{
@@ -334,7 +326,7 @@ function startGame(){
   attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);
   attachCarrotHudInput(view, els, rerenderAll);
-  attachZoomWheel();
+  attachZoomWheel(view, els, rerenderAll);
   attachPickOrganism();
 
   setupResizeObserver();

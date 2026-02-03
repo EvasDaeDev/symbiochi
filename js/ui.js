@@ -291,7 +291,15 @@ export function attachDragPan(view, els){
 // Click a log entry to briefly highlight the organ that caused it.
 // Highlight uses the same outer glow as selection, but white and lasts 0.2s.
 
-
+export function attachZoomWheel(view, els, rerender){
+  els.canvas.addEventListener("wheel", (e)=>{
+    if (!view.state) return;
+    e.preventDefault();
+    const dir = e.deltaY > 0 ? -1 : 1;
+    view.zoom = clampZoom((view.zoom || 0) + dir);
+    rerender(0);
+  }, { passive:false });
+}
 
 export function attachLogFlash(view, els, rerender){
   if (!els?.logBody) return;
