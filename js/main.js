@@ -154,12 +154,14 @@ function autoTick(){
     return;
   }
 
-const sim = simulate(state, delta);
-rerenderAll(delta);
+  const sim = simulate(state, delta);
+  state.lastSeen = now;
+  saveGame(state);
+  rerenderAll(delta);
 
-if (delta >= 15 && sim.dueSteps > 0){
-  showOfflineSummary(delta, sim);
-}
+  if (delta >= 15 && sim.dueSteps > 0){
+    showOfflineSummary(delta, sim);
+  }
 
   if (sim.mutations > 0){
     toast(`Мутаций: <b>${sim.mutations}</b>.`);
