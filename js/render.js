@@ -511,6 +511,7 @@ function drawSelectionGlow(ctx, rects, strength=1){
   }
   ctx.restore();
 }
+/* DUPLICATE REMOVED:
 function drawSelectionGlow(ctx, rects, strength=1){
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
@@ -527,6 +528,7 @@ function drawSelectionGlow(ctx, rects, strength=1){
   }
   ctx.restore();
 }
+*/
 
 function drawFlashGlow(ctx, rects){
   ctx.save();
