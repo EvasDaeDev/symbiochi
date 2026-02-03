@@ -203,6 +203,7 @@ export function simulate(state, deltaSec){
     }
   }
 
+state.lastSeen = upTo;
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
 }
 
