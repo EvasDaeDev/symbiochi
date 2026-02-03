@@ -296,7 +296,7 @@ export function attachZoomWheel(view, els, rerender){
     if (!view.state) return;
     e.preventDefault();
     const dir = e.deltaY > 0 ? -1 : 1;
-    view.zoom = clampZoom((view.zoom || 0) + dir);
+    view.zoom = clamp((view.zoom || 0) + dir, -3, 3);
     rerender(0);
   }, { passive:false });
 }

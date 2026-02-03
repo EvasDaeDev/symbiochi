@@ -320,8 +320,6 @@ function startGame(){
   attachActions(view, els, toast, rerenderAll);
   attachDragPan(view, els); // drag uses els.grid size + view.gridW/H
   attachPinchZoom(view, els, rerenderAll);
-  attachDragPan(view, els);
-  attachPinchZoom(view, els, rerenderAll);
   attachInfoTabs(els);
   attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);
