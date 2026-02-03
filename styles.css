@@ -50,7 +50,7 @@ html, body {
   display: grid;
   grid-template-rows: var(--statusH) auto;
   gap: 10px;
-  min-width: 520px;
+  min-width: 600px;
 }
 
 #infoPanel{
@@ -105,8 +105,8 @@ html, body {
 }
 
 #mainPanel{
-  width: 300px;         /* стартовый размер */
-  height: 300px;        /* стартовый размер */
+  width: 600px;         /* стартовый размер */
+  height: 445px;        /* стартовый размер */
   position: relative;
 
   resize: both;         /* <-- вот оно */
@@ -498,6 +498,40 @@ html, body {
   image-rendering: crisp-edges;
 }
 
+#grid, #canvas{
+  touch-action: none;
+}
+#grid{
+  overscroll-behavior: none;
+}
+html, body { overscroll-behavior: none; }
+@media (max-width: 980px){
+  html, body{
+    display:block;
+  }
+
+  #wrap.wrap2{
+    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+
+  #centerCol{ min-width: 0; }
+
+  #mainPanel{
+    width: 100%;
+    height: min(445px, 56vh);
+    resize: none;
+  }
+
+  #infoPanel{
+    width: 100%;
+    max-height: 42vh;
+    height: auto;
+    resize: none;
+  }
+
+  .tabBody{ overflow:auto; -webkit-overflow-scrolling: touch; }
+}
 
 .logEntry.bud .msg { color: #38bdf8; font-weight: 700; }
 .logEntry.bud .when { color: #38bdf8; }

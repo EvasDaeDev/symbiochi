@@ -214,9 +214,16 @@ export function attachActions(view, els, toast, rerenderAll){
  */
 export function attachDragPan(view, els){
   const PAN_SENS = 0.33;
+  const START_DRAG_PX = 6;
 
-  const drag = { on:false, sx:0, sy:0, ox:0, oy:0 };
   const grid = els.grid;
+  const drag = {
+    tracking:false, // pointer down, но ещё не “drag”
+    dragging:false, // реальный drag включён
+    pid:null,
+    sx:0, sy:0,
+    ox:0, oy:0,
+  };
 
   const getCellDelta = (dxPix, dyPix) => {
     const rect = grid.getBoundingClientRect();
@@ -227,40 +234,58 @@ export function attachDragPan(view, els){
 
   const onDown = (e)=>{
     if (!view.state) return;
-    // When feeding mode is active, the user must be able to click the canvas to place carrots.
-    // Pointer-capture on the grid would swallow the click, so disable drag-pan in this mode.
+
+    // В режиме кормления тап должен ставить морковку — pan выключаем
     if (view.mode === "carrot") return;
-    drag.on = true;
-    grid.classList.add("dragging");
+
+    // Если активен pinch (2 пальца) — пан не стартуем
+    if (view._pinchActive) return;
+
+    drag.tracking = true;
+    drag.dragging = false;
+    drag.pid = e.pointerId;
     drag.sx = e.clientX;
     drag.sy = e.clientY;
     drag.ox = view.state.cam.ox;
     drag.oy = view.state.cam.oy;
-    grid.setPointerCapture?.(e.pointerId);
   };
 
   const onMove = (e)=>{
-    if (!drag.on || !view.state) return;
+    if (!drag.tracking || !view.state) return;
+    if (drag.pid !== e.pointerId) return;
+    if (view._pinchActive) return;
 
     const dx = e.clientX - drag.sx;
     const dy = e.clientY - drag.sy;
-    const [dcx, dcy] = getCellDelta(dx, dy);
 
+    // включаем drag только после порога
+    if (!drag.dragging){
+      if ((dx*dx + dy*dy) < (START_DRAG_PX*START_DRAG_PX)) return;
+      drag.dragging = true;
+      grid.classList.add("dragging");
+      grid.setPointerCapture?.(e.pointerId);
+    }
+
+    const [dcx, dcy] = getCellDelta(dx, dy);
     view.state.cam.ox = drag.ox - dcx * PAN_SENS;
     view.state.cam.oy = drag.oy - dcy * PAN_SENS;
-
-    // clampCamera теперь вызывается из render (buildFrame), тут не обязательно
   };
 
-  const onUp = ()=>{
-    if (!drag.on) return;
-    drag.on = false;
-    grid.classList.remove("dragging");
+  const onUp = (e)=>{
+    if (!drag.tracking) return;
+    if (drag.pid !== e.pointerId) return;
+    drag.tracking = false;
+    drag.pid = null;
+    if (drag.dragging){
+      drag.dragging = false;
+      grid.classList.remove("dragging");
+    }
   };
 
   grid.addEventListener("pointerdown", onDown);
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
+  grid.addEventListener("pointermove", onMove);
+  grid.addEventListener("pointerup", onUp);
+  grid.addEventListener("pointercancel", onUp);
 }
 
 // Click a log entry to briefly highlight the organ that caused it.
@@ -299,3 +324,68 @@ export function attachLogFlash(view, els, rerender){
   });
 }
 
+export function attachPinchZoom(view, els, rerender){
+  const grid = els.grid;
+  if (!grid) return;
+
+  const pts = new Map(); // pointerId -> {x,y}
+  let startDist = 0;
+  let startZoom = 0;
+  let active = false;
+
+  const dist = ()=>{
+    const a = [...pts.values()];
+    if (a.length < 2) return 0;
+    const dx = a[0].x - a[1].x;
+    const dy = a[0].y - a[1].y;
+    return Math.hypot(dx, dy);
+  };
+
+  const onDown = (e)=>{
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2){
+      active = true;
+      view._pinchActive = true;
+      startDist = dist();
+      startZoom = view.zoom || 0;
+      grid.setPointerCapture?.(e.pointerId);
+    }
+  };
+
+  const onMove = (e)=>{
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (!active || pts.size < 2) return;
+
+    const d = dist();
+    if (!startDist) return;
+
+    // 10% изменения расстояния = шаг зума
+    const ratio = d / startDist;
+    let dz = 0;
+    if (ratio > 1.10) dz = +1;
+    else if (ratio < 0.90) dz = -1;
+
+    if (dz !== 0){
+      view.zoom = Math.max(-3, Math.min(3, startZoom + dz));
+      // пересчёт blockPx обычно в render/buildFrame, но перерендерим сразу
+      startZoom = view.zoom;
+      startDist = d;
+      rerender(0);
+    }
+  };
+
+  const onUp = (e)=>{
+    pts.delete(e.pointerId);
+    if (pts.size < 2){
+      active = false;
+      view._pinchActive = false;
+    }
+  };
+
+  grid.addEventListener("pointerdown", onDown);
+  grid.addEventListener("pointermove", onMove);
+  grid.addEventListener("pointerup", onUp);
+  grid.addEventListener("pointercancel", onUp);
+}

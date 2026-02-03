@@ -18,6 +18,8 @@ import {
   attachActions,
   attachDragPan,
   attachInfoTabs,
+  attachZoomWheel,
+  attachPinchZoom,
   attachLegendHuePicker,
   attachCarrotHudInput,
   attachLogFlash
@@ -325,6 +327,9 @@ function startGame(){
   attachSettings(view, els, toast);
   attachActions(view, els, toast, rerenderAll);
   attachDragPan(view, els); // drag uses els.grid size + view.gridW/H
+  attachPinchZoom(view, els, rerenderAll);
+  attachDragPan(view, els);
+  attachPinchZoom(view, els, rerenderAll);
   attachInfoTabs(els);
   attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);
