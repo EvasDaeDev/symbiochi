@@ -49,9 +49,9 @@ export function renderLog(state, els){
   const total = 1e-6 + state.care.feed + state.care.wash + state.care.heal + state.care.neglect;
   const pf = state.care.feed/total, pw = state.care.wash/total, ph = state.care.heal/total, pn = state.care.neglect/total;
   const top = [
-    ["корм", pf],
-    ["мыть", pw],
-    ["леч", ph],
+    ["кормить", pf],
+    ["помыть", pw],
+    ["лечение", ph],
     ["запущ", pn]
   ].sort((a,b)=>b[1]-a[1])[0];
 
