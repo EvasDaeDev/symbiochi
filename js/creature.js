@@ -197,7 +197,20 @@ export function addModule(state, type, rng){
     return s2 - s1;
   });
 
-  const baseDir = dirs[0];
+  let baseDir = dirs[0];
+
+// если сразу упёрлись — ищем ближайший выход
+for (const d of dirs){
+  const nx = anchor[0] + d[0];
+  const ny = anchor[1] + d[1];
+  if (
+    !bodySet.has(key(nx,ny)) &&
+    !occupiedByModules(state, nx, ny)
+  ){
+    baseDir = d;
+    break;
+  }
+}
 
   let cells = [];
   let movable = false;
@@ -350,58 +363,81 @@ export function addModule(state, type, rng){
 }
 
 export function growPlannedModules(state, rng){
-  // Each call tries to extend growing modules by 1 segment.
-  // If extension is impossible, we stop growth for that module.
   if (!state?.modules?.length) return 0;
+
   const bodySet = bodyCellSet(state.body);
-  function rotateDir45(dir, sign){
-    // вращаем по DIR8 на 1 шаг
-    let idx = DIR8.findIndex(d => d[0]===dir[0] && d[1]===dir[1]);
-    if (idx < 0) idx = 0;
-    idx = (idx + (sign>0 ? 1 : -1) + DIR8.length) % DIR8.length;
-    return DIR8[idx];
+
+  function rotateDir(dir, steps){
+    let i = DIR8.findIndex(d => d[0]===dir[0] && d[1]===dir[1]);
+    if (i < 0) i = 0;
+    return DIR8[(i + steps + DIR8.length) % DIR8.length];
   }
 
-  function perpDir(dir, sign){
-    // перпендикуляр (для зигзага)
-    const dx = dir[0], dy = dir[1];
-    // (dx,dy) -> (dy,-dx) или (-dy,dx)
-    return (sign > 0) ? [dy, -dx] : [-dy, dx];
-  }
   let grew = 0;
 
   for (const m of state.modules){
-    const target = (m.growTo ?? m.cells?.length ?? 0);
-    if (!m.cells || m.cells.length >= target) continue;
-    if (!m.growDir){ m.growTo = m.cells.length; continue; }
+    const target = m.growTo ?? m.cells.length;
+    if (m.cells.length >= target) continue;
+    if (!m.growDir) { m.growTo = m.cells.length; continue; }
 
-const last = m.cells[m.cells.length - 1];
+    const last = m.cells[m.cells.length - 1];
+    let baseDir = m.growDir;
 
-    // choose direction based on style
-    let dir = m.growDir;
-
-    if (m.growStyle === "zigzag" && m.baseDir){
-      const step = (m.growStep || 0);
-      dir = (step % 2 === 0) ? m.baseDir : perpDir(m.baseDir, m.zigzagSign || 1);
-      m.growStep = step + 1;
-    } else if (m.growStyle === "curve"){
-      // occasionally turn left/right by 45°
-      if (rng() < (m.turnChance ?? 0.25)){
-        dir = rotateDir45(dir, m.curveSign || 1);
-        m.growDir = dir; // фиксируем поворот
+    // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
+    let dir = baseDir;
+    if (m.cells.length >= 3){
+      if (m.growStyle === "zigzag"){
+        dir = (m.growStep % 2 === 0)
+          ? baseDir
+          : [baseDir[1], -baseDir[0]];
+        m.growStep++;
+      }
+      else if (m.growStyle === "curve"){
+        if (rng() < (m.turnChance || 0.2)){
+          baseDir = rotateDir(baseDir, m.curveSign || 1);
+          m.growDir = baseDir;
+        }
+        dir = baseDir;
       }
     }
 
-    const nx = last[0] + dir[0];
-    const ny = last[1] + dir[1];
-    const kk = key(nx, ny);
+    // 🔍 ПРОБУЕМ ОБОЙТИ ПРЕПЯТСТВИЕ
+    const tryDirs = [
+      dir,
+      rotateDir(dir, 1),
+      rotateDir(dir, -1),
+      rotateDir(dir, 2),
+      rotateDir(dir, -2),
+      rotateDir(dir, 3),
+      rotateDir(dir, -3),
+    ];
 
-    if (bodySet.has(kk)) { m.growTo = m.cells.length; continue; }
-    if (occupiedByModules(state, nx, ny)) { m.growTo = m.cells.length; continue; }
+    let placed = false;
 
-    m.cells.push([nx, ny]);
-    markAnim(state, nx, ny);
-    grew++;
+    for (const [dx,dy] of tryDirs){
+      const nx = last[0] + dx;
+      const ny = last[1] + dy;
+      const k = key(nx, ny);
+
+      // ❗ у основания разрешаем рост рядом с телом
+      const nearBody = bodySet.has(k);
+      if (nearBody && m.cells.length >= 3) continue;
+
+      if (bodySet.has(k)) continue;
+      if (occupiedByModules(state, nx, ny)) continue;
+
+      m.cells.push([nx, ny]);
+      markAnim(state, nx, ny);
+      grew++;
+      placed = true;
+      break;
+    }
+
+    // ❌ если совсем некуда — прекращаем рост этого модуля
+    if (!placed){
+      m.growTo = m.cells.length;
+    }
   }
+
   return grew;
 }
