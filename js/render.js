@@ -339,9 +339,12 @@ function perpOf([dx,dy]){ return [-dy, dx]; }
 function windOffsetPx(i, len, blockPx){
   if (i < 2) return 0;
   const t = Date.now()/1000;
-  const phase = t*2 + i*0.55;
-  const amp01 = Math.min(1, (i-1)/Math.max(1,len-2));
-  return Math.sin(phase) * blockPx * 0.65 * amp01;
+  const omega = 2*Math.PI/5;
+  const phase = omega*t + i*0.55;
+  const denom = Math.max(1, len-2);
+  const amp01 = Math.min(1, (i-1)/denom);
+  const ampPx = blockPx * 0.65 * amp01;
+  return Math.sin(phase) * ampPx;
 }
 
 // growth animation: org.anim["x,y"] = {t0, dur}
@@ -508,6 +511,23 @@ function drawSelectionGlow(ctx, rects, strength=1){
   }
   ctx.restore();
 }
+function drawSelectionGlow(ctx, rects, strength=1){
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  for (let i = GLOW_PX; i >= 1; i--){
+    const alpha = (0.08 + (i / GLOW_PX) * 0.14) * strength;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = "rgba(90,255,140,0.70)";
+    ctx.shadowBlur = i * 2.2;
+    ctx.strokeStyle = "rgba(90,255,140,0.55)";
+    ctx.lineWidth = 1;
+    for (const r of rects){
+      ctx.strokeRect(r.x - i, r.y - i, r.w + i*2, r.h + i*2);
+    }
+  }
+  ctx.restore();
+}
+
 function drawFlashGlow(ctx, rects){
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
@@ -518,7 +538,6 @@ function drawFlashGlow(ctx, rects){
     ctx.shadowBlur = i * 2.6;
     ctx.strokeStyle = "rgba(255,255,255,0.75)";
     ctx.lineWidth = 1;
-
     for (const r of rects){
       ctx.strokeRect(r.x - i, r.y - i, r.w + i*2, r.h + i*2);
     }
