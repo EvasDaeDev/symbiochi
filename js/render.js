@@ -347,6 +347,14 @@ function windOffsetPx(i, len, blockPx){
   return Math.sin(phase) * ampPx;
 }
 
+function windOffset(i, len){
+  if (i < 2) return 0;
+  const t = Date.now()/1000;
+  const phase = t*2 + i*0.55;
+  const amp01 = Math.min(1, (i-1)/Math.max(1,len-2));
+  return Math.sin(phase) * 0.35 * amp01;
+}
+
 // growth animation: org.anim["x,y"] = {t0, dur}
 function animProgress(org, wx, wy){
   const a = org?.anim?.[`${wx},${wy}`];
