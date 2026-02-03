@@ -283,6 +283,7 @@ html, body {
 .actions {
   display: flex;
   justify-content: center; /* по центру строки */
+  transform: translateY(-12px); /* поднимает кнопки вверх */
   gap: 10px;
   pointer-events: auto; /* кнопки кликабельны при pointer-events:none у контейнера */
 }
