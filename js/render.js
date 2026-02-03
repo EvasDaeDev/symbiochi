@@ -570,20 +570,19 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
   // BODY blocks
   const bodyColor = org?.palette?.body || "#60a5fa";
   const bodyCells = org?.body?.cells || [];
-  for (const [wx,wy] of bodyCells){
-    const p0 = worldToScreenPx(cam, wx, wy, view);
-	const offPx = (type === "antenna") ? 0 : windOffsetPx(i, len, s);
-	const x = p0.x + perp[0] * offPx;
-	const y = p0.y + breathY + perp[1] * offPx;
+for (const [wx,wy] of bodyCells){
+  const p = worldToScreenPx(cam, wx, wy, view);
+  const x = p.x;
+  const y = p.y + breathY;
 
-    const nm = neighMaskAt(occ, wx, wy);
-    const kGrow = animProgress(org, wx, wy);
-    drawBlockAnim(ctx, x, y, s, bodyColor, breathK, nm, kGrow);
+  const nm = neighMaskAt(occ, wx, wy);
+  const kGrow = animProgress(org, wx, wy);
+  drawBlockAnim(ctx, x, y, s, bodyColor, breathK, nm, kGrow);
 
-    if (isSelected && isBoundary(occ, wx, wy)){
-      boundaryRects.push({x, y, w:s, h:s});
-    }
+  if (isSelected && isBoundary(occ, wx, wy)){
+    boundaryRects.push({x, y, w:s, h:s});
   }
+}
 
   // MODULES
   const modules = org?.modules || [];
