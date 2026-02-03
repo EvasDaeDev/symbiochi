@@ -649,8 +649,41 @@ for (const [wx,wy] of bodyCells){
     const dir = moduleDir(cells);
     const perp = perpOf(dir);
 
-    // thickness at base: if len >= 10 → add 1 extra block near base (2-wide) visually
-    const th = (len >= 10) ? 2 : 1;
+// Variable thickness profile (visual-only)
+// Goal:
+// - first 1/4 of length: maximum thickness
+// - up to 2/3 of length: thick
+// - rest: thin
+// - if no lateral space: stays thinner (never blocks growth)
+// - antenna is always thin
+function thicknessLevel(type, i, len){
+  if (type === "antenna") return 1;
+  if (len < 6) return 1;
+
+  const maxZone = Math.max(1, Math.floor(len * 0.25));
+  const midZone = Math.max(maxZone, Math.floor(len * (2/3)));
+
+  if (i < maxZone) return 3;   // max thickness
+  if (i < midZone) return 2;   // thick
+  return 1;                    // thin
+}
+
+// Try to draw a lateral "support" block if that world-cell is free.
+// Uses TRUE occupancy (occ) so we don't draw into body/modules.
+// wx0/wy0 must be the real cell coords (cells[i][0], cells[i][1]), not wind-shifted.
+function tryDrawSupport(wx0, wy0, sx, sy, dx, dy, col, kGrow){
+  const k = `${wx0 + dx},${wy0 + dy}`;
+  if (occ.has(k)) return false;
+
+  const bx = sx + dx * s;
+  const by = sy + dy * s;
+  drawBlockAnim(ctx, bx, by, s, col, breathK, 0, kGrow);
+
+  if (isSelected){
+    boundaryRects.push({ x: bx, y: by, w: s, h: s });
+  }
+  return true;
+}
 
     for (let i=0;i<len;i++){
       let [wx,wy] = cells[i];
@@ -671,16 +704,23 @@ for (const [wx,wy] of bodyCells){
 
       drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
 
-      // base thickening: add one adjacent block near base (segments 0..1) if long
-      if (th === 2 && i < 2){
-        const bx = x + perp[0] * s; // expand sideways
-        const by = y + perp[1] * s;
-        // draw a “support” block with slight darkening
-        drawBlockAnim(ctx, bx, by, s, brighten(c, -0.04), breathK, 0, kGrow);
-        if (isSelected){
-          boundaryRects.push({x:bx, y:by, w:s, h:s});
-        }
-      }
+// variable thickness: tries to be thick, but can stay thin if blocked
+const lvl = thicknessLevel(type, i, len);
+const shade = brighten(c, -0.04);
+
+// IMPORTANT: use real cell coords for occupancy test
+const wx0 = cells[i][0];
+const wy0 = cells[i][1];
+
+if (lvl === 2){
+  // thick: one-sided support if possible
+  tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
+}
+else if (lvl === 3){
+  // max thickness: try both sides; if blocked, it will draw only what fits
+  tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
+  tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
+}
 
       if (isSelected && isBoundary(occ, cells[i][0], cells[i][1])){
         boundaryRects.push({x, y, w:s, h:s});
