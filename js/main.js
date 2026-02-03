@@ -99,8 +99,14 @@ const view = {
 };
 
 function stopLoops(){
-  if (view.renderTimer){ clearInterval(view.renderTimer); view.renderTimer = null; }
-  if (view.autoTimer){ clearInterval(view.autoTimer); view.autoTimer = null; }
+  if (view.renderTimer){
+    cancelAnimationFrame(view.renderTimer);
+    view.renderTimer = null;
+  }
+  if (view.autoTimer){
+    clearInterval(view.autoTimer);
+    view.autoTimer = null;
+  }
 }
 
 function syncToSize(){
@@ -160,19 +166,24 @@ function autoTick(){
 }
 
 function startLoops(){
-  // Smooth-ish renderer for animations (blink/wind/breath)
+  // Smooth renderer: 60fps-ish via requestAnimationFrame
+  const frame = ()=>{
+    if (!view.state) return;
+
+    // canvas sync (cheap) + draw only the grid for smooth animations
+    syncToSize();
+    renderGrid(view.state, els.canvas, els.grid, view);
+
+    view.renderTimer = requestAnimationFrame(frame);
+  };
+
   if (!view.renderTimer){
-    view.renderTimer = setInterval(()=>{
-      if (!view.state) return;
-      syncToSize();
-     renderGrid(view.state, els.canvas, els.grid, view);
-	
-    }, 100);
+    view.renderTimer = requestAnimationFrame(frame);
   }
 
-  // Auto-update stats + simulate offline progress
+  // Simulation / HUD updates (can be slower)
   if (!view.autoTimer){
-    view.autoTimer = setInterval(autoTick, 2000);
+    view.autoTimer = setInterval(autoTick, 1000); // было 2000, 1000 приятнее, но можно оставить 2000
   }
 }
 
