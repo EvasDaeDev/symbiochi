@@ -479,6 +479,15 @@ html, body {
   background: rgba(0,0,0,.45);
   z-index: 40;
 }
+#symbiosisOverlay{
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  padding: 14px;
+  background: rgba(0,0,0,.45);
+  z-index: 45;
+}
 .modal{
   width: 100%;
   border: 1px solid var(--border);
@@ -486,6 +495,9 @@ html, body {
   background: rgba(16,24,38,.92);
   padding: 12px;
   box-sizing: border-box;
+}
+.symModal{
+  max-width: 360px;
 }
 .modal h2{
   margin: 0 0 8px 0;
@@ -518,6 +530,63 @@ html, body {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 10px;
+}
+.symTabs{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.symTabs .tabBtn{
+  background: #0b1320;
+  border: 1px solid #24344a;
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 10px;
+}
+.symTabs .tabBtn.isActive{
+  border-color: var(--accent);
+  color: var(--text);
+}
+.symBody{
+  display: block;
+  gap: 8px;
+}
+.symHint{
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.symTextArea{
+  width: 100%;
+  min-height: 96px;
+  border-radius: 10px;
+  border: 1px solid #24344a;
+  background: #0b1320;
+  color: var(--text);
+  padding: 8px;
+  font-size: 10px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+#qrCanvas{
+  display: block;
+  margin: 6px auto 8px;
+  background: #fff;
+  border-radius: 8px;
+}
+.symVideo{
+  width: 100%;
+  height: 160px;
+  border-radius: 10px;
+  background: #05080f;
+  margin-bottom: 6px;
+  object-fit: cover;
+}
+.symRow{
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 8px;
 }
 .hint{
   font-size:10px;
