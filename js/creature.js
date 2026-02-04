@@ -391,7 +391,7 @@ for (const d of dirs){
 export function growPlannedModules(state, rng, options = {}){
   if (!state?.modules?.length) return 0;
 
-  const { target = null, maxGrows = Infinity, strength = null } = options;
+  const { target = null, maxGrows = Infinity, strength = null, shuffle = false } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
   const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
@@ -466,6 +466,11 @@ export function growPlannedModules(state, rng, options = {}){
       const scoreB = b.i * (1 - ib) + db * ib;
       return scoreA - scoreB;
     });
+  } else if (shuffle){
+    for (let i = modules.length - 1; i > 0; i--){
+      const j = Math.floor(rng() * (i + 1));
+      [modules[i], modules[j]] = [modules[j], modules[i]];
+    }
   }
 
   for (const entry of modules){
