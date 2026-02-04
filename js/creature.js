@@ -17,10 +17,33 @@ export function makeSmallConnectedBody(seed, targetCount=12){
   set.add(key(cx,cy));
 
   while (set.size < targetCount){
-    const arr = Array.from(set);
-    const [bx,by] = parseKey(arr[Math.floor(rng()*arr.length)]);
-    const [dx,dy] = DIR8[Math.floor(rng()*DIR8.length)];
-    set.add(key(bx + dx, by + dy));
+    const candidates = new Map();
+    for (const k of set){
+      const [bx, by] = parseKey(k);
+      for (const [dx, dy] of DIR8){
+        const nx = bx + dx;
+        const ny = by + dy;
+        const kk = key(nx, ny);
+        if (set.has(kk)) continue;
+        if (!candidates.has(kk)) candidates.set(kk, [nx, ny]);
+      }
+    }
+    const pool = Array.from(candidates.values());
+    pool.sort((a, b) => {
+      const da = Math.abs(a[0] - cx) + Math.abs(a[1] - cy);
+      const db = Math.abs(b[0] - cx) + Math.abs(b[1] - cy);
+      if (da !== db) return da - db;
+      let na = 0;
+      let nb = 0;
+      for (const [dx, dy] of DIR8){
+        if (set.has(key(a[0] + dx, a[1] + dy))) na++;
+        if (set.has(key(b[0] + dx, b[1] + dy))) nb++;
+      }
+      return nb - na;
+    });
+    const pickIdx = Math.floor(rng() * Math.min(6, pool.length));
+    const [px, py] = pool[pickIdx];
+    set.add(key(px, py));
   }
 
   return { core:[cx,cy], cells:Array.from(set).map(parseKey) };
