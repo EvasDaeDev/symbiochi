@@ -32,6 +32,11 @@
       <div class="panel" id="mainPanel">
         <div class="lifeOverlay">
           <span class="pill lifePill" id="lifePill">жизнь: 00:00:00</span>
+          <div class="perfStats" id="perfStats">
+            <div class="perfItem" id="gpuStat">GPU: —%</div>
+            <div class="perfItem" id="cpuStat">CPU: —%</div>
+            <div class="perfItem" id="fpsStat">FPS: —</div>
+          </div>
         </div>
         <div class="viewportFull">
           <div class="gridWrap">
@@ -136,8 +141,8 @@
         <div class="legendBody" id="legendBody"></div>
         <div class="huePicker" id="huePicker" style="display:none;">
           <div class="hueTitle" id="hueTitle">Цвет</div>
-          <input id="hueRange" type="range" min="0" max="360" step="1" />
-          <div class="hint">Клик по цвету в легенде → меняешь тональность.</div>
+          <input id="hueRange" type="color" />
+          <div class="hint">Клик по цвету в легенде → меняешь цвет.</div>
         </div>
       </div>
       <div class="tabBody" id="tab-log">
