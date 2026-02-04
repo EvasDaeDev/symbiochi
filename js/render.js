@@ -932,14 +932,22 @@ function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
   // какие клетки подсвечиваем
   const set = new Set();
 
-  // 1) если указан индекс модуля — подсвечиваем только этот модуль
-  if (flash.mi !== null && Number.isFinite(flash.mi)){
+  // 1) если указаны несколько модулей — подсвечиваем их
+  if (Array.isArray(flash.grownModules) && flash.grownModules.length){
+    for (const mi of flash.grownModules){
+      const m = (org.modules || [])[mi];
+      if (m && Array.isArray(m.cells)){
+        for (const [x,y] of m.cells) set.add(`${x},${y}`);
+      }
+    }
+  } else if (flash.mi !== null && Number.isFinite(flash.mi)){
+    // 2) если указан индекс модуля — подсвечиваем только этот модуль
     const m = (org.modules || [])[flash.mi];
     if (m && Array.isArray(m.cells)){
       for (const [x,y] of m.cells) set.add(`${x},${y}`);
     }
   } else {
-    // 2) иначе по part: "body" — тело; иначе — все модули нужного типа
+    // 3) иначе по part: "body" — тело; иначе — все модули нужного типа
     if (flash.part === "body"){
       for (const [x,y] of (org.body?.cells || [])) set.add(`${x},${y}`);
     } else if (flash.part){
@@ -975,6 +983,46 @@ function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
   return rects;
 }
 
+function drawGridOverlay(ctx, view, cam){
+  const step = 10;
+  const Vx = (view.gridW - 1) / 2;
+  const Vy = (view.gridH - 1) / 2;
+  const left = Math.floor(cam.ox - Vx);
+  const right = Math.ceil(cam.ox + Vx);
+  const top = Math.floor(cam.oy - Vy);
+  const bottom = Math.ceil(cam.oy + Vy);
+
+  const rootStyle = getComputedStyle(document.documentElement);
+  const bgHex = rootStyle.getPropertyValue("--bg").trim() || "#070a0f";
+  const lineHex = scaleBrightness(bgHex, 1.15);
+
+  const startX = Math.floor(left / step) * step;
+  const startY = Math.floor(top / step) * step;
+
+  ctx.save();
+  ctx.strokeStyle = lineHex;
+  ctx.lineWidth = 1;
+
+  for (let wx = startX; wx <= right; wx += step){
+    const p = worldToScreenPx(cam, wx, 0, view);
+    const x = p.x + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, view.rectH);
+    ctx.stroke();
+  }
+
+  for (let wy = startY; wy <= bottom; wy += step){
+    const p = worldToScreenPx(cam, 0, wy, view);
+    const y = p.y + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(view.rectW, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // =====================
 // Main render entry
 // =====================
@@ -1002,6 +1050,8 @@ export function renderGrid(state, canvas, gridEl, view){
   g.addColorStop(1, "rgba(0,0,0,0.24)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
+
+  drawGridOverlay(ctx, view, state.cam);
 
   // Carrots (rect blocks, orange)
 if (Array.isArray(state.carrots)){

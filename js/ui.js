@@ -40,9 +40,10 @@ export function renderLog(state, els){
     const org = Number.isFinite(meta.org) ? meta.org : "";
     const mi = Number.isFinite(meta.mi) ? meta.mi : "";
     const part = meta.part ? String(meta.part) : "";
+    const grown = Array.isArray(meta.grownModules) ? meta.grownModules.join(",") : "";
 
     return `
-      <div class="${cls}" data-org="${org}" data-mi="${mi}" data-part="${escapeHtml(part)}">
+      <div class="${cls}" data-org="${org}" data-mi="${mi}" data-part="${escapeHtml(part)}" data-grown="${escapeHtml(grown)}">
         <div class="when">${new Date(e.t*1000).toLocaleTimeString()} • ${escapeHtml(e.kind)}</div>
         <div class="msg">${escapeHtml(e.msg)}</div>
       </div>
@@ -266,6 +267,16 @@ export function attachLegendHuePicker(view, els, rerenderAll){
     const cur = view.state.partHue?.[part];
     els.hueRange.value = String(Number.isFinite(cur) ? cur : 0);
     if (els.hueTitle) els.hueTitle.textContent = `Тон: ${part}`;
+
+    view.flash = {
+      org: -1,
+      mi: null,
+      part,
+      grownModules: [],
+      until: Date.now()/1000 + 0.35,
+      strength: 2,
+    };
+    rerenderAll(0);
   });
 
   els.hueRange.addEventListener("input", ()=>{
@@ -424,14 +435,20 @@ export function attachLogFlash(view, els, rerender){
     const orgRaw = row.dataset.org;
     const miRaw  = row.dataset.mi;
     const part   = row.dataset.part || null;
+    const grownRaw = row.dataset.grown || "";
 
     const orgN = (orgRaw === "" || orgRaw == null) ? -1 : (parseInt(orgRaw, 10));
     const miN  = (miRaw === ""  || miRaw  == null) ? null : (parseInt(miRaw, 10));
+
+    const grownModules = grownRaw
+      ? grownRaw.split(",").map((v)=>parseInt(v, 10)).filter((v)=>Number.isFinite(v))
+      : [];
 
     view.flash = {
       org: Number.isFinite(orgN) ? orgN : -1,
       mi: Number.isFinite(miN) ? miN : null,
       part,
+      grownModules,
       // brighter + longer is handled in renderer; keep duration 0.2s
       until: Date.now()/1000 + 0.2,
       strength: 2, // requested: ~2x brighter

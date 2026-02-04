@@ -526,14 +526,19 @@ export function applyMutation(state, momentSec){
       1,
       Math.round((baseGrows + moduleBoost) * (EVO.appendageGrowMult || 1))
     );
+    const grownModules = [];
     const grew = growPlannedModules(state, rng, {
       target,
       maxGrows,
       strength,
-      shuffle: !target
+      shuffle: !target,
+      grownModules
     });
     if (grew){
-      pushLog(state, `Мутация: отросток вырос.`, "mut_ok", { part: "appendage" });
+      pushLog(state, `Мутация: отросток вырос.`, "mut_ok", {
+        part: "appendage",
+        grownModules
+      });
     } else {
       pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
     }
