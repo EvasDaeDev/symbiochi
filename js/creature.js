@@ -393,7 +393,13 @@ for (const d of dirs){
 export function growPlannedModules(state, rng, options = {}){
   if (!state?.modules?.length) return 0;
 
-  const { target = null, maxGrows = Infinity, strength = null, shuffle = false } = options;
+  const {
+    target = null,
+    maxGrows = Infinity,
+    strength = null,
+    shuffle = false,
+    grownModules = null
+  } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
   const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
@@ -560,6 +566,9 @@ export function growPlannedModules(state, rng, options = {}){
 
       m.cells.push([nx, ny]);
       markAnim(state, nx, ny);
+      if (Array.isArray(grownModules) && !grownModules.includes(entry.i)){
+        grownModules.push(entry.i);
+      }
       grew++;
       placed = true;
       if (grew >= maxGrows) return grew;
