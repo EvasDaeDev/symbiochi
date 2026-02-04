@@ -125,17 +125,19 @@ export function growBodyConnected(state, addN, rng, target=null){
         const nx=x+dx, ny=y+dy;
         const kk = key(nx,ny);
         if (set.has(kk)) continue;
-        if (occupiedByModules(state, nx, ny)) continue;
-        candidates.push([nx,ny]);
+        const blockedByModule = occupiedByModules(state, nx, ny);
+        candidates.push([nx, ny, blockedByModule]);
       }
     }
     if (!candidates.length) return false;
+    const freeCandidates = candidates.filter((c) => !c[2]);
+    const pool = freeCandidates.length ? freeCandidates : candidates;
 
     // If a growth target is provided (e.g. "carrot"), bias growth towards it,
     // otherwise bias towards the core for compact connected bodies.
     const tx = Array.isArray(target) ? target[0] : null;
     const ty = Array.isArray(target) ? target[1] : null;
-    candidates.sort((a,b)=>{
+    pool.sort((a,b)=>{
       const daCore = Math.abs(a[0]-core[0]) + Math.abs(a[1]-core[1]);
       const dbCore = Math.abs(b[0]-core[0]) + Math.abs(b[1]-core[1]);
       if (tx === null || ty === null) return daCore - dbCore;
@@ -145,8 +147,8 @@ export function growBodyConnected(state, addN, rng, target=null){
       return (daT*3 + daCore) - (dbT*3 + dbCore);
     });
 
-    const pickIdx = Math.floor(rng()*Math.min(12, candidates.length));
-    const [px,py] = candidates[pickIdx];
+    const pickIdx = Math.floor(rng()*Math.min(12, pool.length));
+    const [px,py] = pool[pickIdx];
     set.add(key(px,py));
   }
 
