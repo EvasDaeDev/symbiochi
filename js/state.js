@@ -131,6 +131,9 @@ export function migrateOrNew(){
 export function simulate(state, deltaSec){
   if (deltaSec <= 0) return { deltaSec: 0, mutations: 0, budMutations: 0, eaten: 0, skipped: 0, dueSteps: 0 };
 
+  const now = (state.lastSeen || nowSec()) + deltaSec;
+  pruneExpiredCarrots(state, now);
+
   // decay for parent + buds
   const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
   for (const org of orgs){
@@ -164,7 +167,7 @@ export function simulate(state, deltaSec){
   let eaten = 0;
   let skipped = 0;
 
-  const upTo = state.lastSeen + deltaSec;
+  const upTo = now;
   const dueSteps = Math.floor((upTo - state.lastMutationAt) / intervalSec);
 
   // OFFLINE: apply instantly (no debt)
@@ -208,11 +211,36 @@ export function simulate(state, deltaSec){
     }
   }
 
-state.lastSeen = upTo;
+  state.lastSeen = upTo;
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
 }
 
 // ===== Carrots (interactive feeding / shaping) =====
+function pruneExpiredCarrots(state, now){
+  if (!Array.isArray(state.carrots) || !state.carrots.length) return;
+  const ttlSec = 60 * 60;
+  const kept = [];
+  for (const car of state.carrots){
+    if (!Number.isFinite(car.t)){
+      car.t = now;
+      kept.push(car);
+      continue;
+    }
+    if ((now - car.t) <= ttlSec){
+      kept.push(car);
+    }
+  }
+  state.carrots = kept;
+  if (!state.carrots.length){
+    const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+    for (const org of orgs){
+      org.growthTarget = null;
+      org.growthTargetMode = null;
+      org.growthTargetPower = 0;
+    }
+  }
+}
+
 function carrotCells(car){
   const out = [];
   const w = (car.w ?? CARROT.w ?? 7);
