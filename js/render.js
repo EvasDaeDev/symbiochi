@@ -575,17 +575,12 @@ function computeEyeSideBlocks(org, bodyBlocks){
 function drawSelectionGlow(ctx, rects, strength=1){
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
-  for (let i = GLOW_PX; i >= 1; i--){
-    const alpha = 0.08 + (i / GLOW_PX) * 0.14;
-    ctx.globalAlpha = alpha;
-    ctx.shadowColor = "rgba(90,255,140,0.70)";
-    ctx.shadowBlur = i * 2.2;
-    ctx.strokeStyle = "rgba(90,255,140,0.55)";
-    ctx.lineWidth = 1;
-
-    for (const r of rects){
-      ctx.strokeRect(r.x - i, r.y - i, r.w + i*2, r.h + i*2);
-    }
+  ctx.globalAlpha = 0.85 * strength;
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(90,255,140,0.9)";
+  ctx.lineWidth = 1;
+  for (const r of rects){
+    ctx.strokeRect(r.x - 0.5, r.y - 0.5, r.w + 1, r.h + 1);
   }
   ctx.restore();
 }
@@ -636,6 +631,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
   const breathK = (breathY !== 0); // slight tint toggle
 
   const boundaryRects = [];
+  const boundaryCells = [];
 
   // BODY blocks
   const bodyColor = getPartColor(org, "body", 0);
@@ -655,8 +651,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
     }
 
     if (isSelected && isBoundary(occ, wx, wy)){
-      const p = worldToScreenPx(cam, wx, wy, view);
-      boundaryRects.push({ x: p.x, y: p.y + breathY, w: s, h: s });
+      boundaryCells.push([wx, wy]);
     }
   }
 
@@ -703,7 +698,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
         drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
 
         if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryRects.push({x, y, w:s, h:s});
+          boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -724,7 +719,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
         drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
 
         if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryRects.push({x, y, w:s, h:s});
+          boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -859,8 +854,20 @@ else if (lvl === 3){
 }
 
       if (isSelected && isBoundary(occ, cells[i][0], cells[i][1])){
-        boundaryRects.push({x, y, w:s, h:s});
+        if (Number.isInteger(wx) && Number.isInteger(wy)){
+          boundaryCells.push([wx, wy]);
+        } else {
+          boundaryRects.push({x, y, w:s, h:s});
+        }
       }
+    }
+  }
+
+  if (isSelected && boundaryCells.length){
+    const packed = buildPackedRects(boundaryCells);
+    for (const r of packed){
+      const p = worldToScreenPx(cam, r.x, r.y, view);
+      boundaryRects.push({ x: p.x, y: p.y + breathY, w: r.w * s, h: r.h * s });
     }
   }
 
