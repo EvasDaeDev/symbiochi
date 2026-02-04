@@ -2,7 +2,7 @@
 import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { organLabel } from "./mods/labels.js";
 import { PARTS } from "./mods/parts.js";
-import { CARROT } from "./mods/carrots.js";
+import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 
@@ -955,26 +955,25 @@ export function renderGrid(state, canvas, gridEl, view){
   // Carrots (rect blocks, orange)
 if (Array.isArray(state.carrots)){
   const sPx = view.blockPx;
-  const cw = (CARROT.w|0) || 7;
-  const ch = (CARROT.h|0) || 3;
+  const cw = (CARROT.w|0) || 3;
+  const ch = (CARROT.h|0) || 7;
 
   for (const car of state.carrots){
-    for (let yy=0; yy<ch; yy++){
-      for (let xx=0; xx<cw; xx++){
-        const wx = (car.x|0) + xx;
-        const wy = (car.y|0) + yy;
-        const p = worldToScreenPx(state.cam, wx, wy, view);
+    const offsets = carrotCellOffsets(cw, ch);
+    const offsetSet = new Set(offsets.map(([dx, dy]) => `${dx},${dy}`));
+    for (const [dx, dy] of offsets){
+      const wx = (car.x|0) + dx;
+      const wy = (car.y|0) + dy;
+      const p = worldToScreenPx(state.cam, wx, wy, view);
 
-        // neighbor mask внутри прямоугольника морковки,
-        // чтобы сглаживание углов не "съедало" клетки
-        let m = 0;
-        if (yy > 0)      m |= 1; // N
-        if (xx < cw-1)   m |= 2; // E
-        if (yy < ch-1)   m |= 4; // S
-        if (xx > 0)      m |= 8; // W
+      let m = 0;
+      if (offsetSet.has(`${dx},${dy - 1}`)) m |= 1; // N
+      if (offsetSet.has(`${dx + 1},${dy}`)) m |= 2; // E
+      if (offsetSet.has(`${dx},${dy + 1}`)) m |= 4; // S
+      if (offsetSet.has(`${dx - 1},${dy}`)) m |= 8; // W
 
-        drawBlock(ctx, p.x, p.y, sPx, "#fb923c", false, m);
-      }
+      const color = dy === 0 ? "#22c55e" : "#fb923c";
+      drawBlock(ctx, p.x, p.y, sPx, color, false, m);
     }
   }
 }

@@ -1,7 +1,7 @@
 import { BAR_MAX, clamp, clamp01, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
-import { CARROT } from "./mods/carrots.js";
+import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
 import { applyMutation } from "./state_mutation.js";
@@ -243,12 +243,11 @@ function pruneExpiredCarrots(state, now){
 
 function carrotCells(car){
   const out = [];
-  const w = (car.w ?? CARROT.w ?? 7);
-  const h = (car.h ?? CARROT.h ?? 3);
-  for (let dy=0; dy<h; dy++){
-    for (let dx=0; dx<w; dx++){
-      out.push([car.x + dx, car.y + dy]);
-    }
+  const w = (car.w ?? CARROT.w ?? 3);
+  const h = (car.h ?? CARROT.h ?? 7);
+  const offsets = carrotCellOffsets(w, h);
+  for (const [dx, dy] of offsets){
+    out.push([car.x + dx, car.y + dy]);
   }
   return out;
 }
@@ -283,8 +282,8 @@ function processCarrotsTick(state, org = state){
   // Eat only if touches >= 2 cells. If target is appendage, count only modules.
   const remaining = [];
   for (const car of state.carrots){
-    const cx = car.x + Math.floor((car.w||7)/2);
-    const cy = car.y + Math.floor((car.h||3)/2);
+    const cx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
+    const cy = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, cx, cy);
     const moduleD = minDistToCells(moduleCells, cx, cy);
     const mode = (moduleD < bodyD) ? "appendage" : "body";
@@ -323,8 +322,8 @@ function processCarrotsTick(state, org = state){
   let bestBodyD = Infinity;
   let bestModuleD = Infinity;
   for (const car of state.carrots){
-    const tx = car.x + Math.floor((car.w||7)/2);
-    const ty = car.y + Math.floor((car.h||3)/2);
+    const tx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
+    const ty = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, tx, ty);
     const moduleD = minDistToCells(moduleCells, tx, ty);
     const d = Math.min(bodyD, moduleD);

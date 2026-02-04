@@ -295,7 +295,7 @@ export function attachActions(view, els, toast, rerenderAll){
   els.feed.addEventListener("click", ()=>{
     if (!view.state) return;
     // Feeding is now interactive: click "КОРМ" to enter carrot-throw mode,
-    // then click in the field to place an orange "carrot" (7x3 blocks).
+    // then click in the field to place an orange "carrot" (3x7 blocks).
     view.mode = (view.mode === "carrot") ? null : "carrot";
     els.feed.classList.toggle("isActive", view.mode === "carrot");
     toast(view.mode === "carrot" ? "Брось морковку в поле." : "Кормление: выкл.");
