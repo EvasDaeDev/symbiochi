@@ -30,7 +30,12 @@ export async function encodeGenome(genome){
   if (!genome || typeof genome !== "object") throw new Error("bad genome");
   const json = JSON.stringify(genome);
   const bytes = new TextEncoder().encode(json);
-  const deflated = await deflateBytes(bytes);
+  let deflated = { bytes, compressed: false };
+  try {
+    deflated = await deflateBytes(bytes);
+  } catch {
+    deflated = { bytes, compressed: false };
+  }
   const payload = base64UrlEncode(deflated.bytes);
   return (deflated.compressed ? PREFIX : PREFIX_NOCOMP) + payload;
 }
