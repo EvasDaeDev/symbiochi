@@ -138,14 +138,15 @@ function rerenderAll(deltaSec){
   renderRules(els.rulesBody);
   renderLegend(view.state, els.legendBody);
   renderLog(view.state, els);
-  renderHud(view.state, els, deltaSec, fmtAgeSeconds, view.zoom);
+  const root = view.state;
+  const a = root.active;
+  const selectedOrg = (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
+    ? root.buds[a]
+    : root;
+  renderHud(root, selectedOrg, els, deltaSec, fmtAgeSeconds, view.zoom);
   // organism info tab
   if (els.orgInfo){
-    const root = view.state;
-    const a = root.active;
-    const org = (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
-      ? root.buds[a]
-      : root;
+    const org = selectedOrg;
     const age = Math.max(0, (root.lastSeen||0) - (org.createdAt||root.createdAt||root.lastSeen||0));
     const blocks = (org.body?.cells?.length||0) + (org.modules||[]).reduce((s,m)=>s+(m.cells?.length||0),0);
     els.orgInfo.innerHTML = `

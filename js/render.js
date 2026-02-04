@@ -1138,26 +1138,28 @@ export function renderRules(rulesEl){
   `;
 }
 
-export function renderHud(state, els, deltaSec, fmtAgeSeconds, zoom){
-  const status = barStatus(state);
+export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
+  const target = org || state;
+  const status = barStatus(target);
 
-  els.hudName.textContent = state.name;
-  els.hudStage.textContent = `• ${getStageName(state)}`;
+  els.hudName.textContent = target.name;
+  els.hudStage.textContent = `• ${getStageName(target)}`;
   // seed moved to settings
 
   els.hudMeta.innerHTML = `
-    <span class="pill">еда: ${barPct(state.bars.food)}%</span>
-    <span class="pill">чист: ${barPct(state.bars.clean)}%</span>
-    <span class="pill">hp: ${barPct(state.bars.hp)}%</span>
-    <span class="pill">настр: ${barPct(state.bars.mood)}%</span>
+    <span class="pill">еда: ${barPct(target.bars.food)}%</span>
+    <span class="pill">чист: ${barPct(target.bars.clean)}%</span>
+    <span class="pill">hp: ${barPct(target.bars.hp)}%</span>
+    <span class="pill">настр: ${barPct(target.bars.mood)}%</span>
     <span class="pill ${status.cls}">сост: ${status.txt}</span>
-    <span class="pill">блоков: ${getTotalBlocks(state)}</span>
-    <span class="pill">детей: ${(state.buds?.length || 0)}</span>
+    <span class="pill">блоков: ${getTotalBlocks(target)}</span>
+    <span class="pill">детей: ${(target.buds?.length || 0)}</span>
   `;
 
   // second row: life time + carrots inventory (input is static in DOM)
   if (els.lifePill){
-    const age = Math.max(0, (state.lastSeen || 0) - (state.createdAt || state.lastSeen || 0));
+    const now = state.lastSeen || target.lastSeen || 0;
+    const age = Math.max(0, now - (target.createdAt || now));
     els.lifePill.textContent = `жизнь: ${fmtAgeSeconds(age)}`;
   }
   if (els.carrotHudInput && document.activeElement !== els.carrotHudInput){
