@@ -121,11 +121,25 @@ html, body {
   right: 10px;
   z-index: 5;
   pointer-events: none;
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
 }
 
 .lifePill{
   color: #f59e0b;
   border-color: rgba(245, 158, 11, 0.55);
+}
+
+.perfStats{
+  display: grid;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.perfItem{
+  line-height: 1.2;
 }
 
 .hdr{
