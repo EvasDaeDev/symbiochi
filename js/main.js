@@ -135,14 +135,14 @@ function rerenderAll(deltaSec){
 
   syncToSize();
 
-  renderRules(els.rulesBody);
-  renderLegend(view.state, els.legendBody);
-  renderLog(view.state, els);
   const root = view.state;
   const a = root.active;
   const selectedOrg = (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
     ? root.buds[a]
     : root;
+  renderRules(els.rulesBody);
+  renderLegend(selectedOrg, els.legendBody);
+  renderLog(view.state, els);
   renderHud(root, selectedOrg, els, deltaSec, fmtAgeSeconds, view.zoom);
   // organism info tab
   if (els.orgInfo){
