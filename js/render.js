@@ -2,9 +2,10 @@
 import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { organLabel } from "./mods/labels.js";
 import { PARTS } from "./mods/parts.js";
-import { CARROT } from "./mods/carrots.js";
+import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
+import { RULES } from "./rules-data.js";
 
 /**
  * Canvas pixel-block renderer (procedural, no sprites).
@@ -60,18 +61,17 @@ function hslCss(h,s,l){
   const hh = ((h%360)+360)%360;
   return `hsl(${hh.toFixed(1)},${clamp(s,0,100).toFixed(1)}%,${clamp(l,0,100).toFixed(1)}%)`;
 }
-function getPartBaseHex(part, palette){
-  if (part === "body") return palette?.body || "#1f2937";
-  if (part === "eye") return ORGAN_COLORS.eye || palette?.eye || "#f472b6";
-  return ORGAN_COLORS[part] || "#cbd5e1";
+function getPartBaseHex(org, part){
+  if (part === "body") return org?.partColor?.body || org?.palette?.body || "#1f2937";
+  if (part === "eye") return org?.partColor?.eye || org?.palette?.eye || ORGAN_COLORS.eye || "#f472b6";
+  return org?.partColor?.[part] || ORGAN_COLORS[part] || "#cbd5e1";
 }
-function getPartColor(state, part, hueShiftDeg){
-  const baseHex = getPartBaseHex(part, state.palette);
+function getPartColor(org, part, hueShiftDeg){
+  const baseHex = getPartBaseHex(org, part);
+  if (!Number.isFinite(hueShiftDeg) || hueShiftDeg === 0) return baseHex;
   const {r,g,b} = hexToRgb(baseHex);
   const hsl = rgbToHsl(r,g,b);
-  const userHue = state.partHue?.[part];
-  const h = Number.isFinite(userHue) ? userHue : hsl.h;
-  return hslCss(h + (hueShiftDeg||0), hsl.s, hsl.l);
+  return hslCss(hsl.h + hueShiftDeg, hsl.s, hsl.l);
 }
 
 // =====================
@@ -408,13 +408,13 @@ function animProgress(org, wx, wy){
 // =====================
 // Colors per organ instance + subtle variations
 // =====================
-function organBaseColor(type){
-  return ORGAN_COLORS[type] || "#cbd5e1";
+function organBaseColor(org, type){
+  return org?.partColor?.[type] || ORGAN_COLORS[type] || "#cbd5e1";
 }
 
-function organColor(type, orgId, organIndex, baseSeed){
+function organColor(org, type, orgId, organIndex, baseSeed){
   // tone variance up to ~10% by mixing towards slightly shifted warm/cool anchors
-  const base = organBaseColor(type);
+  const base = organBaseColor(org, type);
   const t = (hash01(`${baseSeed}|tone|${orgId}|${organIndex}|${type}`) - 0.5) * 0.10; // -0.05..+0.05
   // mix between slightly warm and cool
   const warm = mix(base, "#ffccaa", 0.18);
@@ -435,30 +435,14 @@ function organSegmentColor(hex, segIndex, segLen, baseSeed, orgId, organIndex){
 // Block drawing (procedural shading + corner smoothing)
 // =====================
 function drawBlock(ctx, x, y, s, colorHex, breathK, neighMask){
-  // basic shaded cube feel: highlight top/left, shadow bottom/right
   // neighMask bits: 1=N,2=E,4=S,8=W (present=1)
   const base = colorHex;
-  const hi = brighten(base, 0.10);
-  const lo = brighten(base, -0.10);
 
   // subtle breathe tint (very slight)
   const tint = breathK ? brighten(base, 0.04) : base;
 
   ctx.fillStyle = tint;
   ctx.fillRect(x, y, s, s);
-
-  // edges
-  ctx.fillStyle = hi;
-  // top edge if no neighbor north
-  if (!(neighMask & 1)) ctx.fillRect(x, y, s, 1);
-  // left edge if no neighbor west
-  if (!(neighMask & 8)) ctx.fillRect(x, y, 1, s);
-
-  ctx.fillStyle = lo;
-  // bottom edge if no neighbor south
-  if (!(neighMask & 4)) ctx.fillRect(x, y + s - 1, s, 1);
-  // right edge if no neighbor east
-  if (!(neighMask & 2)) ctx.fillRect(x + s - 1, y, 1, s);
 
   // Corner smoothing: if an outer corner is free (no neighbors on the two touching sides)
   // cut a *single pixel* (per project rules). For tiny blocks (<=2px), skip smoothing.
@@ -515,6 +499,55 @@ function isBoundary(occ, x, y){
 }
 
 // =====================
+// Rect packing for static cells (row runs merged vertically)
+// =====================
+function buildPackedRects(cells){
+  if (!cells || cells.length === 0) return [];
+  const rows = new Map();
+  for (const [x, y] of cells){
+    if (!rows.has(y)) rows.set(y, []);
+    rows.get(y).push(x);
+  }
+
+  const runByRow = [];
+  const ys = [...rows.keys()].sort((a, b) => a - b);
+  for (const y of ys){
+    const xs = rows.get(y).sort((a, b) => a - b);
+    let start = xs[0];
+    let prev = xs[0];
+    for (let i = 1; i < xs.length; i++){
+      const x = xs[i];
+      if (x === prev + 1){
+        prev = x;
+        continue;
+      }
+      runByRow.push({ y, x0: start, x1: prev });
+      start = x;
+      prev = x;
+    }
+    runByRow.push({ y, x0: start, x1: prev });
+  }
+
+  runByRow.sort((a, b) => (a.y - b.y) || (a.x0 - b.x0));
+  const active = new Map();
+  const rects = [];
+
+  for (const run of runByRow){
+    const key = `${run.x0},${run.x1}`;
+    const prev = active.get(key);
+    if (prev && prev.y + prev.h === run.y){
+      prev.h += 1;
+    } else {
+      const rect = { x: run.x0, y: run.y, w: run.x1 - run.x0 + 1, h: 1 };
+      rects.push(rect);
+      active.set(key, rect);
+    }
+  }
+
+  return rects;
+}
+
+// =====================
 // Core + Eyes scaling rules
 // =====================
 function computeCorePx(view, bodyBlocks){
@@ -542,17 +575,12 @@ function computeEyeSideBlocks(org, bodyBlocks){
 function drawSelectionGlow(ctx, rects, strength=1){
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
-  for (let i = GLOW_PX; i >= 1; i--){
-    const alpha = 0.08 + (i / GLOW_PX) * 0.14;
-    ctx.globalAlpha = alpha;
-    ctx.shadowColor = "rgba(90,255,140,0.70)";
-    ctx.shadowBlur = i * 2.2;
-    ctx.strokeStyle = "rgba(90,255,140,0.55)";
-    ctx.lineWidth = 1;
-
-    for (const r of rects){
-      ctx.strokeRect(r.x - i, r.y - i, r.w + i*2, r.h + i*2);
-    }
+  ctx.globalAlpha = 0.85 * strength;
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(90,255,140,0.9)";
+  ctx.lineWidth = 1;
+  for (const r of rects){
+    ctx.strokeRect(r.x - 0.5, r.y - 0.5, r.w + 1, r.h + 1);
   }
   ctx.restore();
 }
@@ -603,23 +631,40 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
   const breathK = (breathY !== 0); // slight tint toggle
 
   const boundaryRects = [];
+  const boundaryCells = [];
 
   // BODY blocks
-  const bodyColor = org?.palette?.body || "#60a5fa";
+  const bodyColor = getPartColor(org, "body", 0);
   const bodyCells = org?.body?.cells || [];
-for (const [wx,wy] of bodyCells){
-  const p = worldToScreenPx(cam, wx, wy, view);
-  const x = p.x;
-  const y = p.y + breathY;
+  const staticCells = [];
+  for (const [wx, wy] of bodyCells){
+    const nm = neighMaskAt(occ, wx, wy);
+    const kGrow = animProgress(org, wx, wy);
 
-  const nm = neighMaskAt(occ, wx, wy);
-  const kGrow = animProgress(org, wx, wy);
-  drawBlockAnim(ctx, x, y, s, bodyColor, breathK, nm, kGrow);
+    if (kGrow < 0.999){
+      const p = worldToScreenPx(cam, wx, wy, view);
+      const x = p.x;
+      const y = p.y + breathY;
+      drawBlockAnim(ctx, x, y, s, bodyColor, breathK, nm, kGrow);
+    } else {
+      staticCells.push([wx, wy]);
+    }
 
-  if (isSelected && isBoundary(occ, wx, wy)){
-    boundaryRects.push({x, y, w:s, h:s});
+    if (isSelected && isBoundary(occ, wx, wy)){
+      boundaryCells.push([wx, wy]);
+    }
   }
-}
+
+  if (staticCells.length){
+    const rects = buildPackedRects(staticCells);
+    ctx.fillStyle = breathK ? brighten(bodyColor, 0.04) : bodyColor;
+    for (const r of rects){
+      const p = worldToScreenPx(cam, r.x, r.y, view);
+      const x = p.x;
+      const y = p.y + breathY;
+      ctx.fillRect(x, y, r.w * s, r.h * s);
+    }
+  }
 
   // MODULES
   const modules = org?.modules || [];
@@ -629,7 +674,7 @@ for (const [wx,wy] of bodyCells){
     const cells = m.cells || [];
     if (cells.length === 0) continue;
 
-    let base = organColor(type, orgId, mi, baseSeed);
+    let base = organColor(org, type, orgId, mi, baseSeed);
 
     if (type === "spike"){
       const on = spikeBlinkOn();
@@ -653,7 +698,7 @@ for (const [wx,wy] of bodyCells){
         drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
 
         if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryRects.push({x, y, w:s, h:s});
+          boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -674,7 +719,7 @@ for (const [wx,wy] of bodyCells){
         drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
 
         if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryRects.push({x, y, w:s, h:s});
+          boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -809,8 +854,20 @@ else if (lvl === 3){
 }
 
       if (isSelected && isBoundary(occ, cells[i][0], cells[i][1])){
-        boundaryRects.push({x, y, w:s, h:s});
+        if (Number.isInteger(wx) && Number.isInteger(wy)){
+          boundaryCells.push([wx, wy]);
+        } else {
+          boundaryRects.push({x, y, w:s, h:s});
+        }
       }
+    }
+  }
+
+  if (isSelected && boundaryCells.length){
+    const packed = buildPackedRects(boundaryCells);
+    for (const r of packed){
+      const p = worldToScreenPx(cam, r.x, r.y, view);
+      boundaryRects.push({ x: p.x, y: p.y + breathY, w: r.w * s, h: r.h * s });
     }
   }
 
@@ -844,7 +901,7 @@ else if (lvl === 3){
   const face = org?.face?.anchor;
   if (face){
     const eyeSide = computeEyeSideBlocks(org, bodyBlocks);
-    const eyeColor = org?.palette?.eye || "#e2e8f0";
+    const eyeColor = getPartColor(org, "eye", 0) || "#e2e8f0";
 
     const sx = face[0] - Math.floor(eyeSide/2);
     const sy = face[1] - Math.floor(eyeSide/2);
@@ -881,14 +938,22 @@ function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
   // какие клетки подсвечиваем
   const set = new Set();
 
-  // 1) если указан индекс модуля — подсвечиваем только этот модуль
-  if (flash.mi !== null && Number.isFinite(flash.mi)){
+  // 1) если указаны несколько модулей — подсвечиваем их
+  if (Array.isArray(flash.grownModules) && flash.grownModules.length){
+    for (const mi of flash.grownModules){
+      const m = (org.modules || [])[mi];
+      if (m && Array.isArray(m.cells)){
+        for (const [x,y] of m.cells) set.add(`${x},${y}`);
+      }
+    }
+  } else if (flash.mi !== null && Number.isFinite(flash.mi)){
+    // 2) если указан индекс модуля — подсвечиваем только этот модуль
     const m = (org.modules || [])[flash.mi];
     if (m && Array.isArray(m.cells)){
       for (const [x,y] of m.cells) set.add(`${x},${y}`);
     }
   } else {
-    // 2) иначе по part: "body" — тело; иначе — все модули нужного типа
+    // 3) иначе по part: "body" — тело; иначе — все модули нужного типа
     if (flash.part === "body"){
       for (const [x,y] of (org.body?.cells || [])) set.add(`${x},${y}`);
     } else if (flash.part){
@@ -924,6 +989,46 @@ function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
   return rects;
 }
 
+function drawGridOverlay(ctx, view, cam){
+  const step = 10;
+  const Vx = (view.gridW - 1) / 2;
+  const Vy = (view.gridH - 1) / 2;
+  const left = Math.floor(cam.ox - Vx);
+  const right = Math.ceil(cam.ox + Vx);
+  const top = Math.floor(cam.oy - Vy);
+  const bottom = Math.ceil(cam.oy + Vy);
+
+  const rootStyle = getComputedStyle(document.documentElement);
+  const bgHex = rootStyle.getPropertyValue("--bg").trim() || "#070a0f";
+  const lineHex = scaleBrightness(bgHex, 1.15);
+
+  const startX = Math.floor(left / step) * step;
+  const startY = Math.floor(top / step) * step;
+
+  ctx.save();
+  ctx.strokeStyle = lineHex;
+  ctx.lineWidth = 1;
+
+  for (let wx = startX; wx <= right; wx += step){
+    const p = worldToScreenPx(cam, wx, 0, view);
+    const x = p.x + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, view.rectH);
+    ctx.stroke();
+  }
+
+  for (let wy = startY; wy <= bottom; wy += step){
+    const p = worldToScreenPx(cam, 0, wy, view);
+    const y = p.y + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(view.rectW, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // =====================
 // Main render entry
 // =====================
@@ -947,34 +1052,35 @@ export function renderGrid(state, canvas, gridEl, view){
     view.rectW/2, view.rectH/2, Math.min(view.rectW,view.rectH)*0.15,
     view.rectW/2, view.rectH/2, Math.max(view.rectW,view.rectH)*0.85
   );
-  g.addColorStop(0, "rgba(255,255,255,0.03)");
-  g.addColorStop(1, "rgba(0,0,0,0.24)");
+  g.addColorStop(0, "rgb(49, 62, 51)");
+  g.addColorStop(1, "rgb(5, 8, 5)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
+
+  drawGridOverlay(ctx, view, state.cam);
 
   // Carrots (rect blocks, orange)
 if (Array.isArray(state.carrots)){
   const sPx = view.blockPx;
-  const cw = (CARROT.w|0) || 7;
-  const ch = (CARROT.h|0) || 3;
+  const cw = (CARROT.w|0) || 3;
+  const ch = (CARROT.h|0) || 7;
 
   for (const car of state.carrots){
-    for (let yy=0; yy<ch; yy++){
-      for (let xx=0; xx<cw; xx++){
-        const wx = (car.x|0) + xx;
-        const wy = (car.y|0) + yy;
-        const p = worldToScreenPx(state.cam, wx, wy, view);
+    const offsets = carrotCellOffsets(cw, ch);
+    const offsetSet = new Set(offsets.map(([dx, dy]) => `${dx},${dy}`));
+    for (const [dx, dy] of offsets){
+      const wx = (car.x|0) + dx;
+      const wy = (car.y|0) + dy;
+      const p = worldToScreenPx(state.cam, wx, wy, view);
 
-        // neighbor mask внутри прямоугольника морковки,
-        // чтобы сглаживание углов не "съедало" клетки
-        let m = 0;
-        if (yy > 0)      m |= 1; // N
-        if (xx < cw-1)   m |= 2; // E
-        if (yy < ch-1)   m |= 4; // S
-        if (xx > 0)      m |= 8; // W
+      let m = 0;
+      if (offsetSet.has(`${dx},${dy - 1}`)) m |= 1; // N
+      if (offsetSet.has(`${dx + 1},${dy}`)) m |= 2; // E
+      if (offsetSet.has(`${dx},${dy + 1}`)) m |= 4; // S
+      if (offsetSet.has(`${dx - 1},${dy}`)) m |= 8; // W
 
-        drawBlock(ctx, p.x, p.y, sPx, "#fb923c", false, m);
-      }
+      const color = dy === 0 ? "#22c55e" : "#fb923c";
+      drawBlock(ctx, p.x, p.y, sPx, color, false, m);
     }
   }
 }
@@ -1058,14 +1164,11 @@ export function barStatus(org){
   return { txt:"хорошо", cls:"ok" };
 }
 
-export function renderLegend(state, legendEl){
+export function renderLegend(org, legendEl){
   const present = new Set(["body", "core"]);
-  const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
-  for (const org of orgs){
-    if (org?.face?.anchor) present.add("eye");
-    for (const m of (org?.modules || [])){
-      if (m?.type) present.add(m.type);
-    }
+  if (org?.face?.anchor) present.add("eye");
+  for (const m of (org?.modules || [])){
+    if (m?.type) present.add(m.type);
   }
 
   const items = [
@@ -1090,9 +1193,11 @@ export function renderLegend(state, legendEl){
   const filtered = items.filter((it) => present.has(it.part));
 
   legendEl.innerHTML = filtered.map(it => {
-    const sw = (it.part === "core") ? "#34d399" : getPartColor(state, it.part, 0);
+    const sw = (it.part === "core") ? "#34d399" : getPartColor(org, it.part, 0);
     const cls = (it.part === "core") ? "legendSwatch" : "legendSwatch swatch";
-    const data = (it.part === "core") ? "" : `data-part="${escapeHtml(it.part)}"`;
+    const data = (it.part === "core")
+      ? ""
+      : `data-part="${escapeHtml(it.part)}" data-color="${escapeHtml(sw)}"`;
     return `
     <div class="legendItem">
       <div class="${cls}" ${data} style="background:${escapeHtml(sw)}"></div>
@@ -1106,59 +1211,52 @@ export function renderLegend(state, legendEl){
 }
 
 export function renderRules(rulesEl){
+  const tokens = {
+    shell: escapeHtml(organLabel("shell")),
+    antenna: escapeHtml(organLabel("antenna")),
+    spike: escapeHtml(organLabel("spike"))
+  };
+
+  const applyTokens = (text)=> text.replace(/\{\{(\w+)\}\}/g, (_, key) => tokens[key] ?? "");
+
+  const sectionsHtml = RULES.map((section, index)=>{
+    const title = `<div class="rule"><b>${escapeHtml(section.title)}</b></div>`;
+    const items = (section.items || []).map((item)=>{
+      const style = item.muted ? ' style="color:var(--muted);"' : "";
+      return `<div class="rule"${style}>${applyTokens(item.text)}</div>`;
+    }).join("");
+    const spacer = index === 0 ? "" : '<div style="height:8px"></div>';
+    return `${spacer}${title}${items}`;
+  }).join("");
+
   rulesEl.innerHTML = `
-    <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Правила и управление (актуально)</div>
-
-    <div class="rule"><b>Управление</b></div>
-    <div class="rule">• <b>Клик по существу</b> — выбрать (родитель/почка). <b>Клик по пустоте</b> — снять выбор.</div>
-    <div class="rule">• <b>Drag</b> мышью — панорама камеры. <b>Колесо</b> — зум (−3…+3).</div>
-    <div class="rule">• <b>Журнал</b>: клик по записи — короткая белая подсветка связанного органа.</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Кормление морковками</b></div>
-    <div class="rule">• Нажми <b>КОРМ</b> → включится режим «брось морковку». Затем <b>кликни в поле</b>, чтобы поставить морковку.</div>
-    <div class="rule">• Морковки берутся из запаса (число справа в HUD). Можно менять запас в настройках/поле HUD.</div>
-    <div class="rule" style="color:var(--muted);">• Если морковка <b>близко</b> к телу — чаще растёт <b>тело</b>. Если <b>далеко</b> — чаще тянется <b>отросток</b> (мобильность).</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Уход и эволюция</b></div>
-    <div class="rule">• <b>МЫТЬ</b> — повышает чистоту, чаще помогает появлению <b>${escapeHtml(organLabel("shell"))}</b> и «аккуратного» роста.</div>
-    <div class="rule">• <b>ЛЕЧ</b> — повышает HP/настроение, чаще помогает сенсорам: <b>${escapeHtml(organLabel("antenna"))}</b> и глазам.</div>
-    <div class="rule" style="color:var(--muted);">• <b>Стресс/запущенность</b> — чаще даёт защиту: <b>${escapeHtml(organLabel("spike"))}</b> и панцирь.</div>
-    <div class="rule" style="color:var(--muted);">• <b>Ядро и глаза</b> растут вместе с организмом и стараются не занимать больше ~10% объёма (кроме ранней стадии).</div>
-    <div class="rule" style="color:var(--muted);">• Все параметры живут в диапазоне <b>0…140%</b> — “перекорм” возможен, но даёт стресс.</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Мутации и оффлайн</b></div>
-    <div class="rule">• Мутации происходят раз в <b>интервал мутации</b> минут (настраивается в «Настройках»).</div>
-    <div class="rule" style="color:var(--muted);">• За один тик — не более <b>2</b> мутаций. После долгого отсутствия «долг» догоняется постепенно.</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Почкование (дети)</b></div>
-    <div class="rule" style="color:var(--muted);">• У крупных организмов длинный хвост/лапа/антенна может отделиться и стать <b>почкой</b> рядом. Почки живут и мутируют отдельно.</div>
+    <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Правила и управление (обновлено)</div>
+    ${sectionsHtml}
   `;
 }
 
-export function renderHud(state, els, deltaSec, fmtAgeSeconds, zoom){
-  const status = barStatus(state);
+export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
+  const target = org || state;
+  const status = barStatus(target);
 
-  els.hudName.textContent = state.name;
-  els.hudStage.textContent = `• ${getStageName(state)}`;
+  els.hudName.textContent = target.name;
+  els.hudStage.textContent = `• ${getStageName(target)}`;
   // seed moved to settings
 
   els.hudMeta.innerHTML = `
-    <span class="pill">еда: ${barPct(state.bars.food)}%</span>
-    <span class="pill">чист: ${barPct(state.bars.clean)}%</span>
-    <span class="pill">hp: ${barPct(state.bars.hp)}%</span>
-    <span class="pill">настр: ${barPct(state.bars.mood)}%</span>
+    <span class="pill">еда: ${barPct(target.bars.food)}%</span>
+    <span class="pill">чист: ${barPct(target.bars.clean)}%</span>
+    <span class="pill">hp: ${barPct(target.bars.hp)}%</span>
+    <span class="pill">настр: ${barPct(target.bars.mood)}%</span>
     <span class="pill ${status.cls}">сост: ${status.txt}</span>
-    <span class="pill">блоков: ${getTotalBlocks(state)}</span>
-    <span class="pill">детей: ${(state.buds?.length || 0)}</span>
+    <span class="pill">блоков: ${getTotalBlocks(target)}</span>
+    <span class="pill">детей: ${(target.buds?.length || 0)}</span>
   `;
 
   // second row: life time + carrots inventory (input is static in DOM)
   if (els.lifePill){
-    const age = Math.max(0, (state.lastSeen || 0) - (state.createdAt || state.lastSeen || 0));
+    const now = state.lastSeen || target.lastSeen || 0;
+    const age = Math.max(0, now - (target.createdAt || now));
     els.lifePill.textContent = `жизнь: ${fmtAgeSeconds(age)}`;
   }
   if (els.carrotHudInput && document.activeElement !== els.carrotHudInput){

@@ -1,7 +1,7 @@
-import { BAR_MAX, clamp, clamp01, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
+import { BAR_MAX, clamp, clamp01, key, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
-import { CARROT } from "./mods/carrots.js";
+import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
 import { applyMutation } from "./state_mutation.js";
@@ -78,6 +78,7 @@ export function migrateOrNew(){
     if (org.active === undefined) org.active = null;
     if (!Number.isFinite(org.hueShiftDeg)) org.hueShiftDeg = 0;
     if (!org.partHue) org.partHue = {};
+    if (!org.partColor) org.partColor = {};
     if (org.growthTarget === undefined) org.growthTarget = null;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
@@ -101,6 +102,7 @@ export function migrateOrNew(){
   if (!state.settings) state.settings = {};
   if (!Number.isFinite(state.settings.lengthPriority)) state.settings.lengthPriority = 0.65;
   if (!state.partHue) state.partHue = {};
+  if (!state.partColor) state.partColor = {};
 
   // evo interval: prefer settings (more stable on mobile), normalize & clamp
   {
@@ -122,6 +124,7 @@ export function migrateOrNew(){
     if (!Number.isFinite(b.lastMutationAt)) b.lastMutationAt = state.lastMutationAt;
     if (!Number.isFinite(b.lastSeen)) b.lastSeen = state.lastSeen;
     if (!b.partHue) b.partHue = state.partHue;
+    if (!b.partColor) b.partColor = {};
   }
 
   saveGame(state);
@@ -178,6 +181,7 @@ export function simulate(state, deltaSec){
     state.lastMutationAt += intervalSec;
     eaten += processCarrotsTick(state, state);
     applyMutation(state, state.lastMutationAt);
+    eatBudAppendage(state);
     mutations++;
   }
 
@@ -198,6 +202,7 @@ export function simulate(state, deltaSec){
         bud.lastMutationAt = (bud.lastMutationAt || state.lastMutationAt) + intervalSec;
         eaten += processCarrotsTick(state, bud);
         applyMutation(bud, bud.lastMutationAt);
+        eatParentAppendage(state, bud);
         budMutations++;
       }
 
@@ -213,6 +218,94 @@ export function simulate(state, deltaSec){
 
   state.lastSeen = upTo;
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
+}
+
+function eatParentAppendage(state, bud){
+  if (!bud || !Array.isArray(state.modules) || state.modules.length === 0) return false;
+
+  const budCells = new Set();
+  if (Array.isArray(bud.body?.cells)){
+    for (const [x, y] of bud.body.cells) budCells.add(key(x, y));
+  }
+  if (Array.isArray(bud.modules)){
+    for (const mod of bud.modules){
+      for (const [x, y] of (mod?.cells || [])) budCells.add(key(x, y));
+    }
+  }
+  if (budCells.size === 0) return false;
+
+  const minOverlap = 2;
+  const minLen = 1;
+
+  for (const mod of state.modules){
+    const cells = mod?.cells || [];
+    if (cells.length === 0) continue;
+    let overlap = 0;
+    for (const [x, y] of cells){
+      if (budCells.has(key(x, y))){
+        overlap++;
+        if (overlap >= minOverlap) break;
+      }
+    }
+    if (overlap >= minOverlap){
+      if (cells.length > minLen){
+        mod.cells = cells.slice(0, minLen);
+      }
+      bud.bars.food = clamp(bud.bars.food + 0.10, 0, BAR_MAX);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function eatBudAppendage(state){
+  if (!Array.isArray(state.buds) || state.buds.length === 0) return false;
+
+  const bodyCells = new Set();
+  if (Array.isArray(state.body?.cells)){
+    for (const [x, y] of state.body.cells) bodyCells.add(key(x, y));
+  }
+  if (bodyCells.size === 0) return false;
+
+  const neighborDirs = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0], [1, 0],
+    [-1, 1], [0, 1], [1, 1]
+  ];
+  const minLen = 1;
+
+  const touchesBody = (x, y)=>{
+    if (bodyCells.has(key(x, y))) return true;
+    for (const [dx, dy] of neighborDirs){
+      if (bodyCells.has(key(x + dx, y + dy))) return true;
+    }
+    return false;
+  };
+
+  for (const bud of state.buds){
+    if (!bud) continue;
+    for (const mod of (bud.modules || [])){
+      const cells = mod?.cells || [];
+      if (cells.length === 0) continue;
+      let contact = false;
+      for (const [x, y] of cells){
+        if (touchesBody(x, y)){
+          contact = true;
+          break;
+        }
+      }
+      if (contact){
+        if (cells.length > minLen){
+          mod.cells = cells.slice(0, minLen);
+        }
+        state.bars.food = clamp(state.bars.food + 0.10, 0, BAR_MAX);
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 // ===== Carrots (interactive feeding / shaping) =====
@@ -243,12 +336,11 @@ function pruneExpiredCarrots(state, now){
 
 function carrotCells(car){
   const out = [];
-  const w = (car.w ?? CARROT.w ?? 7);
-  const h = (car.h ?? CARROT.h ?? 3);
-  for (let dy=0; dy<h; dy++){
-    for (let dx=0; dx<w; dx++){
-      out.push([car.x + dx, car.y + dy]);
-    }
+  const w = (car.w ?? CARROT.w ?? 3);
+  const h = (car.h ?? CARROT.h ?? 7);
+  const offsets = carrotCellOffsets(w, h);
+  for (const [dx, dy] of offsets){
+    out.push([car.x + dx, car.y + dy]);
   }
   return out;
 }
@@ -283,8 +375,8 @@ function processCarrotsTick(state, org = state){
   // Eat only if touches >= 2 cells. If target is appendage, count only modules.
   const remaining = [];
   for (const car of state.carrots){
-    const cx = car.x + Math.floor((car.w||7)/2);
-    const cy = car.y + Math.floor((car.h||3)/2);
+    const cx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
+    const cy = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, cx, cy);
     const moduleD = minDistToCells(moduleCells, cx, cy);
     const mode = (moduleD < bodyD) ? "appendage" : "body";
@@ -323,8 +415,8 @@ function processCarrotsTick(state, org = state){
   let bestBodyD = Infinity;
   let bestModuleD = Infinity;
   for (const car of state.carrots){
-    const tx = car.x + Math.floor((car.w||7)/2);
-    const ty = car.y + Math.floor((car.h||3)/2);
+    const tx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
+    const ty = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, tx, ty);
     const moduleD = minDistToCells(moduleCells, tx, ty);
     const d = Math.min(bodyD, moduleD);
