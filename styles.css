@@ -115,6 +115,19 @@ html, body {
   min-height: 240px;
 }
 
+.lifeOverlay{
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.lifePill{
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.55);
+}
+
 .hdr{
   padding: 10px 10px 8px 10px;
   background: rgba(16, 24, 38, 0.72);

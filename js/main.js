@@ -22,7 +22,8 @@ import {
   attachPinchZoom,
   attachLegendHuePicker,
   attachCarrotHudInput,
-  attachLogFlash
+  attachLogFlash,
+  attachDisableDoubleTapZoom
 } from "./ui.js";
 
 const els = {
@@ -254,13 +255,13 @@ function attachPickOrganism(){
         return;
       }
 
-      // max 2 carrots per feeding tick (same as mutation tick)
+      // max carrots per feeding tick (same as mutation tick)
       const intervalSec = Math.max(60, Math.floor(Number(s.evoIntervalMin || 12) * 60));
       const tickId = Math.floor(nowSec() / intervalSec);
       s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
       if (s.carrotTick.id !== tickId){ s.carrotTick.id = tickId; s.carrotTick.used = 0; }
       if (s.carrotTick.used >= CARROT.maxPerTick){
-        toast("Лимит: 2 морковки за тик.");
+        toast(`Лимит: ${CARROT.maxPerTick} морковки за тик.`);
         return;
       }
 
@@ -329,6 +330,7 @@ function startGame(){
   attachActions(view, els, toast, rerenderAll);
   attachDragPan(view, els); // drag uses els.grid size + view.gridW/H
   attachPinchZoom(view, els, rerenderAll);
+  attachDisableDoubleTapZoom(els);
   attachInfoTabs(els);
   attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);

@@ -281,6 +281,8 @@ export function applyMutation(state, momentSec){
   );
 
   const M = computeMorphology(state);
+  const power = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
+  const k = 0.35 + 0.65 * power;
 
   // Late game thresholds
   const isGiant = M.totalBlocks >= 350;
@@ -380,11 +382,21 @@ export function applyMutation(state, momentSec){
       if (k === "grow_body") return [k, w + 0.55];
       return [k,w];
     });
+    weights = weights.map(([kind, w]) => {
+      if (kind === "grow_body") return [kind, w * k];
+      return [kind, w];
+    });
   } else if (state.growthTargetMode === "appendage"){
     weights = weights.map(([k,w]) => {
       if (k === "tentacle" || k === "limb" || k === "tail" || k === "antenna") return [k, w + 0.45];
       if (k === "grow_body") return [k, Math.max(0.01, w * 0.65)];
       return [k,w];
+    });
+    weights = weights.map(([kind, w]) => {
+      if (kind === "tentacle" || kind === "limb" || kind === "tail" || kind === "antenna"){
+        return [kind, w * k];
+      }
+      return [kind, w];
     });
   }
 
@@ -486,7 +498,8 @@ export function applyMutation(state, momentSec){
 
   // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
   const beforeN = (state.modules ? state.modules.length : 0);
-  const added = addModule(state, kind, rng);
+  const target = Array.isArray(state.growthTarget) ? state.growthTarget : null;
+  const added = addModule(state, kind, rng, target);
   const afterN = (state.modules ? state.modules.length : 0);
   const newMi = (added && afterN > beforeN) ? beforeN : null;
 
@@ -497,7 +510,7 @@ export function applyMutation(state, momentSec){
 
   // Если орган не поместился -> вместо него растим тело (+1..2)
   const addN = 1 + Math.floor(rng() * 2); // +1..2
-  const grown = growBodyConnected(state, addN, rng);
+  const grown = growBodyConnected(state, addN, rng, target);
 
   if (grown){
     pushLog(

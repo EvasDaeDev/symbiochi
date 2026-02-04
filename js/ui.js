@@ -399,3 +399,20 @@ export function attachPinchZoom(view, els, rerender){
   grid.addEventListener("pointerup", onUp);
   grid.addEventListener("pointercancel", onUp);
 }
+
+export function attachDisableDoubleTapZoom(els){
+  const grid = els.grid;
+  if (!grid) return;
+  if (!window.matchMedia("(pointer: coarse)").matches) return;
+  if (grid.__disableDoubleTap) return;
+  grid.__disableDoubleTap = true;
+
+  let lastTap = 0;
+  grid.addEventListener("touchend", (e)=>{
+    const now = Date.now();
+    if (now - lastTap < 300){
+      e.preventDefault();
+    }
+    lastTap = now;
+  }, { passive: false });
+}
