@@ -255,12 +255,14 @@ for (const d of dirs){
     targetLen = 2 + Math.floor(rng()*5);
     const dir = rng()<0.7 ? [0,-1] : baseDir;
     dirForGrowth = dir;
+    targetLen = Math.min(targetLen, 27);
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "spike"){
     movable = false;
     targetLen = 1 + Math.floor(rng()*4);
     dirForGrowth = baseDir;
+    targetLen = Math.min(targetLen, 10);
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "shell"){
@@ -465,6 +467,8 @@ export function growPlannedModules(state, rng, options = {}){
     const m = entry.m;
     const minLen = m.growTo ?? 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
+    if (m.type === "spike" && m.cells.length >= 10) continue;
+    if (m.type === "antenna" && m.cells.length >= 27) continue;
     if (requireSight && !seesCarrot(m)) continue;
 
     const last = m.cells[m.cells.length - 1];
