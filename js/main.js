@@ -23,7 +23,8 @@ import {
   attachLegendHuePicker,
   attachCarrotHudInput,
   attachLogFlash,
-  attachDisableDoubleTapZoom
+  attachDisableDoubleTapZoom,
+  attachSymbiosisUI
 } from "./ui.js";
 
 const els = {
@@ -73,6 +74,16 @@ const els = {
   lenPrio: document.getElementById("lenPrio"),
   carrotsInput: document.getElementById("carrotsInput"),
   newCreature: document.getElementById("newCreature"),
+  symbiosisBtn: document.getElementById("symbiosisBtn"),
+  symbiosisOverlay: document.getElementById("symbiosisOverlay"),
+  symShowHint: document.getElementById("symShowHint"),
+  symShareBtn: document.getElementById("symShareBtn"),
+  symReceiveInput: document.getElementById("symReceiveInput"),
+  symApplyBtn: document.getElementById("symApplyBtn"),
+  symCloseBtn: document.getElementById("symCloseBtn"),
+  symConfirm: document.getElementById("symConfirm"),
+  symConfirmYes: document.getElementById("symConfirmYes"),
+  symConfirmNo: document.getElementById("symConfirmNo"),
 };
 
 const toast = makeToast();
@@ -336,6 +347,7 @@ function startGame(){
   attachLegendHuePicker(view, els, rerenderAll);
   attachCarrotHudInput(view, els, rerenderAll);
   attachZoomWheel(view, els, rerenderAll);
+  attachSymbiosisUI(view, els, toast);
   attachPickOrganism();
 
   setupResizeObserver();

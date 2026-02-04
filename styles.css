@@ -479,6 +479,15 @@ html, body {
   background: rgba(0,0,0,.45);
   z-index: 40;
 }
+#symbiosisOverlay{
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  padding: 14px;
+  background: rgba(0,0,0,.45);
+  z-index: 45;
+}
 .modal{
   width: 100%;
   border: 1px solid var(--border);
@@ -486,6 +495,9 @@ html, body {
   background: rgba(16,24,38,.92);
   padding: 12px;
   box-sizing: border-box;
+}
+.symModal{
+  max-width: 360px;
 }
 .modal h2{
   margin: 0 0 8px 0;
@@ -518,6 +530,84 @@ html, body {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-top: 10px;
+}
+.symTabs{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.symTabs .tabBtn{
+  background: #0b1320;
+  border: 1px solid #24344a;
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 10px;
+}
+.symTabs .tabBtn.isActive{
+  border-color: var(--accent);
+  color: var(--text);
+}
+.symBody{
+  display: block;
+  gap: 8px;
+}
+.symBody .symRow{
+  margin-bottom: 10px;
+}
+.symHint{
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.symTextArea{
+  width: 100%;
+  min-height: 68px;
+  border-radius: 10px;
+  border: 1px solid #24344a;
+  background: #0b1320;
+  color: var(--text);
+  padding: 8px;
+  font-size: 10px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.symRow{
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 8px;
+}
+.symConfirm{
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.6);
+  border-radius: 12px;
+}
+.symConfirmCard{
+  width: 100%;
+  max-width: 280px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(16,24,38,.98);
+  padding: 12px;
+  text-align: center;
+}
+.symConfirmTitle{
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--accent);
+}
+.symConfirmText{
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.symConfirmBtns{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 .hint{
   font-size:10px;
@@ -575,3 +665,6 @@ html, body { overscroll-behavior: none; }
 
 .logEntry.bud .msg { color: #38bdf8; font-weight: 700; }
 .logEntry.bud .when { color: #38bdf8; }
+.modalBtns #symbiosisBtn{
+  color: var(--muted);
+}

@@ -4,6 +4,7 @@ import { BUD } from "./mods/budding.js";
 import { EVO } from "./mods/evo.js";
 import { pushLog } from "./log.js";
 import { growBodyConnected, addModule, makeSmallConnectedBody, growPlannedModules } from "./creature.js";
+import { extractGenome, decodeGenome, mergeGenomes, instantiateParentFromGenome } from "./mods/merge.js";
 
 /**
  * Экологическая эволюция + почкование.
@@ -14,6 +15,25 @@ import { growBodyConnected, addModule, makeSmallConnectedBody, growPlannedModule
  * - Почкование: отращенный длинный подвижный модуль может отделиться
  *   и стать новым организмом (state.buds[]).
  */
+
+export async function applySymbiosisMerge(state, foreignGenomeOrString){
+  try {
+    const genomeRemote = await decodeGenome(foreignGenomeOrString);
+    const genomeLocal = extractGenome(state);
+    if (!genomeLocal || !genomeRemote) throw new Error("no genome");
+    const merged = mergeGenomes(genomeLocal, genomeRemote);
+    const localSeed = genomeLocal.seed | 0;
+    const remoteSeed = genomeRemote.seed | 0;
+    const pickFirst = localSeed <= remoteSeed;
+    const chosen = pickFirst ? merged.out1 : merged.out2;
+    instantiateParentFromGenome(state, chosen);
+    pushLog(state, "Контакт принят. Границы перестраиваются.", "symbiosis");
+    return { ok: true };
+  } catch (err){
+    pushLog(state, "Отпечаток не распознан.", "symbiosis");
+    return { ok: false, error: err };
+  }
+}
 
 function weightedPick(rng, pairs){
   let sum = 0;
