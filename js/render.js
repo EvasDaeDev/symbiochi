@@ -5,6 +5,7 @@ import { PARTS } from "./mods/parts.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
+import { RULES } from "./rules-data.js";
 
 /**
  * Canvas pixel-block renderer (procedural, no sprites).
@@ -1105,36 +1106,27 @@ export function renderLegend(state, legendEl){
 }
 
 export function renderRules(rulesEl){
+  const tokens = {
+    shell: escapeHtml(organLabel("shell")),
+    antenna: escapeHtml(organLabel("antenna")),
+    spike: escapeHtml(organLabel("spike"))
+  };
+
+  const applyTokens = (text)=> text.replace(/\{\{(\w+)\}\}/g, (_, key) => tokens[key] ?? "");
+
+  const sectionsHtml = RULES.map((section, index)=>{
+    const title = `<div class=\"rule\"><b>${escapeHtml(section.title)}</b></div>`;
+    const items = (section.items || []).map((item)=>{
+      const style = item.muted ? " style=\"color:var(--muted);\"" : "";
+      return `<div class=\"rule\"${style}>${applyTokens(item.text)}</div>`;
+    }).join(\"\");
+    const spacer = index === 0 ? \"\" : '<div style=\"height:8px\"></div>';
+    return `${spacer}${title}${items}`;
+  }).join(\"\");
+
   rulesEl.innerHTML = `
-    <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Правила и управление (актуально)</div>
-
-    <div class="rule"><b>Управление</b></div>
-    <div class="rule">• <b>Клик по существу</b> — выбрать (родитель/почка). <b>Клик по пустоте</b> — снять выбор.</div>
-    <div class="rule">• <b>Drag</b> мышью — панорама камеры. <b>Колесо</b> — зум (−3…+3).</div>
-    <div class="rule">• <b>Журнал</b>: клик по записи — короткая белая подсветка связанного органа.</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Кормление морковками</b></div>
-    <div class="rule">• Нажми <b>КОРМ</b> → включится режим «брось морковку». Затем <b>кликни в поле</b>, чтобы поставить морковку.</div>
-    <div class="rule">• Морковки берутся из запаса (число справа в HUD). Можно менять запас в настройках/поле HUD.</div>
-    <div class="rule" style="color:var(--muted);">• Если морковка <b>близко</b> к телу — чаще растёт <b>тело</b>. Если <b>далеко</b> — чаще тянется <b>отросток</b> (мобильность).</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Уход и эволюция</b></div>
-    <div class="rule">• <b>МЫТЬ</b> — повышает чистоту, чаще помогает появлению <b>${escapeHtml(organLabel("shell"))}</b> и «аккуратного» роста.</div>
-    <div class="rule">• <b>ЛЕЧ</b> — повышает HP/настроение, чаще помогает сенсорам: <b>${escapeHtml(organLabel("antenna"))}</b> и глазам.</div>
-    <div class="rule" style="color:var(--muted);">• <b>Стресс/запущенность</b> — чаще даёт защиту: <b>${escapeHtml(organLabel("spike"))}</b> и панцирь.</div>
-    <div class="rule" style="color:var(--muted);">• <b>Ядро и глаза</b> растут вместе с организмом и стараются не занимать больше ~10% объёма (кроме ранней стадии).</div>
-    <div class="rule" style="color:var(--muted);">• Все параметры живут в диапазоне <b>0…140%</b> — “перекорм” возможен, но даёт стресс.</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Мутации и оффлайн</b></div>
-    <div class="rule">• Мутации происходят раз в <b>интервал мутации</b> минут (настраивается в «Настройках»).</div>
-    <div class="rule" style="color:var(--muted);">• За один тик — не более <b>2</b> мутаций. После долгого отсутствия «долг» догоняется постепенно.</div>
-
-    <div style="height:8px"></div>
-    <div class="rule"><b>Почкование (дети)</b></div>
-    <div class="rule" style="color:var(--muted);">• У крупных организмов длинный хвост/лапа/антенна может отделиться и стать <b>почкой</b> рядом. Почки живут и мутируют отдельно.</div>
+    <div style=\"font-weight:900; color:var(--text); margin-bottom:6px;\">Правила и управление (обновлено)</div>
+    ${sectionsHtml}
   `;
 }
 
