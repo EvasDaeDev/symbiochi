@@ -336,6 +336,17 @@ export function applyMutation(state, momentSec){
     weights = weights.map(([k,w]) => (k===key ? [k, w * m] : [k,w]));
   }
 
+  // === Ранние стадии роста ===
+  // До 70 блоков: тело получает +50% к текущему приоритету.
+  if (M.totalBlocks <= 70){
+    mul("grow_body", 1.5);
+  }
+  // С 50 блоков добавляем приоритет одному случайному отростку до 83 блоков.
+  if (M.totalBlocks >= 50 && M.totalBlocks <= 83){
+    const favoredAppendage = pick(rng, ["tail", "tentacle", "limb", "antenna"]);
+    mul(favoredAppendage, 1.5);
+  }
+
   // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
   if (eco === "crawler"){
     bump("limb", 0.30);
