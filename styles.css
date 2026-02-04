@@ -426,24 +426,49 @@ html, body {
 
 .toast {
   position: absolute;
-  left: 10px;
-  right: 10px;
+  left: 50%;
+  right: auto;
   top: 10px;
-  background: rgba(16, 24, 38, 0.92);
+  background: rgba(16, 24, 38, 0.6);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 11px;
   color: var(--text);
   text-align: center;
+  width: fit-content;
+  max-width: min(240px, 90vw);
   opacity: 0;
-  transform: translateY(8px);
+  transform: translate(-50%, 8px);
   transition: opacity .18s ease, transform .18s ease;
   pointer-events: none;
   z-index: 50;
 }
-.toast.show { opacity: 1; transform: translateY(0); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast b { color: var(--accent); }
+
+#offlineSummary .offlineCard{
+  background: #111;
+  border-radius: 14px;
+  padding: 16px;
+  width: 150px;
+  max-width: 150px;
+  text-align: center;
+}
+
+#offlineSummary .offlineTitle{
+  font-weight: 900;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+#offlineSummary .offlineText{
+  text-align: center;
+}
+
+#offlineSummary .offlineOk{
+  margin-top: 12px;
+}
 
 #settingsOverlay{
   position: absolute;
