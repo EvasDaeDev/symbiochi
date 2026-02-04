@@ -571,6 +571,9 @@ html, body {
   display: block;
   gap: 8px;
 }
+.symBody .symRow{
+  margin-bottom: 10px;
+}
 .symHint{
   font-size: 11px;
   color: var(--muted);
@@ -578,7 +581,7 @@ html, body {
 }
 .symTextArea{
   width: 100%;
-  min-height: 96px;
+  min-height: 68px;
   border-radius: 10px;
   border: 1px solid #24344a;
   background: #0b1320;
@@ -588,24 +591,42 @@ html, body {
   box-sizing: border-box;
   resize: vertical;
 }
-#qrCanvas{
-  display: block;
-  margin: 6px auto 8px;
-  background: #fff;
-  border-radius: 8px;
-}
-.symVideo{
-  width: 100%;
-  height: 160px;
-  border-radius: 10px;
-  background: #05080f;
-  margin-bottom: 6px;
-  object-fit: cover;
-}
 .symRow{
   display: flex;
   justify-content: flex-start;
   margin-bottom: 8px;
+}
+.symConfirm{
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0,0,0,0.6);
+  border-radius: 12px;
+}
+.symConfirmCard{
+  width: 100%;
+  max-width: 280px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(16,24,38,.98);
+  padding: 12px;
+  text-align: center;
+}
+.symConfirmTitle{
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--accent);
+}
+.symConfirmText{
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.symConfirmBtns{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 .hint{
   font-size:10px;

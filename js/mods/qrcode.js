@@ -375,6 +375,7 @@ class QRCode {
         if (buffer.length <= totalDataCount * 8) break;
         this.typeNumber++;
       }
+      if (this.typeNumber >= 21) throw new Error("QR data too large");
     }
     this.makeImpl(false, this.getBestMaskPattern());
   }

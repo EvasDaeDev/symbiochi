@@ -86,7 +86,7 @@
             </div>
             <div class="modalBtns">
               <button class="smallbtn" id="newCreature">НОВОЕ СУЩ.</button>
-              <button class="smallbtn" id="symbiosisBtn" disabled aria-disabled="true" title="Симбиоз временно недоступен">СИМБИОЗ</button>
+              <button class="smallbtn" id="symbiosisBtn">СИМБИОЗ</button>
               <button class="smallbtn" id="saveSettings">СОХР</button>
               <button class="smallbtn" id="closeSettings">ЗАКР</button>
             </div>
@@ -95,24 +95,24 @@
         <div id="symbiosisOverlay">
           <div class="modal symModal">
             <h2>Симбиоз</h2>
-            <div class="symTabs">
-              <button class="tabBtn isActive" id="symShowTab">ПОКАЗАТЬ ОТПЕЧАТОК</button>
-              <button class="tabBtn" id="symReceiveTab">ПРИНЯТЬ ОТПЕЧАТОК</button>
-            </div>
-            <div class="symBody" id="symShowBody">
+            <div class="symBody" id="symBody">
               <div class="symHint" id="symShowHint">Форма сжалась в отпечаток.</div>
-              <canvas id="qrCanvas" width="240" height="240"></canvas>
-              <textarea id="symTextArea" class="symTextArea" readonly></textarea>
-            </div>
-            <div class="symBody" id="symReceiveBody" style="display:none;">
-              <div class="symHint">Пусть отпечаток коснётся тебя — камерой или через текст.</div>
-              <video id="symVideo" class="symVideo" playsinline muted></video>
               <div class="symRow">
-                <button class="smallbtn" id="symScanBtn">СКАНИРОВАТЬ</button>
+                <button class="smallbtn" id="symShareBtn">ПОДЕЛИТЬСЯ СВОИМ ГЕНОМОМ</button>
               </div>
-              <textarea id="symReceiveInput" class="symTextArea" placeholder="Вставь строку отпечатка"></textarea>
+              <textarea id="symReceiveInput" class="symTextArea" placeholder="Вставь строку отпечатка другого существа"></textarea>
               <div class="symRow">
-                <button class="smallbtn" id="symApplyBtn">ПРИНЯТЬ</button>
+                <button class="smallbtn" id="symApplyBtn" disabled>ПРОИЗВЕСТИ СЛИЯНИЕ</button>
+              </div>
+            </div>
+            <div class="symConfirm" id="symConfirm" style="display:none;">
+              <div class="symConfirmCard">
+                <div class="symConfirmTitle">Процесс необратим.</div>
+                <div class="symConfirmText">Это тело будет заменено. Ты точно согласен?</div>
+                <div class="symConfirmBtns">
+                  <button class="smallbtn" id="symConfirmYes">СОГЛАСЕН</button>
+                  <button class="smallbtn" id="symConfirmNo">ОТМЕНА</button>
+                </div>
               </div>
             </div>
             <div class="modalBtns">

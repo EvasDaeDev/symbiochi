@@ -79,18 +79,14 @@ const els = {
   newCreature: document.getElementById("newCreature"),
   symbiosisBtn: document.getElementById("symbiosisBtn"),
   symbiosisOverlay: document.getElementById("symbiosisOverlay"),
-  symShowTab: document.getElementById("symShowTab"),
-  symReceiveTab: document.getElementById("symReceiveTab"),
-  symShowBody: document.getElementById("symShowBody"),
-  symReceiveBody: document.getElementById("symReceiveBody"),
-  qrCanvas: document.getElementById("qrCanvas"),
-  symTextArea: document.getElementById("symTextArea"),
   symShowHint: document.getElementById("symShowHint"),
-  symVideo: document.getElementById("symVideo"),
-  symScanBtn: document.getElementById("symScanBtn"),
+  symShareBtn: document.getElementById("symShareBtn"),
   symReceiveInput: document.getElementById("symReceiveInput"),
   symApplyBtn: document.getElementById("symApplyBtn"),
   symCloseBtn: document.getElementById("symCloseBtn"),
+  symConfirm: document.getElementById("symConfirm"),
+  symConfirmYes: document.getElementById("symConfirmYes"),
+  symConfirmNo: document.getElementById("symConfirmNo"),
 };
 
 const toast = makeToast();
