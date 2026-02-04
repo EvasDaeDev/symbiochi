@@ -149,8 +149,7 @@ export function attachSymbiosisUI(view, els, toast){
     if (els.symShowBody) els.symShowBody.style.display = name === "show" ? "block" : "none";
     if (els.symReceiveBody) els.symReceiveBody.style.display = name === "receive" ? "block" : "none";
     if (name === "show") prepareShow();
-    if (name === "receive") startScan();
-    if (name !== "receive") stopScan();
+    if (name === "receive") stopScan();
   }
 
   async function prepareShow(){
@@ -162,26 +161,17 @@ export function attachSymbiosisUI(view, els, toast){
       if (els.qrCanvas) drawQrToCanvas(els.qrCanvas, code);
       if (els.symShowHint) els.symShowHint.textContent = "Форма сжалась в отпечаток.";
     } catch (err){
-      if (els.symShowHint) els.symShowHint.textContent = "Отпечаток слишком плотный для QR — используй текст.";
+      if (els.symShowHint) els.symShowHint.textContent = "Не удалось собрать отпечаток.";
     }
   }
 
   async function startScan(){
-    if (!els.symVideo || !els.symReceiveHint) return;
-    if (!("BarcodeDetector" in window)){
-      els.symReceiveHint.textContent = "Камера недоступна — вставь строку вручную.";
-      return;
-    }
-    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia){
-      els.symReceiveHint.textContent = "Для камеры нужен HTTPS или localhost. Вставь строку вручную.";
-      return;
-    }
+    if (!els.symVideo || !("BarcodeDetector" in window)) return;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       els.symVideo.srcObject = stream;
       await els.symVideo.play();
       const detector = new BarcodeDetector({ formats: ["qr_code"] });
-      els.symReceiveHint.textContent = "Наведи камеру на отпечаток.";
       scanTimer = setInterval(async ()=>{
         if (!els.symVideo) return;
         const barcodes = await detector.detect(els.symVideo);
@@ -192,7 +182,6 @@ export function attachSymbiosisUI(view, els, toast){
         }
       }, 300);
     } catch (err){
-      if (els.symReceiveHint) els.symReceiveHint.textContent = "Камера не ответила. Используй текст.";
       stopScan();
     }
   }
@@ -209,9 +198,6 @@ export function attachSymbiosisUI(view, els, toast){
     if (els.symVideo){
       els.symVideo.pause();
       els.symVideo.srcObject = null;
-    }
-    if (els.symReceiveHint){
-      els.symReceiveHint.textContent = "Пусть отпечаток коснётся тебя — камерой или через текст.";
     }
   }
 

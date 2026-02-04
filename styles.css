@@ -559,7 +559,7 @@ html, body {
 }
 .symTextArea{
   width: 100%;
-  min-height: 68px;
+  min-height: 96px;
   border-radius: 10px;
   border: 1px solid #24344a;
   background: #0b1320;

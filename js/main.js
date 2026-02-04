@@ -83,7 +83,6 @@ const els = {
   qrCanvas: document.getElementById("qrCanvas"),
   symTextArea: document.getElementById("symTextArea"),
   symShowHint: document.getElementById("symShowHint"),
-  symReceiveHint: document.getElementById("symReceiveHint"),
   symVideo: document.getElementById("symVideo"),
   symScanBtn: document.getElementById("symScanBtn"),
   symReceiveInput: document.getElementById("symReceiveInput"),
