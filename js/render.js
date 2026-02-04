@@ -1045,8 +1045,8 @@ export function renderGrid(state, canvas, gridEl, view){
     view.rectW/2, view.rectH/2, Math.min(view.rectW,view.rectH)*0.15,
     view.rectW/2, view.rectH/2, Math.max(view.rectW,view.rectH)*0.85
   );
-  g.addColorStop(0, "rgb(70, 125, 79)");
-  g.addColorStop(1, "rgb(16, 30, 19)");
+  g.addColorStop(0, "rgb(33, 66, 38)");
+  g.addColorStop(1, "rgb(6, 11, 6)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
 
