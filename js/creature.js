@@ -94,6 +94,7 @@ export function newGame(){
     carrotTick: { id: 0, used: 0 }, // max 3 per feeding tick
     growthTarget: null,
     growthTargetMode: null, // "body" | "appendage"
+    growthTargetPower: 0,
     active: null,
     log: [],
     cam: { ox: body.core[0], oy: body.core[1] },
@@ -168,11 +169,12 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
   return out;
 }
 
-export function addModule(state, type, rng){
+export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
 
   let anchor = null;
+  let anchorCandidates = null;
   for (let tries=0; tries<60 && !anchor; tries++){
     const [ax,ay] = bodyCells[Math.floor(rng()*bodyCells.length)];
     let free = 0;
@@ -183,6 +185,19 @@ export function addModule(state, type, rng){
       free++;
     }
     if (free>0) anchor=[ax,ay];
+    if (target){
+      if (!anchorCandidates) anchorCandidates = [];
+      if (free > 0) anchorCandidates.push([ax,ay]);
+    }
+  }
+  if (target && anchorCandidates && anchorCandidates.length){
+    anchorCandidates.sort((a,b)=>{
+      const da = Math.abs(a[0]-target[0]) + Math.abs(a[1]-target[1]);
+      const db = Math.abs(b[0]-target[0]) + Math.abs(b[1]-target[1]);
+      return da - db;
+    });
+    const pickIdx = Math.floor(rng() * Math.min(6, anchorCandidates.length));
+    anchor = anchorCandidates[pickIdx];
   }
   if (!anchor) return false;
 
@@ -192,6 +207,11 @@ export function addModule(state, type, rng){
   const dirs = DIR8.slice().sort((d1,d2)=>{
     const n1=[ax+d1[0], ay+d1[1]];
     const n2=[ax+d2[0], ay+d2[1]];
+    if (target){
+      const d1t = Math.abs(n1[0]-target[0]) + Math.abs(n1[1]-target[1]);
+      const d2t = Math.abs(n2[0]-target[0]) + Math.abs(n2[1]-target[1]);
+      return d1t - d2t;
+    }
     const s1=(n1[0]-cx)*(n1[0]-cx)+(n1[1]-cy)*(n1[1]-cy);
     const s2=(n2[0]-cx)*(n2[0]-cx)+(n2[1]-cy)*(n2[1]-cy);
     return s2 - s1;
@@ -376,8 +396,7 @@ export function growPlannedModules(state, rng){
   let grew = 0;
 
   for (const m of state.modules){
-    const target = m.growTo ?? m.cells.length;
-    if (m.cells.length >= target) continue;
+    const minLen = m.growTo ?? 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
 
     const last = m.cells[m.cells.length - 1];
@@ -448,7 +467,7 @@ export function growPlannedModules(state, rng){
 
     // ❌ если совсем некуда — прекращаем рост этого модуля
     if (!placed){
-      m.growTo = m.cells.length;
+      continue;
     }
   }
 

@@ -1059,9 +1059,18 @@ export function barStatus(org){
 }
 
 export function renderLegend(state, legendEl){
+  const present = new Set(["body", "core"]);
+  const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+  for (const org of orgs){
+    if (org?.face?.anchor) present.add("eye");
+    for (const m of (org?.modules || [])){
+      if (m?.type) present.add(m.type);
+    }
+  }
+
   const items = [
     { part:"body",    title:"Тело",    desc:"Блоки биоматериала (объём/тень)." },
-    { part:null,       title:"Ядро",    desc:"Центр жизненной активности. Цвет отражает текущее состояние организма." },
+    { part:"core",     title:"Ядро",    desc:"Центр жизненной активности. Цвет отражает текущее состояние организма." },
     { part:"eye",     title:"Глаза",   desc:"Растут вместе с телом, рисуются поверх." },
 
     { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный отросток.	Формируется при попытках «лечить» и вмешиваться." },
@@ -1078,10 +1087,12 @@ export function renderLegend(state, legendEl){
     { part:"fin",      title:organLabel("fin"),      desc:"Плавание/манёвр (плавник)." },
   ];
 
-  legendEl.innerHTML = items.map(it => {
-    const sw = it.part ? getPartColor(state, it.part, 0) : "#34d399";
-    const cls = it.part ? "legendSwatch swatch" : "legendSwatch";
-    const data = it.part ? `data-part="${escapeHtml(it.part)}"` : "";
+  const filtered = items.filter((it) => present.has(it.part));
+
+  legendEl.innerHTML = filtered.map(it => {
+    const sw = (it.part === "core") ? "#34d399" : getPartColor(state, it.part, 0);
+    const cls = (it.part === "core") ? "legendSwatch" : "legendSwatch swatch";
+    const data = (it.part === "core") ? "" : `data-part="${escapeHtml(it.part)}"`;
     return `
     <div class="legendItem">
       <div class="${cls}" ${data} style="background:${escapeHtml(sw)}"></div>

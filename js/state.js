@@ -92,6 +92,7 @@ export function migrateOrNew(){
   state.carrotTick = state.carrotTick || { id: 0, used: 0 };
   if (state.growthTarget === undefined) state.growthTarget = null;
   if (state.growthTargetMode === undefined) state.growthTargetMode = null;
+  if (!Number.isFinite(state.growthTargetPower)) state.growthTargetPower = 0;
 
   // UI / tuning settings
   if (!state.settings) state.settings = {};
@@ -208,15 +209,6 @@ state.lastSeen = upTo;
 }
 
 // ===== Carrots (interactive feeding / shaping) =====
-function buildOcc(org){
-  const occ = new Set();
-  for (const [x,y] of (org?.body?.cells || [])) occ.add(`${x},${y}`);
-  for (const m of (org?.modules || [])){
-    for (const [x,y] of (m?.cells || [])) occ.add(`${x},${y}`);
-  }
-  return occ;
-}
-
 function carrotCells(car){
   const out = [];
   const w = (car.w ?? CARROT.w ?? 7);
@@ -233,20 +225,37 @@ function processCarrotsTick(state){
   if (!Array.isArray(state.carrots) || !state.carrots.length){
     state.growthTarget = null;
     state.growthTargetMode = null;
+    state.growthTargetPower = 0;
     return 0;
   }
 
   let eaten = 0;
-  const occ = buildOcc(state);
+  const bodyOcc = new Set();
+  for (const [x,y] of (state.body?.cells || [])) bodyOcc.add(`${x},${y}`);
+  const moduleOcc = new Set();
+  for (const m of (state.modules || [])){
+    for (const [x,y] of (m?.cells || [])) moduleOcc.add(`${x},${y}`);
+  }
 
-  // Eat if touches any occupied cell (body or appendages)
+  // Eat only if touches >= 2 cells. If target is appendage, count only modules.
   const remaining = [];
   for (const car of state.carrots){
-    let touched = false;
+    const cx = car.x + Math.floor((car.w||7)/2);
+    const cy = car.y + Math.floor((car.h||3)/2);
+    const d = Math.abs(cx - state.body.core[0]) + Math.abs(cy - state.body.core[1]);
+    const mode = (d <= 15) ? "body" : "appendage";
+    const occ = (mode === "appendage") ? moduleOcc : null;
+    let hits = 0;
     for (const [x,y] of carrotCells(car)){
-      if (occ.has(`${x},${y}`)) { touched = true; break; }
+      const k = `${x},${y}`;
+      if (mode === "appendage"){
+        if (occ.has(k)) hits++;
+      } else {
+        if (moduleOcc.has(k) || bodyOcc.has(k)) hits++;
+      }
+      if (hits >= 2) break;
     }
-    if (touched){
+    if (hits >= 2){
       state.bars.food = clamp(state.bars.food + 0.22, 0, BAR_MAX);
       state.bars.mood = clamp(state.bars.mood + 0.06, 0, BAR_MAX);
       pushLog(state, `Кормление: морковка съедена.`, "care");
@@ -276,6 +285,7 @@ function processCarrotsTick(state){
 
   state.growthTarget = best;
   state.growthTargetMode = (bestD <= 15) ? "body" : "appendage";
+  state.growthTargetPower = Math.max(0, Math.min(1, 1 - bestD / 45));
   return eaten;
 }
 
