@@ -61,18 +61,17 @@ function hslCss(h,s,l){
   const hh = ((h%360)+360)%360;
   return `hsl(${hh.toFixed(1)},${clamp(s,0,100).toFixed(1)}%,${clamp(l,0,100).toFixed(1)}%)`;
 }
-function getPartBaseHex(part, palette){
-  if (part === "body") return palette?.body || "#1f2937";
-  if (part === "eye") return ORGAN_COLORS.eye || palette?.eye || "#f472b6";
-  return ORGAN_COLORS[part] || "#cbd5e1";
+function getPartBaseHex(org, part){
+  if (part === "body") return org?.partColor?.body || org?.palette?.body || "#1f2937";
+  if (part === "eye") return org?.partColor?.eye || org?.palette?.eye || ORGAN_COLORS.eye || "#f472b6";
+  return org?.partColor?.[part] || ORGAN_COLORS[part] || "#cbd5e1";
 }
-function getPartColor(state, part, hueShiftDeg){
-  const baseHex = getPartBaseHex(part, state.palette);
+function getPartColor(org, part, hueShiftDeg){
+  const baseHex = getPartBaseHex(org, part);
+  if (!Number.isFinite(hueShiftDeg) || hueShiftDeg === 0) return baseHex;
   const {r,g,b} = hexToRgb(baseHex);
   const hsl = rgbToHsl(r,g,b);
-  const userHue = state.partHue?.[part];
-  const h = Number.isFinite(userHue) ? userHue : hsl.h;
-  return hslCss(h + (hueShiftDeg||0), hsl.s, hsl.l);
+  return hslCss(hsl.h + hueShiftDeg, hsl.s, hsl.l);
 }
 
 // =====================
@@ -409,13 +408,13 @@ function animProgress(org, wx, wy){
 // =====================
 // Colors per organ instance + subtle variations
 // =====================
-function organBaseColor(type){
-  return ORGAN_COLORS[type] || "#cbd5e1";
+function organBaseColor(org, type){
+  return org?.partColor?.[type] || ORGAN_COLORS[type] || "#cbd5e1";
 }
 
-function organColor(type, orgId, organIndex, baseSeed){
+function organColor(org, type, orgId, organIndex, baseSeed){
   // tone variance up to ~10% by mixing towards slightly shifted warm/cool anchors
-  const base = organBaseColor(type);
+  const base = organBaseColor(org, type);
   const t = (hash01(`${baseSeed}|tone|${orgId}|${organIndex}|${type}`) - 0.5) * 0.10; // -0.05..+0.05
   // mix between slightly warm and cool
   const warm = mix(base, "#ffccaa", 0.18);
@@ -639,7 +638,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
   const boundaryRects = [];
 
   // BODY blocks
-  const bodyColor = org?.palette?.body || "#60a5fa";
+  const bodyColor = getPartColor(org, "body", 0);
   const bodyCells = org?.body?.cells || [];
   const staticCells = [];
   for (const [wx, wy] of bodyCells){
@@ -680,7 +679,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
     const cells = m.cells || [];
     if (cells.length === 0) continue;
 
-    let base = organColor(type, orgId, mi, baseSeed);
+    let base = organColor(org, type, orgId, mi, baseSeed);
 
     if (type === "spike"){
       const on = spikeBlinkOn();
@@ -895,7 +894,7 @@ else if (lvl === 3){
   const face = org?.face?.anchor;
   if (face){
     const eyeSide = computeEyeSideBlocks(org, bodyBlocks);
-    const eyeColor = org?.palette?.eye || "#e2e8f0";
+    const eyeColor = getPartColor(org, "eye", 0) || "#e2e8f0";
 
     const sx = face[0] - Math.floor(eyeSide/2);
     const sy = face[1] - Math.floor(eyeSide/2);
@@ -1158,14 +1157,11 @@ export function barStatus(org){
   return { txt:"хорошо", cls:"ok" };
 }
 
-export function renderLegend(state, legendEl){
+export function renderLegend(org, legendEl){
   const present = new Set(["body", "core"]);
-  const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
-  for (const org of orgs){
-    if (org?.face?.anchor) present.add("eye");
-    for (const m of (org?.modules || [])){
-      if (m?.type) present.add(m.type);
-    }
+  if (org?.face?.anchor) present.add("eye");
+  for (const m of (org?.modules || [])){
+    if (m?.type) present.add(m.type);
   }
 
   const items = [
@@ -1190,9 +1186,11 @@ export function renderLegend(state, legendEl){
   const filtered = items.filter((it) => present.has(it.part));
 
   legendEl.innerHTML = filtered.map(it => {
-    const sw = (it.part === "core") ? "#34d399" : getPartColor(state, it.part, 0);
+    const sw = (it.part === "core") ? "#34d399" : getPartColor(org, it.part, 0);
     const cls = (it.part === "core") ? "legendSwatch" : "legendSwatch swatch";
-    const data = (it.part === "core") ? "" : `data-part="${escapeHtml(it.part)}"`;
+    const data = (it.part === "core")
+      ? ""
+      : `data-part="${escapeHtml(it.part)}" data-color="${escapeHtml(sw)}"`;
     return `
     <div class="legendItem">
       <div class="${cls}" ${data} style="background:${escapeHtml(sw)}"></div>
