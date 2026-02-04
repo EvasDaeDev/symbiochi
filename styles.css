@@ -314,6 +314,11 @@ html, body {
 }
 .smallbtn:hover{ border-color: #345073; }
 .smallbtn:active{ transform: translateY(1px); }
+.smallbtn:disabled{
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: rgba(36,52,74,.5);
+}
 
 .smallbtn.isActive{
   border-color: rgba(251,146,60,0.7);
