@@ -1,4 +1,4 @@
-import { BAR_MAX, clamp, clamp01, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
+import { BAR_MAX, clamp, clamp01, key, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
@@ -178,6 +178,7 @@ export function simulate(state, deltaSec){
     state.lastMutationAt += intervalSec;
     eaten += processCarrotsTick(state, state);
     applyMutation(state, state.lastMutationAt);
+    eatBudAppendage(state);
     mutations++;
   }
 
@@ -198,6 +199,7 @@ export function simulate(state, deltaSec){
         bud.lastMutationAt = (bud.lastMutationAt || state.lastMutationAt) + intervalSec;
         eaten += processCarrotsTick(state, bud);
         applyMutation(bud, bud.lastMutationAt);
+        eatParentAppendage(state, bud);
         budMutations++;
       }
 
@@ -213,6 +215,94 @@ export function simulate(state, deltaSec){
 
   state.lastSeen = upTo;
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
+}
+
+function eatParentAppendage(state, bud){
+  if (!bud || !Array.isArray(state.modules) || state.modules.length === 0) return false;
+
+  const budCells = new Set();
+  if (Array.isArray(bud.body?.cells)){
+    for (const [x, y] of bud.body.cells) budCells.add(key(x, y));
+  }
+  if (Array.isArray(bud.modules)){
+    for (const mod of bud.modules){
+      for (const [x, y] of (mod?.cells || [])) budCells.add(key(x, y));
+    }
+  }
+  if (budCells.size === 0) return false;
+
+  const minOverlap = 2;
+  const minLen = 1;
+
+  for (const mod of state.modules){
+    const cells = mod?.cells || [];
+    if (cells.length === 0) continue;
+    let overlap = 0;
+    for (const [x, y] of cells){
+      if (budCells.has(key(x, y))){
+        overlap++;
+        if (overlap >= minOverlap) break;
+      }
+    }
+    if (overlap >= minOverlap){
+      if (cells.length > minLen){
+        mod.cells = cells.slice(0, minLen);
+      }
+      bud.bars.food = clamp(bud.bars.food + 0.10, 0, BAR_MAX);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function eatBudAppendage(state){
+  if (!Array.isArray(state.buds) || state.buds.length === 0) return false;
+
+  const bodyCells = new Set();
+  if (Array.isArray(state.body?.cells)){
+    for (const [x, y] of state.body.cells) bodyCells.add(key(x, y));
+  }
+  if (bodyCells.size === 0) return false;
+
+  const neighborDirs = [
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0], [1, 0],
+    [-1, 1], [0, 1], [1, 1]
+  ];
+  const minLen = 1;
+
+  const touchesBody = (x, y)=>{
+    if (bodyCells.has(key(x, y))) return true;
+    for (const [dx, dy] of neighborDirs){
+      if (bodyCells.has(key(x + dx, y + dy))) return true;
+    }
+    return false;
+  };
+
+  for (const bud of state.buds){
+    if (!bud) continue;
+    for (const mod of (bud.modules || [])){
+      const cells = mod?.cells || [];
+      if (cells.length === 0) continue;
+      let contact = false;
+      for (const [x, y] of cells){
+        if (touchesBody(x, y)){
+          contact = true;
+          break;
+        }
+      }
+      if (contact){
+        if (cells.length > minLen){
+          mod.cells = cells.slice(0, minLen);
+        }
+        state.bars.food = clamp(state.bars.food + 0.10, 0, BAR_MAX);
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 // ===== Carrots (interactive feeding / shaping) =====
