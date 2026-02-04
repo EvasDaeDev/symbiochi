@@ -62,3 +62,59 @@ export function parseKey(k){ const [x,y]=k.split(",").map(Number); return [x,y];
 export function barPct(x){
   return Math.round(clamp(x, 0, BAR_MAX)*100);
 }
+
+export function base64UrlEncode(bytes){
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk){
+    const slice = bytes.subarray(i, i + chunk);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+export function base64UrlDecode(str){
+  const padded = str.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((str.length + 3) % 4);
+  const binary = atob(padded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+async function streamToUint8Array(stream){
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true){
+    const { value, done } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks){
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+export async function deflateBytes(bytes){
+  if (typeof CompressionStream === "undefined") return { bytes, compressed: false };
+  const cs = new CompressionStream("deflate");
+  const writer = cs.writable.getWriter();
+  await writer.write(bytes);
+  await writer.close();
+  const out = await streamToUint8Array(cs.readable);
+  return { bytes: out, compressed: true };
+}
+
+export async function inflateBytes(bytes){
+  if (typeof DecompressionStream === "undefined") throw new Error("no decompression");
+  const ds = new DecompressionStream("deflate");
+  const writer = ds.writable.getWriter();
+  await writer.write(bytes);
+  await writer.close();
+  return await streamToUint8Array(ds.readable);
+}
