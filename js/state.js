@@ -236,14 +236,26 @@ function processCarrotsTick(state){
   for (const m of (state.modules || [])){
     for (const [x,y] of (m?.cells || [])) moduleOcc.add(`${x},${y}`);
   }
+  const bodyCells = state.body?.cells || [];
+  const moduleCells = (state.modules || []).flatMap(m => m?.cells || []);
+
+  function minDistToCells(cells, tx, ty){
+    let best = Infinity;
+    for (const [x,y] of cells){
+      const d = Math.abs(tx - x) + Math.abs(ty - y);
+      if (d < best) best = d;
+    }
+    return best;
+  }
 
   // Eat only if touches >= 2 cells. If target is appendage, count only modules.
   const remaining = [];
   for (const car of state.carrots){
     const cx = car.x + Math.floor((car.w||7)/2);
     const cy = car.y + Math.floor((car.h||3)/2);
-    const d = Math.abs(cx - state.body.core[0]) + Math.abs(cy - state.body.core[1]);
-    const mode = (d <= 15) ? "body" : "appendage";
+    const bodyD = minDistToCells(bodyCells, cx, cy);
+    const moduleD = minDistToCells(moduleCells, cx, cy);
+    const mode = (moduleD < bodyD) ? "appendage" : "body";
     const occ = (mode === "appendage") ? moduleOcc : null;
     let hits = 0;
     for (const [x,y] of carrotCells(car)){
@@ -273,18 +285,26 @@ function processCarrotsTick(state){
   }
 
   // Choose nearest carrot as a growth target
-  const [cx,cy] = state.body?.core || [0,0];
   let best = null;
   let bestD = Infinity;
+  let bestBodyD = Infinity;
+  let bestModuleD = Infinity;
   for (const car of state.carrots){
     const tx = car.x + Math.floor((car.w||7)/2);
     const ty = car.y + Math.floor((car.h||3)/2);
-    const d = Math.abs(tx - cx) + Math.abs(ty - cy);
-    if (d < bestD){ bestD = d; best = [tx,ty]; }
+    const bodyD = minDistToCells(bodyCells, tx, ty);
+    const moduleD = minDistToCells(moduleCells, tx, ty);
+    const d = Math.min(bodyD, moduleD);
+    if (d < bestD){
+      bestD = d;
+      bestBodyD = bodyD;
+      bestModuleD = moduleD;
+      best = [tx,ty];
+    }
   }
 
   state.growthTarget = best;
-  state.growthTargetMode = (bestD <= 15) ? "body" : "appendage";
+  state.growthTargetMode = (bestModuleD < bestBodyD) ? "appendage" : "body";
   state.growthTargetPower = Math.max(0, Math.min(1, 1 - bestD / 45));
   return eaten;
 }

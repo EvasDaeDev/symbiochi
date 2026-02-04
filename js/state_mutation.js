@@ -288,19 +288,10 @@ export function applyMutation(state, momentSec){
   const isGiant = M.totalBlocks >= 350;
   const isBigForBud = M.totalBlocks >= 230;
 
-  // Passive growth: previously spawned modules grow over time (1 segment per tick).
-  // This is what makes new organs appear small and then extend gradually.
-  // We do it BEFORE choosing the mutation, so growth is visible even if this tick picks body/palette.
-  growPlannedModules(state, rng);
-  if (Array.isArray(state.buds)){
-    for (const bud of state.buds){
-      growPlannedModules(bud, rng);
-    }
-  }
-
   // Базовые веса (как раньше)
   let weights = [
     ["grow_body", 0.32 + 0.55*pf + 0.25*pw],
+    ["grow_appendage", (state.modules?.length ? 0.12 + 0.03 * state.modules.length : 0)],
     ["tail",      0.10 + 0.85*pf],
     ["tentacle",  0.08 + 0.65*pf + 0.15*ph],
     ["limb",      0.10 + 0.75*pf],
@@ -389,11 +380,15 @@ export function applyMutation(state, momentSec){
   } else if (state.growthTargetMode === "appendage"){
     weights = weights.map(([k,w]) => {
       if (k === "tentacle" || k === "limb" || k === "tail" || k === "antenna") return [k, w + 0.45];
+      if (k === "grow_appendage") return [k, w + 0.55];
       if (k === "grow_body") return [k, Math.max(0.01, w * 0.65)];
       return [k,w];
     });
     weights = weights.map(([kind, w]) => {
       if (kind === "tentacle" || kind === "limb" || kind === "tail" || kind === "antenna"){
+        return [kind, w * k];
+      }
+      if (kind === "grow_appendage"){
         return [kind, w * k];
       }
       return [kind, w];
@@ -435,7 +430,15 @@ export function applyMutation(state, momentSec){
     weights.push(["fin",   0.06 + 0.20*pw]);
   }
 
-  const kind = weightedPick(rng, weights);
+  let forcedKind = null;
+  if (Array.isArray(state.growthTarget)){
+    if (state.growthTargetMode === "appendage" && (state.modules?.length || 0) > 0){
+      forcedKind = "grow_appendage";
+    } else {
+      forcedKind = "grow_body";
+    }
+  }
+  const kind = forcedKind ?? weightedPick(rng, weights);
 
   // 1) Почкование
   if (kind === "bud"){
@@ -487,7 +490,22 @@ export function applyMutation(state, momentSec){
     return;
   }
 
-  // 3) Палитра
+  // 3) Рост отростков (один сегмент)
+  if (kind === "grow_appendage"){
+    const target = (state.growthTargetMode === "appendage" && Array.isArray(state.growthTarget))
+      ? state.growthTarget
+      : null;
+    const strength = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : null;
+    const grew = growPlannedModules(state, rng, { target, maxGrows: 1, strength });
+    if (grew){
+      pushLog(state, `Мутация: отросток вырос.`, "mut_ok", { part: "appendage" });
+    } else {
+      pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
+    }
+    return;
+  }
+
+  // 4) Палитра
   if (kind === "palette"){
     const pal = pick(rng, PALETTES);
     const k = pick(rng, ["body", "accent", "eye", "core"]);
@@ -496,7 +514,7 @@ export function applyMutation(state, momentSec){
     return;
   }
 
-  // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
+  // 5) Органы (tail/limb/antenna/spike/shell/eye/...)
   const beforeN = (state.modules ? state.modules.length : 0);
   const target = Array.isArray(state.growthTarget) ? state.growthTarget : null;
   const added = addModule(state, kind, rng, target);
