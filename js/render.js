@@ -436,30 +436,14 @@ function organSegmentColor(hex, segIndex, segLen, baseSeed, orgId, organIndex){
 // Block drawing (procedural shading + corner smoothing)
 // =====================
 function drawBlock(ctx, x, y, s, colorHex, breathK, neighMask){
-  // basic shaded cube feel: highlight top/left, shadow bottom/right
   // neighMask bits: 1=N,2=E,4=S,8=W (present=1)
   const base = colorHex;
-  const hi = brighten(base, 0.10);
-  const lo = brighten(base, -0.10);
 
   // subtle breathe tint (very slight)
   const tint = breathK ? brighten(base, 0.04) : base;
 
   ctx.fillStyle = tint;
   ctx.fillRect(x, y, s, s);
-
-  // edges
-  ctx.fillStyle = hi;
-  // top edge if no neighbor north
-  if (!(neighMask & 1)) ctx.fillRect(x, y, s, 1);
-  // left edge if no neighbor west
-  if (!(neighMask & 8)) ctx.fillRect(x, y, 1, s);
-
-  ctx.fillStyle = lo;
-  // bottom edge if no neighbor south
-  if (!(neighMask & 4)) ctx.fillRect(x, y + s - 1, s, 1);
-  // right edge if no neighbor east
-  if (!(neighMask & 2)) ctx.fillRect(x + s - 1, y, 1, s);
 
   // Corner smoothing: if an outer corner is free (no neighbors on the two touching sides)
   // cut a *single pixel* (per project rules). For tiny blocks (<=2px), skip smoothing.
@@ -513,6 +497,55 @@ function isBoundary(occ, x, y){
   const m = neighMaskAt(occ, x, y);
   // boundary if any side missing
   return (m & 1) === 0 || (m & 2) === 0 || (m & 4) === 0 || (m & 8) === 0;
+}
+
+// =====================
+// Rect packing for static cells (row runs merged vertically)
+// =====================
+function buildPackedRects(cells){
+  if (!cells || cells.length === 0) return [];
+  const rows = new Map();
+  for (const [x, y] of cells){
+    if (!rows.has(y)) rows.set(y, []);
+    rows.get(y).push(x);
+  }
+
+  const runByRow = [];
+  const ys = [...rows.keys()].sort((a, b) => a - b);
+  for (const y of ys){
+    const xs = rows.get(y).sort((a, b) => a - b);
+    let start = xs[0];
+    let prev = xs[0];
+    for (let i = 1; i < xs.length; i++){
+      const x = xs[i];
+      if (x === prev + 1){
+        prev = x;
+        continue;
+      }
+      runByRow.push({ y, x0: start, x1: prev });
+      start = x;
+      prev = x;
+    }
+    runByRow.push({ y, x0: start, x1: prev });
+  }
+
+  runByRow.sort((a, b) => (a.y - b.y) || (a.x0 - b.x0));
+  const active = new Map();
+  const rects = [];
+
+  for (const run of runByRow){
+    const key = `${run.x0},${run.x1}`;
+    const prev = active.get(key);
+    if (prev && prev.y + prev.h === run.y){
+      prev.h += 1;
+    } else {
+      const rect = { x: run.x0, y: run.y, w: run.x1 - run.x0 + 1, h: 1 };
+      rects.push(rect);
+      active.set(key, rect);
+    }
+  }
+
+  return rects;
 }
 
 // =====================
@@ -608,19 +641,36 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
   // BODY blocks
   const bodyColor = org?.palette?.body || "#60a5fa";
   const bodyCells = org?.body?.cells || [];
-for (const [wx,wy] of bodyCells){
-  const p = worldToScreenPx(cam, wx, wy, view);
-  const x = p.x;
-  const y = p.y + breathY;
+  const staticCells = [];
+  for (const [wx, wy] of bodyCells){
+    const nm = neighMaskAt(occ, wx, wy);
+    const kGrow = animProgress(org, wx, wy);
 
-  const nm = neighMaskAt(occ, wx, wy);
-  const kGrow = animProgress(org, wx, wy);
-  drawBlockAnim(ctx, x, y, s, bodyColor, breathK, nm, kGrow);
+    if (kGrow < 0.999){
+      const p = worldToScreenPx(cam, wx, wy, view);
+      const x = p.x;
+      const y = p.y + breathY;
+      drawBlockAnim(ctx, x, y, s, bodyColor, breathK, nm, kGrow);
+    } else {
+      staticCells.push([wx, wy]);
+    }
 
-  if (isSelected && isBoundary(occ, wx, wy)){
-    boundaryRects.push({x, y, w:s, h:s});
+    if (isSelected && isBoundary(occ, wx, wy)){
+      const p = worldToScreenPx(cam, wx, wy, view);
+      boundaryRects.push({ x: p.x, y: p.y + breathY, w: s, h: s });
+    }
   }
-}
+
+  if (staticCells.length){
+    const rects = buildPackedRects(staticCells);
+    ctx.fillStyle = breathK ? brighten(bodyColor, 0.04) : bodyColor;
+    for (const r of rects){
+      const p = worldToScreenPx(cam, r.x, r.y, view);
+      const x = p.x;
+      const y = p.y + breathY;
+      ctx.fillRect(x, y, r.w * s, r.h * s);
+    }
+  }
 
   // MODULES
   const modules = org?.modules || [];
