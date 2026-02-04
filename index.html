@@ -100,10 +100,12 @@
               <div class="symRow">
                 <button class="smallbtn" id="symShareBtn">ПОДЕЛИТЬСЯ СВОИМ ГЕНОМОМ</button>
               </div>
+              <textarea id="symShareOutput" class="symTextArea symTextAreaShare" readonly placeholder="Здесь появится строка отпечатка для ручного копирования"></textarea>
               <textarea id="symReceiveInput" class="symTextArea" placeholder="Вставь строку отпечатка другого существа"></textarea>
               <div class="symRow">
                 <button class="smallbtn" id="symApplyBtn" disabled>ПРОИЗВЕСТИ СЛИЯНИЕ</button>
               </div>
+              <div class="symHint" id="symPermissionsHint">Если браузер не дал доступ к буферу, скопируй строку вручную.</div>
             </div>
             <div class="symConfirm" id="symConfirm" style="display:none;">
               <div class="symConfirmCard">

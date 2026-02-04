@@ -131,6 +131,7 @@ export function attachSymbiosisUI(view, els, toast){
 
   function openSymbiosis(){
     els.symbiosisOverlay.style.display = "grid";
+    if (els.symShareOutput) els.symShareOutput.value = "";
   }
 
   function closeSymbiosis(){
@@ -143,13 +144,20 @@ export function attachSymbiosisUI(view, els, toast){
     try {
       const genome = extractGenome(view.state);
       const code = await encodeGenome(genome);
+      if (els.symShareOutput) els.symShareOutput.value = code;
       if (navigator.clipboard?.writeText){
         await navigator.clipboard.writeText(code);
         toast("Отпечаток скопирован.");
+        if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Отпечаток скопирован в буфер.";
       } else {
         throw new Error("no clipboard");
       }
     } catch (err){
+      if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Скопируй строку вручную — браузер не дал доступ.";
+      if (els.symShareOutput){
+        els.symShareOutput.focus();
+        els.symShareOutput.select();
+      }
       toast("Не удалось скопировать отпечаток.");
     }
   }
@@ -192,6 +200,7 @@ export function attachSymbiosisUI(view, els, toast){
   if (els.symConfirmYes) els.symConfirmYes.addEventListener("click", applySymbiosis);
   if (els.symConfirmNo) els.symConfirmNo.addEventListener("click", hideConfirm);
   if (els.symReceiveInput) els.symReceiveInput.addEventListener("input", updateApplyState);
+  if (els.symReceiveInput) els.symReceiveInput.addEventListener("paste", () => setTimeout(updateApplyState, 0));
   if (els.symbiosisOverlay){
     els.symbiosisOverlay.addEventListener("click", (e)=>{
       if (e.target === els.symbiosisOverlay) closeSymbiosis();

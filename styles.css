@@ -591,6 +591,11 @@ html, body {
   box-sizing: border-box;
   resize: vertical;
 }
+.symTextAreaShare{
+  min-height: 54px;
+  font-size: 9px;
+  color: var(--muted);
+}
 .symRow{
   display: flex;
   justify-content: flex-start;
