@@ -427,8 +427,15 @@ export function growPlannedModules(state, rng){
       if (tryDirs.some(([x,y]) => x === d[0] && y === d[1])) return;
       tryDirs.push(d);
     };
+    const appendage =
+      m.movable ||
+      m.type === "tail" ||
+      m.type === "tentacle" ||
+      m.type === "limb" ||
+      m.type === "antenna" ||
+      m.type === "claw";
 
-    // always try forward first, then deviations (±45°, ±90°, rest)
+    if (appendage) pushDir(baseDir);
     pushDir(dir);
     pushDir(rotateDir(dir, 1));
     pushDir(rotateDir(dir, -1));
@@ -436,7 +443,6 @@ export function growPlannedModules(state, rng){
     pushDir(rotateDir(dir, -2));
     pushDir(rotateDir(dir, 3));
     pushDir(rotateDir(dir, -3));
-    pushDir(rotateDir(dir, 4));
 
     let placed = false;
 
