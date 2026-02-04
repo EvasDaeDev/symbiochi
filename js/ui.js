@@ -39,9 +39,10 @@ export function renderLog(state, els){
     const org = Number.isFinite(meta.org) ? meta.org : "";
     const mi = Number.isFinite(meta.mi) ? meta.mi : "";
     const part = meta.part ? String(meta.part) : "";
+    const grown = Array.isArray(meta.grownModules) ? meta.grownModules.join(",") : "";
 
     return `
-      <div class="${cls}" data-org="${org}" data-mi="${mi}" data-part="${escapeHtml(part)}">
+      <div class="${cls}" data-org="${org}" data-mi="${mi}" data-part="${escapeHtml(part)}" data-grown="${escapeHtml(grown)}">
         <div class="when">${new Date(e.t*1000).toLocaleTimeString()} • ${escapeHtml(e.kind)}</div>
         <div class="msg">${escapeHtml(e.msg)}</div>
       </div>
@@ -254,23 +255,46 @@ export function attachLegendHuePicker(view, els, rerenderAll){
   if (!els.legendBody || !els.huePicker || !els.hueRange) return;
 
   let currentPart = null;
+  let currentOrg = null;
+
+  const getSelectedOrg = ()=>{
+    const root = view.state;
+    if (!root) return null;
+    const a = root.active;
+    return (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
+      ? root.buds[a]
+      : root;
+  };
 
   els.legendBody.addEventListener("click", (e)=>{
     const sw = e.target?.closest?.(".swatch");
     if (!sw) return;
     const part = sw.dataset.part;
     if (!part || !view.state) return;
+    const org = getSelectedOrg();
+    if (!org) return;
+    currentOrg = org;
     currentPart = part;
     els.huePicker.style.display = "block";
-    const cur = view.state.partHue?.[part];
-    els.hueRange.value = String(Number.isFinite(cur) ? cur : 0);
-    if (els.hueTitle) els.hueTitle.textContent = `Тон: ${part}`;
+    const cur = sw.dataset.color || "";
+    if (cur) els.hueRange.value = cur;
+    if (els.hueTitle) els.hueTitle.textContent = `Цвет: ${part}`;
+
+    view.flash = {
+      org: -1,
+      mi: null,
+      part,
+      grownModules: [],
+      until: Date.now()/1000 + 0.35,
+      strength: 2,
+    };
+    rerenderAll(0);
   });
 
   els.hueRange.addEventListener("input", ()=>{
-    if (!view.state || !currentPart) return;
-    if (!view.state.partHue) view.state.partHue = {};
-    view.state.partHue[currentPart] = parseInt(els.hueRange.value, 10) || 0;
+    if (!view.state || !currentPart || !currentOrg) return;
+    if (!currentOrg.partColor) currentOrg.partColor = {};
+    currentOrg.partColor[currentPart] = els.hueRange.value;
     view.state.lastSeen = nowSec();
     saveGame(view.state);
     rerenderAll(0);
@@ -294,7 +318,7 @@ export function attachActions(view, els, toast, rerenderAll){
   els.feed.addEventListener("click", ()=>{
     if (!view.state) return;
     // Feeding is now interactive: click "КОРМ" to enter carrot-throw mode,
-    // then click in the field to place an orange "carrot" (7x3 blocks).
+    // then click in the field to place an orange "carrot" (3x7 blocks).
     view.mode = (view.mode === "carrot") ? null : "carrot";
     els.feed.classList.toggle("isActive", view.mode === "carrot");
     toast(view.mode === "carrot" ? "Брось морковку в поле." : "Кормление: выкл.");
@@ -423,14 +447,20 @@ export function attachLogFlash(view, els, rerender){
     const orgRaw = row.dataset.org;
     const miRaw  = row.dataset.mi;
     const part   = row.dataset.part || null;
+    const grownRaw = row.dataset.grown || "";
 
     const orgN = (orgRaw === "" || orgRaw == null) ? -1 : (parseInt(orgRaw, 10));
     const miN  = (miRaw === ""  || miRaw  == null) ? null : (parseInt(miRaw, 10));
+
+    const grownModules = grownRaw
+      ? grownRaw.split(",").map((v)=>parseInt(v, 10)).filter((v)=>Number.isFinite(v))
+      : [];
 
     view.flash = {
       org: Number.isFinite(orgN) ? orgN : -1,
       mi: Number.isFinite(miN) ? miN : null,
       part,
+      grownModules,
       // brighter + longer is handled in renderer; keep duration 0.2s
       until: Date.now()/1000 + 0.2,
       strength: 2, // requested: ~2x brighter
