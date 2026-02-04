@@ -91,7 +91,7 @@ export function newGame(){
     // Feeding items placed by the player
     carrots: [],
     inv: { carrots: 10 },
-    carrotTick: { id: 0, used: 0 }, // max 2 per feeding tick
+    carrotTick: { id: 0, used: 0 }, // max 3 per feeding tick
     growthTarget: null,
     growthTargetMode: null, // "body" | "appendage"
     active: null,
@@ -402,15 +402,28 @@ export function growPlannedModules(state, rng){
     }
 
     // 🔍 ПРОБУЕМ ОБОЙТИ ПРЕПЯТСТВИЕ
-    const tryDirs = [
-      dir,
-      rotateDir(dir, 1),
-      rotateDir(dir, -1),
-      rotateDir(dir, 2),
-      rotateDir(dir, -2),
-      rotateDir(dir, 3),
-      rotateDir(dir, -3),
-    ];
+    const tryDirs = [];
+    const pushDir = (d)=>{
+      if (!d) return;
+      if (tryDirs.some(([x,y]) => x === d[0] && y === d[1])) return;
+      tryDirs.push(d);
+    };
+    const appendage =
+      m.movable ||
+      m.type === "tail" ||
+      m.type === "tentacle" ||
+      m.type === "limb" ||
+      m.type === "antenna" ||
+      m.type === "claw";
+
+    if (appendage) pushDir(baseDir);
+    pushDir(dir);
+    pushDir(rotateDir(dir, 1));
+    pushDir(rotateDir(dir, -1));
+    pushDir(rotateDir(dir, 2));
+    pushDir(rotateDir(dir, -2));
+    pushDir(rotateDir(dir, 3));
+    pushDir(rotateDir(dir, -3));
 
     let placed = false;
 
