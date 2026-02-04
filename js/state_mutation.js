@@ -520,7 +520,18 @@ export function applyMutation(state, momentSec){
       ? state.growthTarget
       : null;
     const strength = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : null;
-    const grew = growPlannedModules(state, rng, { target, maxGrows: 1, strength });
+    const baseGrows = 1 + Math.floor(rng() * 2); // 1..2
+    const moduleBoost = Math.floor((state.modules?.length || 0) / 4); // +1 per 4 modules
+    const maxGrows = Math.max(
+      1,
+      Math.round((baseGrows + moduleBoost) * (EVO.appendageGrowMult || 1))
+    );
+    const grew = growPlannedModules(state, rng, {
+      target,
+      maxGrows,
+      strength,
+      shuffle: !target
+    });
     if (grew){
       pushLog(state, `Мутация: отросток вырос.`, "mut_ok", { part: "appendage" });
     } else {
