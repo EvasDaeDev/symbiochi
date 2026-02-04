@@ -125,17 +125,19 @@ export function growBodyConnected(state, addN, rng, target=null){
         const nx=x+dx, ny=y+dy;
         const kk = key(nx,ny);
         if (set.has(kk)) continue;
-        if (occupiedByModules(state, nx, ny)) continue;
-        candidates.push([nx,ny]);
+        const blockedByModule = occupiedByModules(state, nx, ny);
+        candidates.push([nx, ny, blockedByModule]);
       }
     }
     if (!candidates.length) return false;
+    const freeCandidates = candidates.filter((c) => !c[2]);
+    const pool = freeCandidates.length ? freeCandidates : candidates;
 
     // If a growth target is provided (e.g. "carrot"), bias growth towards it,
     // otherwise bias towards the core for compact connected bodies.
     const tx = Array.isArray(target) ? target[0] : null;
     const ty = Array.isArray(target) ? target[1] : null;
-    candidates.sort((a,b)=>{
+    pool.sort((a,b)=>{
       const daCore = Math.abs(a[0]-core[0]) + Math.abs(a[1]-core[1]);
       const dbCore = Math.abs(b[0]-core[0]) + Math.abs(b[1]-core[1]);
       if (tx === null || ty === null) return daCore - dbCore;
@@ -145,8 +147,8 @@ export function growBodyConnected(state, addN, rng, target=null){
       return (daT*3 + daCore) - (dbT*3 + dbCore);
     });
 
-    const pickIdx = Math.floor(rng()*Math.min(12, candidates.length));
-    const [px,py] = candidates[pickIdx];
+    const pickIdx = Math.floor(rng()*Math.min(12, pool.length));
+    const [px,py] = pool[pickIdx];
     set.add(key(px,py));
   }
 
@@ -391,7 +393,13 @@ for (const d of dirs){
 export function growPlannedModules(state, rng, options = {}){
   if (!state?.modules?.length) return 0;
 
-  const { target = null, maxGrows = Infinity, strength = null } = options;
+  const {
+    target = null,
+    maxGrows = Infinity,
+    strength = null,
+    shuffle = false,
+    grownModules = null
+  } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
   const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
@@ -466,6 +474,11 @@ export function growPlannedModules(state, rng, options = {}){
       const scoreB = b.i * (1 - ib) + db * ib;
       return scoreA - scoreB;
     });
+  } else if (shuffle){
+    for (let i = modules.length - 1; i > 0; i--){
+      const j = Math.floor(rng() * (i + 1));
+      [modules[i], modules[j]] = [modules[j], modules[i]];
+    }
   }
 
   for (const entry of modules){
@@ -553,6 +566,9 @@ export function growPlannedModules(state, rng, options = {}){
 
       m.cells.push([nx, ny]);
       markAnim(state, nx, ny);
+      if (Array.isArray(grownModules) && !grownModules.includes(entry.i)){
+        grownModules.push(entry.i);
+      }
       grew++;
       placed = true;
       if (grew >= maxGrows) return grew;

@@ -322,8 +322,7 @@ export function applyMutation(state, momentSec){
     ["antenna",   0.08 + 0.85*ph],
     ["eye",       0.08 + 0.55*ph],
     ["spike",     0.08 + 1.00*pn + 0.40*stress],
-    ["shell",     0.06 + 0.85*pw + 0.25*stress],
-    ["palette",   0.06 + 0.15*(pf+pw+ph+pn)]
+    ["shell",     0.06 + 0.85*pw + 0.25*stress]
   ];
    // === PERSONAL PLAN (cheap but strong shape diversity) ===
   const plan = state.plan || {};
@@ -334,6 +333,17 @@ export function applyMutation(state, momentSec){
   }
   function mul(key, m){
     weights = weights.map(([k,w]) => (k===key ? [k, w * m] : [k,w]));
+  }
+
+  // === Ранние стадии роста ===
+  // До 70 блоков: тело получает +50% к текущему приоритету.
+  if (M.totalBlocks <= 70){
+    mul("grow_body", 1.5);
+  }
+  // С 50 блоков добавляем приоритет одному случайному отростку до 83 блоков.
+  if (M.totalBlocks >= 50 && M.totalBlocks <= 83){
+    const favoredAppendage = pick(rng, ["tail", "tentacle", "limb", "antenna"]);
+    mul(favoredAppendage, 1.5);
   }
 
   // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
@@ -425,7 +435,6 @@ export function applyMutation(state, momentSec){
       if (k==="spike") return [k, Math.max(0.02, w - 0.55)];
       if (k==="tail") return [k, w + 0.18];
       if (k==="antenna") return [k, w + 0.18];
-      if (k==="palette") return [k, w + 0.10];
       return [k,w];
     });
   }
@@ -520,25 +529,32 @@ export function applyMutation(state, momentSec){
       ? state.growthTarget
       : null;
     const strength = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : null;
-    const grew = growPlannedModules(state, rng, { target, maxGrows: 1, strength });
+    const baseGrows = 1 + Math.floor(rng() * 2); // 1..2
+    const moduleBoost = Math.floor((state.modules?.length || 0) / 4); // +1 per 4 modules
+    const maxGrows = Math.max(
+      1,
+      Math.round((baseGrows + moduleBoost) * (EVO.appendageGrowMult || 1))
+    );
+    const grownModules = [];
+    const grew = growPlannedModules(state, rng, {
+      target,
+      maxGrows,
+      strength,
+      shuffle: !target,
+      grownModules
+    });
     if (grew){
-      pushLog(state, `Мутация: отросток вырос.`, "mut_ok", { part: "appendage" });
+      pushLog(state, `Мутация: отросток вырос.`, "mut_ok", {
+        part: "appendage",
+        grownModules
+      });
     } else {
       pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
     }
     return;
   }
 
-  // 4) Палитра
-  if (kind === "palette"){
-    const pal = pick(rng, PALETTES);
-    const k = pick(rng, ["body", "accent", "eye", "core"]);
-    state.palette[k] = pal[k];
-    pushLog(state, `Мутация: изменился цвет (${k}).`, "mut_ok", { part: "palette" });
-    return;
-  }
-
-  // 5) Органы (tail/limb/antenna/spike/shell/eye/...)
+  // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
   const beforeN = (state.modules ? state.modules.length : 0);
   const target = Array.isArray(state.growthTarget) ? state.growthTarget : null;
   const added = addModule(state, kind, rng, target);

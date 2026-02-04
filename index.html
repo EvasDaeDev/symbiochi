@@ -32,6 +32,11 @@
       <div class="panel" id="mainPanel">
         <div class="lifeOverlay">
           <span class="pill lifePill" id="lifePill">жизнь: 00:00:00</span>
+          <div class="perfStats" id="perfStats">
+            <div class="perfItem" id="gpuStat">GPU: —%</div>
+            <div class="perfItem" id="cpuStat">CPU: —%</div>
+            <div class="perfItem" id="fpsStat">FPS: —</div>
+          </div>
         </div>
         <div class="viewportFull">
           <div class="gridWrap">
@@ -77,7 +82,7 @@
             <div class="field">
               <div>Морковок в запасе</div>
               <input id="carrotsInput" type="number" min="0" step="1" />
-              <div class="hint">Клик по полю в режиме «КОРМ» бросает морковку 7×3. Лимит: 3/тик.</div>
+              <div class="hint">Клик по полю в режиме «КОРМ» бросает морковку 3×7. Лимит: 3/тик.</div>
             </div>
             <div class="modalBtns">
               <button class="smallbtn" id="newCreature">НОВОЕ СУЩ.</button>
@@ -136,8 +141,8 @@
         <div class="legendBody" id="legendBody"></div>
         <div class="huePicker" id="huePicker" style="display:none;">
           <div class="hueTitle" id="hueTitle">Цвет</div>
-          <input id="hueRange" type="range" min="0" max="360" step="1" />
-          <div class="hint">Клик по цвету в легенде → меняешь тональность.</div>
+          <input id="hueRange" type="color" />
+          <div class="hint">Клик по цвету в легенде → меняешь цвет.</div>
         </div>
       </div>
       <div class="tabBody" id="tab-log">
