@@ -4,7 +4,7 @@
 export const CARROT = {
   w: 7,
   h: 3,
-  maxPerTick: 2,
+  maxPerTick: 3,
   nearDist: 15,   // близко: растем телом
   farDist: 15,    // далеко: тянем отросток (если > nearDist)
 };

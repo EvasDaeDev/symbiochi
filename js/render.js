@@ -2,7 +2,6 @@
 import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { organLabel } from "./mods/labels.js";
 import { PARTS } from "./mods/parts.js";
-import { CRYSTAL_GLOW } from "./mods/glow.js";
 import { CARROT } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
@@ -180,6 +179,11 @@ function brighten(hex, amt){
   return rgbToHex(c.r*k, c.g*k, c.b*k);
 }
 
+function scaleBrightness(hex, factor){
+  const c = hexToRgb(hex);
+  return rgbToHex(c.r * factor, c.g * factor, c.b * factor);
+}
+
 // cheap deterministic hash → [0..1)
 function hash01(str){
   let h = 2166136261;
@@ -324,7 +328,36 @@ function breathYOffsetPx(org, orgId, baseSeed){
 }
 
 function spikeBlinkOn(){
-  return (Math.floor(Date.now()/500) % 2) === 0;
+  const cycle = 2.5; // 0.5s of blinks + 2s pause
+  const phase = (Date.now()/1000) % cycle;
+  if (phase >= 0.5) return false;
+  const sub = phase % 0.25;
+  return sub < 0.125;
+}
+
+function antennaPulseIndex(len){
+  const speed = 5; // blocks per second
+  const travel = Math.max(1, len - 1) / speed;
+  const pause = 1.5;
+  const cycle = travel + pause;
+  const phase = (Date.now()/1000) % cycle;
+  if (phase >= travel) return null;
+  const pos = phase * speed;
+  return Math.min(len - 1, Math.max(0, Math.round(pos)));
+}
+
+function clawRotationRad(offsetSec=0){
+  const cycle = 14; // 1s rotate + 3s return + 10s pause
+  const phase = ((Date.now()/1000) + offsetSec) % cycle;
+  const maxDeg = 30;
+  if (phase < 1){
+    return (phase / 1) * (Math.PI/180) * maxDeg;
+  }
+  if (phase < 4){
+    const t = (phase - 1) / 3;
+    return (1 - t) * (Math.PI/180) * maxDeg;
+  }
+  return 0;
 }
 
 function moduleDir(cells){
@@ -336,23 +369,27 @@ function moduleDir(cells){
 
 function perpOf([dx,dy]){ return [-dy, dx]; }
 
-function windOffsetPx(i, len, blockPx){
+function lengthAmpScale(len){
+  return Math.min(2.6, 1 + Math.max(0, len - 4) * 0.05);
+}
+
+function windOffsetPx(i, len, blockPx, offsetSec=0){
   if (i < 2) return 0;
-  const t = Date.now()/1000;
+  const t = (Date.now()/1000) + offsetSec;
   const omega = 2*Math.PI/5;
   const phase = omega*t + i*0.55;
   const denom = Math.max(1, len-2);
   const amp01 = Math.min(1, (i-1)/denom);
-  const ampPx = blockPx * 0.65 * amp01;
+  const ampPx = blockPx * 0.65 * amp01 * lengthAmpScale(len);
   return Math.sin(phase) * ampPx;
 }
 
-function windOffset(i, len){
+function windOffset(i, len, offsetSec=0){
   if (i < 2) return 0;
-  const t = Date.now()/1000;
+  const t = (Date.now()/1000) + offsetSec;
   const phase = t*2 + i*0.55;
   const amp01 = Math.min(1, (i-1)/Math.max(1,len-2));
-  return Math.sin(phase) * 0.35 * amp01;
+  return Math.sin(phase) * 0.35 * amp01 * lengthAmpScale(len);
 }
 
 // growth animation: org.anim["x,y"] = {t0, dur}
@@ -597,7 +634,6 @@ for (const [wx,wy] of bodyCells){
     if (type === "spike"){
       const on = spikeBlinkOn();
       const len = cells.length;
-      const blinkCount = (len >= 14) ? 2 : 1;
 
       for (let i=0;i<len;i++){
         const [wx,wy] = cells[i];
@@ -607,10 +643,10 @@ for (const [wx,wy] of bodyCells){
 
         // spike tip blink changes brightness
         let c = base;
-        const isTip = (i >= len - blinkCount);
-        if (isTip && on) c = brighten(c, 0.15);
+        const isTip = (i === len - 1);
 
         c = organSegmentColor(c, i, len, baseSeed, orgId, mi);
+        if (isTip && on) c = scaleBrightness(c, 2);
 
         const nm = neighMaskAt(occ, wx, wy);
         const kGrow = animProgress(org, wx, wy);
@@ -648,6 +684,10 @@ for (const [wx,wy] of bodyCells){
     const len = cells.length;
     const dir = moduleDir(cells);
     const perp = perpOf(dir);
+    const antennaPulse = (type === "antenna") ? antennaPulseIndex(len) : null;
+    const offsetSec = ((orgId || 0) * 0.37 + mi) * 0.1;
+    const baseCell = cells[0];
+    const coreCell = org?.body?.core || baseCell;
 
 // Variable thickness profile (visual-only)
 // Goal:
@@ -659,6 +699,14 @@ for (const [wx,wy] of bodyCells){
 function thicknessLevel(type, i, len){
   if (type === "antenna") return 1;
   if (len < 6) return 1;
+  if (type === "claw"){
+    const mid = (len - 1) / 2;
+    const dist = Math.abs(i - mid);
+    const maxThickness = len >= 10 ? 3 : 2;
+    if (dist <= len * 0.2) return maxThickness;
+    if (dist <= len * 0.35) return Math.min(2, maxThickness);
+    return 1;
+  }
 
   const maxZone = Math.max(1, Math.floor(len * 0.25));
   const midZone = Math.max(maxZone, Math.floor(len * (2/3)));
@@ -685,11 +733,35 @@ function tryDrawSupport(wx0, wy0, sx, sy, dx, dy, col, kGrow){
   return true;
 }
 
+function outwardPerpDir(wx0, wy0){
+  const candA = [perp[0], perp[1]];
+  const candB = [-perp[0], -perp[1]];
+  const da = Math.abs((wx0 + candA[0]) - coreCell[0]) + Math.abs((wy0 + candA[1]) - coreCell[1]);
+  const db = Math.abs((wx0 + candB[0]) - coreCell[0]) + Math.abs((wy0 + candB[1]) - coreCell[1]);
+  return da >= db ? candA : candB;
+}
+
     for (let i=0;i<len;i++){
       let [wx,wy] = cells[i];
 
+      if (type === "claw" && baseCell){
+        const baseX = baseCell[0];
+        const baseY = baseCell[1];
+        const angle = clawRotationRad(offsetSec);
+        if (angle !== 0){
+          const toward = Math.sign((coreCell[0]-baseX) * perp[0] + (coreCell[1]-baseY) * perp[1]) || 1;
+          const a = angle * toward;
+          const dx = wx - baseX;
+          const dy = wy - baseY;
+          const cos = Math.cos(a);
+          const sin = Math.sin(a);
+          wx = baseX + dx * cos - dy * sin;
+          wy = baseY + dx * sin + dy * cos;
+        }
+      }
+
       // Antennas should NOT sway with wind (requested).
-      const off = (type === "antenna") ? 0 : windOffset(i, len);
+      const off = (type === "antenna") ? 0 : windOffset(i, len, offsetSec);
       wx += perp[0] * off;
       wy += perp[1] * off;
 
@@ -698,6 +770,9 @@ function tryDrawSupport(wx0, wy0, sx, sy, dx, dy, col, kGrow){
       const y = p.y + breathY;
 
       let c = organSegmentColor(base, i, len, baseSeed, orgId, mi);
+      if (type === "antenna" && antennaPulse !== null && i === antennaPulse){
+        c = scaleBrightness(c, 3);
+      }
 
       const nm = neighMaskAt(occ, cells[i][0], cells[i][1]); // for shading based on true occupancy
       const kGrow = animProgress(org, cells[i][0], cells[i][1]);
@@ -713,13 +788,24 @@ const wx0 = cells[i][0];
 const wy0 = cells[i][1];
 
 if (lvl === 2){
-  // thick: one-sided support if possible
-  tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
+  if (type === "claw"){
+    const [ox, oy] = outwardPerpDir(wx0, wy0);
+    tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
+  } else {
+    // thick: one-sided support if possible
+    tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
+  }
 }
 else if (lvl === 3){
-  // max thickness: try both sides; if blocked, it will draw only what fits
-  tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
-  tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
+  if (type === "claw"){
+    const [ox, oy] = outwardPerpDir(wx0, wy0);
+    tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
+    tryDrawSupport(wx0, wy0, x, y, ox * 2, oy * 2, shade, kGrow);
+  } else {
+    // max thickness: try both sides; if blocked, it will draw only what fits
+    tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
+    tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
+  }
 }
 
       if (isSelected && isBoundary(occ, cells[i][0], cells[i][1])){
@@ -865,22 +951,6 @@ export function renderGrid(state, canvas, gridEl, view){
   g.addColorStop(1, "rgba(0,0,0,0.24)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
-
-  // Inner perimeter glow (pink crystalline, jagged/fractal edge), depends on avg condition, up to 24px.
-  {
-    const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
-    let sum = 0;
-    for (const o of orgs){
-      const bars = o.bars || {food:1,clean:1,hp:1,mood:1};
-      sum += Math.min(bars.food, bars.clean, bars.hp, bars.mood);
-    }
-    const avg = sum / Math.max(1, orgs.length);
-    const t = Math.max(0, Math.min(1, avg));
-    const px = Math.round((CRYSTAL_GLOW.maxPx || 24) * t);
-    if (px > 0){
-      drawCrystalPerimeter(ctx, view.rectW, view.rectH, px, t, (state.seed||1) ^ ((state.lastSeen||0)|0));
-    }
-  }
 
   // Carrots (rect blocks, orange)
 if (Array.isArray(state.carrots)){
