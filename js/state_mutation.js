@@ -322,8 +322,7 @@ export function applyMutation(state, momentSec){
     ["antenna",   0.08 + 0.85*ph],
     ["eye",       0.08 + 0.55*ph],
     ["spike",     0.08 + 1.00*pn + 0.40*stress],
-    ["shell",     0.06 + 0.85*pw + 0.25*stress],
-    ["palette",   0.06 + 0.15*(pf+pw+ph+pn)]
+    ["shell",     0.06 + 0.85*pw + 0.25*stress]
   ];
    // === PERSONAL PLAN (cheap but strong shape diversity) ===
   const plan = state.plan || {};
@@ -436,7 +435,6 @@ export function applyMutation(state, momentSec){
       if (k==="spike") return [k, Math.max(0.02, w - 0.55)];
       if (k==="tail") return [k, w + 0.18];
       if (k==="antenna") return [k, w + 0.18];
-      if (k==="palette") return [k, w + 0.10];
       return [k,w];
     });
   }
@@ -556,16 +554,7 @@ export function applyMutation(state, momentSec){
     return;
   }
 
-  // 4) Палитра
-  if (kind === "palette"){
-    const pal = pick(rng, PALETTES);
-    const k = pick(rng, ["body", "accent", "eye", "core"]);
-    state.palette[k] = pal[k];
-    pushLog(state, `Мутация: изменился цвет (${k}).`, "mut_ok", { part: "palette" });
-    return;
-  }
-
-  // 5) Органы (tail/limb/antenna/spike/shell/eye/...)
+  // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
   const beforeN = (state.modules ? state.modules.length : 0);
   const target = Array.isArray(state.growthTarget) ? state.growthTarget : null;
   const added = addModule(state, kind, rng, target);
