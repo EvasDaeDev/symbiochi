@@ -1115,17 +1115,17 @@ export function renderRules(rulesEl){
   const applyTokens = (text)=> text.replace(/\{\{(\w+)\}\}/g, (_, key) => tokens[key] ?? "");
 
   const sectionsHtml = RULES.map((section, index)=>{
-    const title = `<div class=\"rule\"><b>${escapeHtml(section.title)}</b></div>`;
+    const title = `<div class="rule"><b>${escapeHtml(section.title)}</b></div>`;
     const items = (section.items || []).map((item)=>{
-      const style = item.muted ? " style=\"color:var(--muted);\"" : "";
-      return `<div class=\"rule\"${style}>${applyTokens(item.text)}</div>`;
-    }).join(\"\");
-    const spacer = index === 0 ? \"\" : '<div style=\"height:8px\"></div>';
+      const style = item.muted ? ' style="color:var(--muted);"' : "";
+      return `<div class="rule"${style}>${applyTokens(item.text)}</div>`;
+    }).join("");
+    const spacer = index === 0 ? "" : '<div style="height:8px"></div>';
     return `${spacer}${title}${items}`;
-  }).join(\"\");
+  }).join("");
 
   rulesEl.innerHTML = `
-    <div style=\"font-weight:900; color:var(--text); margin-bottom:6px;\">Правила и управление (обновлено)</div>
+    <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Правила и управление (обновлено)</div>
     ${sectionsHtml}
   `;
 }
