@@ -386,11 +386,44 @@ export function growPlannedModules(state, rng){
   if (!state?.modules?.length) return 0;
 
   const bodySet = bodyCellSet(state.body);
+  const carrotCenters = Array.isArray(state.carrots)
+    ? state.carrots.map((car) => ([
+      car.x + Math.floor((car.w ?? 7) / 2),
+      car.y + Math.floor((car.h ?? 3) / 2)
+    ]))
+    : [];
+  const hasCarrots = carrotCenters.length > 0;
+  const cos45 = Math.SQRT1_2;
 
   function rotateDir(dir, steps){
     let i = DIR8.findIndex(d => d[0]===dir[0] && d[1]===dir[1]);
     if (i < 0) i = 0;
     return DIR8[(i + steps + DIR8.length) % DIR8.length];
+  }
+  function seesCarrot(m){
+    if (!hasCarrots) return true;
+    const appendage =
+      m.movable ||
+      m.type === "tail" ||
+      m.type === "tentacle" ||
+      m.type === "limb" ||
+      m.type === "antenna" ||
+      m.type === "claw";
+    if (!appendage) return true;
+    const dir = m.growDir || m.baseDir;
+    if (!dir) return true;
+    const base = m.cells?.[0] || m.cells?.[m.cells.length - 1];
+    if (!base) return true;
+    const dirLen = Math.hypot(dir[0], dir[1]) || 1;
+    for (const [cx, cy] of carrotCenters){
+      const vx = cx - base[0];
+      const vy = cy - base[1];
+      const vLen = Math.hypot(vx, vy);
+      if (vLen === 0) return true;
+      const dot = (vx * dir[0] + vy * dir[1]) / (vLen * dirLen);
+      if (dot >= cos45) return true;
+    }
+    return false;
   }
 
   let grew = 0;
@@ -398,6 +431,7 @@ export function growPlannedModules(state, rng){
   for (const m of state.modules){
     const minLen = m.growTo ?? 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
+    if (!seesCarrot(m)) continue;
 
     const last = m.cells[m.cells.length - 1];
     let baseDir = m.growDir;
