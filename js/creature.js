@@ -172,6 +172,7 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
+  const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
 
   let anchor = null;
   let anchorCandidates = null;
@@ -313,6 +314,9 @@ for (const d of dirs){
   }
 
   if (!cells.length) return false;
+  if (dirForGrowth && maxAppendageLen > 0 && targetLen){
+    targetLen = Math.min(targetLen, maxAppendageLen);
+  }
   for (const [x,y] of cells) markAnim(state, x, y);
   // slight per-module tone variation (±10% intended for rendering)
   const pigment = {
@@ -390,6 +394,7 @@ export function growPlannedModules(state, rng, options = {}){
   const { target = null, maxGrows = Infinity, strength = null } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
+  const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
   const carrotCenters = useTarget
     ? [target]
     : Array.isArray(state.carrots)
@@ -467,6 +472,7 @@ export function growPlannedModules(state, rng, options = {}){
     const m = entry.m;
     const minLen = m.growTo ?? 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
+    if (maxAppendageLen > 0 && m.cells.length >= maxAppendageLen) continue;
     if (m.type === "spike" && m.cells.length >= 10) continue;
     if (m.type === "antenna" && m.cells.length >= 27) continue;
     if (requireSight && !seesCarrot(m)) continue;

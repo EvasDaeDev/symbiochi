@@ -358,10 +358,10 @@ function showOfflineSummary(deltaSec, sim){
     el.style.justifyContent = "center";
     el.style.zIndex = "9999";
     el.innerHTML = `
-      <div style="background:#111;border-radius:14px;padding:16px;width:min(520px,92vw)">
-        <div style="font-weight:900;margin-bottom:8px">Пока тебя не было…</div>
-        <div id="offlineText"></div>
-        <button style="margin-top:12px" id="offlineOk">OK</button>
+      <div class="offlineCard">
+        <div class="offlineTitle">Пока тебя не было…</div>
+        <div id="offlineText" class="offlineText"></div>
+        <button class="offlineOk" id="offlineOk">OK</button>
       </div>`;
     document.body.appendChild(el);
     el.querySelector("#offlineOk").onclick = ()=> el.remove();
