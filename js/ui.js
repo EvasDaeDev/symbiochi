@@ -1,6 +1,9 @@
 import { fmtAgeSeconds, escapeHtml, barPct, mulberry32, hash32, clamp, nowSec } from "./util.js";
 import { pushLog } from "./log.js";
 import { saveGame, deleteSave, actOn } from "./state.js";
+import { extractGenome, encodeGenome } from "./mods/merge.js";
+import { applySymbiosisMerge } from "./state_mutation.js";
+import { drawQrToCanvas } from "./mods/qrcode.js";
 
 function getActiveOrg(state){
   // Selection model:
@@ -121,6 +124,110 @@ export function attachSettings(view, els, toast){
   els.settingsOverlay.addEventListener("click", (e)=>{
     if (e.target === els.settingsOverlay) closeSettings();
   });
+}
+
+export function attachSymbiosisUI(view, els, toast){
+  if (!els.symbiosisBtn || !els.symbiosisOverlay) return;
+
+  let stream = null;
+  let scanTimer = null;
+
+  function openSymbiosis(){
+    els.symbiosisOverlay.style.display = "grid";
+    showTab("show");
+  }
+
+  function closeSymbiosis(){
+    stopScan();
+    els.symbiosisOverlay.style.display = "none";
+  }
+
+  function showTab(name){
+    if (!els.symShowTab || !els.symReceiveTab) return;
+    els.symShowTab.classList.toggle("isActive", name === "show");
+    els.symReceiveTab.classList.toggle("isActive", name === "receive");
+    if (els.symShowBody) els.symShowBody.style.display = name === "show" ? "block" : "none";
+    if (els.symReceiveBody) els.symReceiveBody.style.display = name === "receive" ? "block" : "none";
+    if (name === "show") prepareShow();
+    if (name === "receive") stopScan();
+  }
+
+  async function prepareShow(){
+    if (!view.state) return;
+    try {
+      const genome = extractGenome(view.state);
+      const code = await encodeGenome(genome);
+      if (els.symTextArea) els.symTextArea.value = code;
+      if (els.qrCanvas) drawQrToCanvas(els.qrCanvas, code);
+      if (els.symShowHint) els.symShowHint.textContent = "Форма сжалась в отпечаток.";
+    } catch (err){
+      if (els.symShowHint) els.symShowHint.textContent = "Не удалось собрать отпечаток.";
+    }
+  }
+
+  async function startScan(){
+    if (!els.symVideo || !("BarcodeDetector" in window)) return;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      els.symVideo.srcObject = stream;
+      await els.symVideo.play();
+      const detector = new BarcodeDetector({ formats: ["qr_code"] });
+      scanTimer = setInterval(async ()=>{
+        if (!els.symVideo) return;
+        const barcodes = await detector.detect(els.symVideo);
+        if (barcodes && barcodes.length){
+          const value = barcodes[0].rawValue;
+          if (els.symReceiveInput) els.symReceiveInput.value = value;
+          stopScan();
+        }
+      }, 300);
+    } catch (err){
+      stopScan();
+    }
+  }
+
+  function stopScan(){
+    if (scanTimer){
+      clearInterval(scanTimer);
+      scanTimer = null;
+    }
+    if (stream){
+      for (const track of stream.getTracks()) track.stop();
+      stream = null;
+    }
+    if (els.symVideo){
+      els.symVideo.pause();
+      els.symVideo.srcObject = null;
+    }
+  }
+
+  async function applySymbiosis(){
+    if (!view.state || !els.symReceiveInput) return;
+    const input = els.symReceiveInput.value.trim();
+    if (!input){
+      toast("Отпечаток не распознан.");
+      return;
+    }
+    const result = await applySymbiosisMerge(view.state, input);
+    if (result.ok){
+      toast("Симбиоз завершён. Это тело уже не прежнее.");
+      closeSymbiosis();
+    } else {
+      toast("Отпечаток не распознан.");
+    }
+  }
+
+  els.symbiosisBtn.addEventListener("click", openSymbiosis);
+  if (els.symCloseBtn) els.symCloseBtn.addEventListener("click", closeSymbiosis);
+  if (els.symShowTab) els.symShowTab.addEventListener("click", ()=>showTab("show"));
+  if (els.symReceiveTab) els.symReceiveTab.addEventListener("click", ()=>showTab("receive"));
+  if (els.symApplyBtn) els.symApplyBtn.addEventListener("click", applySymbiosis);
+  if (els.symScanBtn) els.symScanBtn.addEventListener("click", startScan);
+  if (els.symbiosisOverlay){
+    els.symbiosisOverlay.addEventListener("click", (e)=>{
+      if (e.target === els.symbiosisOverlay) closeSymbiosis();
+    });
+  }
 }
 
 export function attachInfoTabs(els){
