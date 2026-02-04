@@ -100,9 +100,13 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
   const cells = m.cells.slice();
   const len = cells.length;
 
-  // отрезаем "почку": первые 2 сегмента остаются у родителя (крепление),
-  // остальное уходит в дочерний организм. Минимум 4 клетки в почке.
-  const cut = Math.min(2, len-4);
+  // отрезаем "почку": не ближе чем 2/3 длины от отростка (от крепления),
+  // при этом у родителя остаётся хотя бы несколько сегментов.
+  // Минимум 4 клетки в почке.
+  const minCut = Math.max(2, Math.ceil(len * (2/3)));
+  const maxCut = len - 4;
+  if (minCut > maxCut) return false;
+  const cut = Math.min(minCut, maxCut);
   const budSeg = cells.slice(cut);
   if (budSeg.length < 4) return false;
 

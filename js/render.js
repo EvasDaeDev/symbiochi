@@ -24,7 +24,7 @@ const MIN_GRID_W = 20;
 const MIN_GRID_H = 12;
 
 const BREATH_PERIOD_SEC = 3.0;   // cycle
-const BREATH_AMPL_PX = 1;        // requested: 1 pixel
+const BREATH_AMPL_PX = 1.5;      // requested: 1 pixel (now 1.5x)
 
 const GROW_DUR_SEC = 0.7;        // requested: 0.7s extrusion
 const GLOW_PX = 3;               // requested: ~3px glow thickness

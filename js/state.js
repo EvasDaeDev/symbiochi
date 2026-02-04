@@ -78,6 +78,9 @@ export function migrateOrNew(){
     if (org.active === undefined) org.active = null;
     if (!Number.isFinite(org.hueShiftDeg)) org.hueShiftDeg = 0;
     if (!org.partHue) org.partHue = {};
+    if (org.growthTarget === undefined) org.growthTarget = null;
+    if (org.growthTargetMode === undefined) org.growthTargetMode = null;
+    if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
   }
 
   normalizeOrg(state, state.seed || 1);
@@ -170,7 +173,7 @@ export function simulate(state, deltaSec){
 
   for (let k=0; k<stepsToApply; k++){
     state.lastMutationAt += intervalSec;
-    eaten += processCarrotsTick(state);
+    eaten += processCarrotsTick(state, state);
     applyMutation(state, state.lastMutationAt);
     mutations++;
   }
@@ -180,7 +183,7 @@ export function simulate(state, deltaSec){
     state.lastMutationAt += skipped * intervalSec;
   }
 
-  // buds: evolve instantly too (no carrots, no budding)
+  // buds: evolve instantly too
   if (Array.isArray(state.buds)){
     for (const bud of state.buds){
       if (!bud) continue;
@@ -190,6 +193,7 @@ export function simulate(state, deltaSec){
 
       for (let k=0; k<budApply; k++){
         bud.lastMutationAt = (bud.lastMutationAt || state.lastMutationAt) + intervalSec;
+        eaten += processCarrotsTick(state, bud);
         applyMutation(bud, bud.lastMutationAt);
         budMutations++;
       }
@@ -221,23 +225,23 @@ function carrotCells(car){
   return out;
 }
 
-function processCarrotsTick(state){
+function processCarrotsTick(state, org = state){
   if (!Array.isArray(state.carrots) || !state.carrots.length){
-    state.growthTarget = null;
-    state.growthTargetMode = null;
-    state.growthTargetPower = 0;
+    org.growthTarget = null;
+    org.growthTargetMode = null;
+    org.growthTargetPower = 0;
     return 0;
   }
 
   let eaten = 0;
   const bodyOcc = new Set();
-  for (const [x,y] of (state.body?.cells || [])) bodyOcc.add(`${x},${y}`);
+  for (const [x,y] of (org.body?.cells || [])) bodyOcc.add(`${x},${y}`);
   const moduleOcc = new Set();
-  for (const m of (state.modules || [])){
+  for (const m of (org.modules || [])){
     for (const [x,y] of (m?.cells || [])) moduleOcc.add(`${x},${y}`);
   }
-  const bodyCells = state.body?.cells || [];
-  const moduleCells = (state.modules || []).flatMap(m => m?.cells || []);
+  const bodyCells = org.body?.cells || [];
+  const moduleCells = (org.modules || []).flatMap(m => m?.cells || []);
 
   function minDistToCells(cells, tx, ty){
     let best = Infinity;
@@ -268,8 +272,8 @@ function processCarrotsTick(state){
       if (hits >= 2) break;
     }
     if (hits >= 2){
-      state.bars.food = clamp(state.bars.food + 0.22, 0, BAR_MAX);
-      state.bars.mood = clamp(state.bars.mood + 0.06, 0, BAR_MAX);
+      org.bars.food = clamp(org.bars.food + 0.22, 0, BAR_MAX);
+      org.bars.mood = clamp(org.bars.mood + 0.06, 0, BAR_MAX);
       pushLog(state, `Кормление: морковка съедена.`, "care");
       eaten++;
     } else {
@@ -279,8 +283,9 @@ function processCarrotsTick(state){
   state.carrots = remaining;
 
   if (!state.carrots.length){
-    state.growthTarget = null;
-    state.growthTargetMode = null;
+    org.growthTarget = null;
+    org.growthTargetMode = null;
+    org.growthTargetPower = 0;
     return eaten;
   }
 
@@ -303,9 +308,9 @@ function processCarrotsTick(state){
     }
   }
 
-  state.growthTarget = best;
-  state.growthTargetMode = (bestModuleD < bestBodyD) ? "appendage" : "body";
-  state.growthTargetPower = Math.max(0, Math.min(1, 1 - bestD / 45));
+  org.growthTarget = best;
+  org.growthTargetMode = (bestModuleD < bestBodyD) ? "appendage" : "body";
+  org.growthTargetPower = Math.max(0, Math.min(1, 1 - bestD / 45));
   return eaten;
 }
 
