@@ -382,18 +382,23 @@ for (const d of dirs){
   return true;
 }
 
-export function growPlannedModules(state, rng){
+export function growPlannedModules(state, rng, options = {}){
   if (!state?.modules?.length) return 0;
 
+  const { target = null, maxGrows = Infinity, strength = null } = options;
+  const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
-  const carrotCenters = Array.isArray(state.carrots)
-    ? state.carrots.map((car) => ([
-      car.x + Math.floor((car.w ?? 7) / 2),
-      car.y + Math.floor((car.h ?? 3) / 2)
-    ]))
-    : [];
+  const carrotCenters = useTarget
+    ? [target]
+    : Array.isArray(state.carrots)
+      ? state.carrots.map((car) => ([
+        car.x + Math.floor((car.w ?? 7) / 2),
+        car.y + Math.floor((car.h ?? 3) / 2)
+      ]))
+      : [];
   const hasCarrots = carrotCenters.length > 0;
   const cos45 = Math.SQRT1_2;
+  const requireSight = !useTarget;
 
   function rotateDir(dir, steps){
     let i = DIR8.findIndex(d => d[0]===dir[0] && d[1]===dir[1]);
@@ -419,22 +424,52 @@ export function growPlannedModules(state, rng){
       const vx = cx - base[0];
       const vy = cy - base[1];
       const vLen = Math.hypot(vx, vy);
-      if (vLen === 0) return true;
+    if (vLen === 0) return true;
       const dot = (vx * dir[0] + vy * dir[1]) / (vLen * dirLen);
       if (dot >= cos45) return true;
     }
     return false;
   }
 
-  let grew = 0;
+  function moduleDistance(m, tx, ty){
+    let best = Infinity;
+    for (const [x,y] of (m.cells || [])){
+      const d = Math.abs(x - tx) + Math.abs(y - ty);
+      if (d < best) best = d;
+    }
+    return best;
+  }
 
-  for (const m of state.modules){
+  function targetInfluence(dist){
+    const base = Number.isFinite(strength) ? strength : 1;
+    const scaled = Math.max(0, Math.min(1, 1 - dist / 45));
+    return Math.pow(scaled, 2) * Math.max(0, Math.min(1, base));
+  }
+
+  let grew = 0;
+  const modules = state.modules.map((m, i) => ({ m, i }));
+  if (useTarget){
+    const [tx, ty] = target;
+    modules.sort((a,b) => {
+      const da = moduleDistance(a.m, tx, ty);
+      const db = moduleDistance(b.m, tx, ty);
+      const ia = targetInfluence(da);
+      const ib = targetInfluence(db);
+      const scoreA = a.i * (1 - ia) + da * ia;
+      const scoreB = b.i * (1 - ib) + db * ib;
+      return scoreA - scoreB;
+    });
+  }
+
+  for (const entry of modules){
+    const m = entry.m;
     const minLen = m.growTo ?? 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
-    if (!seesCarrot(m)) continue;
+    if (requireSight && !seesCarrot(m)) continue;
 
     const last = m.cells[m.cells.length - 1];
     let baseDir = m.growDir;
+    const moduleInfluence = useTarget ? targetInfluence(moduleDistance(m, target[0], target[1])) : 0;
 
     // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
     let dir = baseDir;
@@ -478,6 +513,20 @@ export function growPlannedModules(state, rng){
     pushDir(rotateDir(dir, 3));
     pushDir(rotateDir(dir, -3));
 
+    if (useTarget && moduleInfluence > 0){
+      const [tx, ty] = target;
+      const ordered = tryDirs.map((dir, index) => ({ dir, index }));
+      ordered.sort((a,b)=>{
+        const da = Math.abs(last[0] + a.dir[0] - tx) + Math.abs(last[1] + a.dir[1] - ty);
+        const db = Math.abs(last[0] + b.dir[0] - tx) + Math.abs(last[1] + b.dir[1] - ty);
+        const scoreA = a.index * (1 - moduleInfluence) + da * moduleInfluence;
+        const scoreB = b.index * (1 - moduleInfluence) + db * moduleInfluence;
+        return scoreA - scoreB;
+      });
+      tryDirs.length = 0;
+      for (const entry of ordered) tryDirs.push(entry.dir);
+    }
+
     let placed = false;
 
     for (const [dx,dy] of tryDirs){
@@ -496,6 +545,7 @@ export function growPlannedModules(state, rng){
       markAnim(state, nx, ny);
       grew++;
       placed = true;
+      if (grew >= maxGrows) return grew;
       break;
     }
 
