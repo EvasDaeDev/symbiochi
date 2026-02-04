@@ -644,3 +644,6 @@ html, body { overscroll-behavior: none; }
 
 .logEntry.bud .msg { color: #38bdf8; font-weight: 700; }
 .logEntry.bud .when { color: #38bdf8; }
+.modalBtns #symbiosisBtn{
+  color: var(--muted);
+}
