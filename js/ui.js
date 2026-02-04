@@ -1,6 +1,8 @@
 import { fmtAgeSeconds, escapeHtml, barPct, mulberry32, hash32, clamp, nowSec } from "./util.js";
 import { pushLog } from "./log.js";
 import { saveGame, deleteSave, actOn } from "./state.js";
+import { extractGenome, encodeGenome } from "./mods/merge.js";
+import { applySymbiosisMerge } from "./state_mutation.js";
 
 function getActiveOrg(state){
   // Selection model:
@@ -121,6 +123,110 @@ export function attachSettings(view, els, toast){
   els.settingsOverlay.addEventListener("click", (e)=>{
     if (e.target === els.settingsOverlay) closeSettings();
   });
+}
+
+export function attachSymbiosisUI(view, els, toast){
+  if (!els.symbiosisBtn || !els.symbiosisOverlay) return;
+
+  function openSymbiosis(){
+    els.symbiosisOverlay.style.display = "grid";
+    if (els.symShareOutput) els.symShareOutput.value = "";
+    if (!view.state){
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
+      }
+      if (els.symShareBtn) els.symShareBtn.disabled = true;
+      if (els.symApplyBtn) els.symApplyBtn.disabled = true;
+    } else {
+      if (els.symShareBtn) els.symShareBtn.disabled = false;
+      updateApplyState();
+    }
+  }
+
+  function closeSymbiosis(){
+    els.symbiosisOverlay.style.display = "none";
+    hideConfirm();
+    if (els.symShareBtn) els.symShareBtn.disabled = false;
+  }
+
+  async function shareGenome(){
+    if (!view.state){
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
+      }
+      return;
+    }
+    try {
+      const genome = extractGenome(view.state);
+      const code = await encodeGenome(genome);
+      if (els.symShareOutput) els.symShareOutput.value = code;
+      if (navigator.clipboard?.writeText){
+        await navigator.clipboard.writeText(code);
+        toast("Отпечаток скопирован.");
+        if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Отпечаток скопирован в буфер.";
+      } else {
+        throw new Error("no clipboard");
+      }
+    } catch (err){
+      if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Скопируй строку вручную — браузер не дал доступ.";
+      if (els.symShareOutput){
+        els.symShareOutput.focus();
+        els.symShareOutput.select();
+      }
+      toast("Не удалось скопировать отпечаток.");
+    }
+  }
+
+  function updateApplyState(){
+    if (!els.symApplyBtn || !els.symReceiveInput) return;
+    els.symApplyBtn.disabled = !els.symReceiveInput.value.trim();
+  }
+
+  function showConfirm(){
+    if (!els.symConfirm) return;
+    els.symConfirm.style.display = "grid";
+  }
+
+  function hideConfirm(){
+    if (!els.symConfirm) return;
+    els.symConfirm.style.display = "none";
+  }
+
+  async function applySymbiosis(){
+    if (!view.state || !els.symReceiveInput) return;
+    const input = els.symReceiveInput.value.trim();
+    if (!input){
+      toast("Отпечаток не распознан.");
+      return;
+    }
+    const result = await applySymbiosisMerge(view.state, input);
+    if (result.ok){
+      toast("Симбиоз завершён. Это тело уже не прежнее.");
+      closeSymbiosis();
+    } else {
+      toast("Отпечаток не распознан.");
+    }
+  }
+
+  els.symbiosisBtn.addEventListener("click", openSymbiosis);
+  if (els.symCloseBtn) els.symCloseBtn.addEventListener("click", closeSymbiosis);
+  if (els.symShareBtn) els.symShareBtn.addEventListener("click", shareGenome);
+  if (els.symApplyBtn) els.symApplyBtn.addEventListener("click", showConfirm);
+  if (els.symConfirmYes) els.symConfirmYes.addEventListener("click", applySymbiosis);
+  if (els.symConfirmNo) els.symConfirmNo.addEventListener("click", hideConfirm);
+  if (els.symReceiveInput) els.symReceiveInput.addEventListener("input", updateApplyState);
+  if (els.symReceiveInput) els.symReceiveInput.addEventListener("paste", () => setTimeout(updateApplyState, 0));
+  if (els.symbiosisOverlay){
+    els.symbiosisOverlay.addEventListener("click", (e)=>{
+      if (e.target === els.symbiosisOverlay) closeSymbiosis();
+    });
+  }
+  if (els.symConfirm){
+    els.symConfirm.addEventListener("click", (e)=>{
+      if (e.target === els.symConfirm) hideConfirm();
+    });
+  }
+  updateApplyState();
 }
 
 export function attachInfoTabs(els){
