@@ -78,6 +78,7 @@ export function migrateOrNew(){
     if (org.active === undefined) org.active = null;
     if (!Number.isFinite(org.hueShiftDeg)) org.hueShiftDeg = 0;
     if (!org.partHue) org.partHue = {};
+    if (!org.partColor) org.partColor = {};
     if (org.growthTarget === undefined) org.growthTarget = null;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
@@ -101,6 +102,7 @@ export function migrateOrNew(){
   if (!state.settings) state.settings = {};
   if (!Number.isFinite(state.settings.lengthPriority)) state.settings.lengthPriority = 0.65;
   if (!state.partHue) state.partHue = {};
+  if (!state.partColor) state.partColor = {};
 
   // evo interval: prefer settings (more stable on mobile), normalize & clamp
   {
@@ -122,6 +124,7 @@ export function migrateOrNew(){
     if (!Number.isFinite(b.lastMutationAt)) b.lastMutationAt = state.lastMutationAt;
     if (!Number.isFinite(b.lastSeen)) b.lastSeen = state.lastSeen;
     if (!b.partHue) b.partHue = state.partHue;
+    if (!b.partColor) b.partColor = {};
   }
 
   saveGame(state);

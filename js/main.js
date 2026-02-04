@@ -43,6 +43,9 @@ const els = {
   hudMeta2: document.getElementById("hudMeta2"),
   hudSeed: document.getElementById("hudSeed"),
   lifePill: document.getElementById("lifePill"),
+  gpuStat: document.getElementById("gpuStat"),
+  cpuStat: document.getElementById("cpuStat"),
+  fpsStat: document.getElementById("fpsStat"),
   carrotHudInput: document.getElementById("carrotHudInput"),
   footerInfo: document.getElementById("footerInfo"),
 
@@ -110,6 +113,15 @@ const view = {
   renderTimer: null,
   autoTimer: null,
 
+  perf: {
+    lastFrameAt: 0,
+    lastStatAt: 0,
+    frameCount: 0,
+    fps: 0,
+    smoothedFrame: 16.7,
+    smoothedRender: 0,
+  },
+
   // resize observer
   _ro: null,
 };
@@ -135,14 +147,14 @@ function rerenderAll(deltaSec){
 
   syncToSize();
 
-  renderRules(els.rulesBody);
-  renderLegend(view.state, els.legendBody);
-  renderLog(view.state, els);
   const root = view.state;
   const a = root.active;
   const selectedOrg = (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
     ? root.buds[a]
     : root;
+  renderRules(els.rulesBody);
+  renderLegend(selectedOrg, els.legendBody);
+  renderLog(view.state, els);
   renderHud(root, selectedOrg, els, deltaSec, fmtAgeSeconds, view.zoom);
   // organism info tab
   if (els.orgInfo){
@@ -186,14 +198,42 @@ function autoTick(){
 }
 
 function startLoops(){
+  const targetFrameMs = 1000 / 60;
   const frame = ()=>{
     if (!view.state) return;
+    const now = performance.now();
+    const perf = view.perf;
+    const delta = perf.lastFrameAt ? Math.max(0, now - perf.lastFrameAt) : targetFrameMs;
+    perf.lastFrameAt = now;
+    perf.smoothedFrame = perf.smoothedFrame * 0.9 + delta * 0.1;
+    perf.frameCount += 1;
+
+    const renderStart = performance.now();
     renderGrid(view.state, els.canvas, els.grid, view);
+    const renderTime = performance.now() - renderStart;
+    perf.smoothedRender = perf.smoothedRender * 0.9 + renderTime * 0.1;
+
+    if (now - perf.lastStatAt >= 250){
+      const span = now - perf.lastStatAt || 1;
+      perf.fps = Math.min(999, Math.round((perf.frameCount * 1000) / span));
+      perf.frameCount = 0;
+      perf.lastStatAt = now;
+
+      const cpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedRender / Math.max(1, perf.smoothedFrame)) * 100)));
+      const gpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedFrame / targetFrameMs) * 100)));
+
+      if (els.cpuStat) els.cpuStat.textContent = `CPU: ${cpuLoad}%`;
+      if (els.gpuStat) els.gpuStat.textContent = `GPU: ${gpuLoad}%`;
+      if (els.fpsStat) els.fpsStat.textContent = `FPS: ${perf.fps}`;
+    }
     view.renderTimer = requestAnimationFrame(frame);
   };
 
   if (!view.renderTimer){
     syncToSize();
+    view.perf.lastFrameAt = 0;
+    view.perf.lastStatAt = performance.now();
+    view.perf.frameCount = 0;
     view.renderTimer = requestAnimationFrame(frame);
   }
 
