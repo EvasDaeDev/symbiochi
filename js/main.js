@@ -280,7 +280,7 @@ function attachPickOrganism(){
         return;
       }
 
-      // place carrot with its 7x3 rect starting at click cell
+      // place carrot with its 3x7 shape starting at click cell
       s.carrots = Array.isArray(s.carrots) ? s.carrots : [];
       s.carrots.push({ x: wx, y: wy, w: CARROT.w, h: CARROT.h, t: nowSec() });
       s.carrotTick.used++;
