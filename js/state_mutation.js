@@ -579,11 +579,11 @@ export function applyMutation(state, momentSec){
     }
 
     const budType = state.modules[idx]?.type || "tail";
-    const ok = detachAppendageAndDestroy(state, idx);
+    const ok = createBudFromModule(state, idx, rng, isBigForBud ? BUD.bigParentSuccessMult : 1);
     if (ok){
       state.bars.food = clamp01(state.bars.food - 0.20);
       state.bars.hp = clamp01(state.bars.hp - 0.20);
-      pushLog(state, `Мутация: отросток отделился и был уничтожен.`, "mut_ok", { part: budType, mi: idx });
+      pushLog(state, `Мутация: отделилась почка.`, "bud_ok", { part: budType, mi: idx });
     } else {
       const addN = 1 + Math.floor(rng()*2);
       const { biases } = getGrowthBiases(state, "body");
@@ -591,8 +591,8 @@ export function applyMutation(state, momentSec){
       pushLog(
         state,
         grown
-          ? `Мутация: отделение отростка не удалось → тело выросло (+${addN}).`
-          : `Мутация: отделение отростка не удалось и рост тела не удался.`,
+          ? `Мутация: отделение почки не удалось → тело выросло (+${addN}).`
+          : `Мутация: отделение почки не удалось и рост тела не удался.`,
         "mut_fail",
         { part: budType }
       );

@@ -42,7 +42,6 @@ const els = {
   hudStage: document.getElementById("hudStage"),
   hudMeta: document.getElementById("hudMeta"),
   hudMeta2: document.getElementById("hudMeta2"),
-  hudSeed: document.getElementById("hudSeed"),
   lifePill: document.getElementById("lifePill"),
   gpuStat: document.getElementById("gpuStat"),
   cpuStat: document.getElementById("cpuStat"),

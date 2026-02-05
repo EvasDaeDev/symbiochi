@@ -1,6 +1,7 @@
 import { BAR_MAX, clamp, clamp01, key, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
+import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
@@ -131,6 +132,7 @@ export function migrateOrNew(){
     if (!Number.isFinite(org.hueShiftDeg)) org.hueShiftDeg = 0;
     if (!org.partHue) org.partHue = {};
     if (!org.partColor) org.partColor = {};
+    if (!Number.isFinite(org.mutationDebt)) org.mutationDebt = 0;
     if (org.growthTarget === undefined) org.growthTarget = null;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
@@ -153,6 +155,7 @@ export function migrateOrNew(){
   if (state.growthTarget === undefined) state.growthTarget = null;
   if (state.growthTargetMode === undefined) state.growthTargetMode = null;
   if (!Number.isFinite(state.growthTargetPower)) state.growthTargetPower = 0;
+  if (!Number.isFinite(state.mutationDebt)) state.mutationDebt = 0;
 
   // UI / tuning settings
   if (!state.settings) state.settings = {};
@@ -253,27 +256,56 @@ export function simulate(state, deltaSec){
       skippedLocal = due - applied;
       org.lastMutationAt = (org.lastMutationAt || 0) + skippedLocal * stepIntervalSec;
     }
+    if (skippedLocal > 0){
+      org.mutationDebt = Math.max(0, (org.mutationDebt || 0) + skippedLocal);
+    }
 
     return { due, applied, skipped: skippedLocal };
+  };
+
+  const maxPerTick = Math.max(1, Math.floor(EVO.maxMutationsPerTick || 2));
+  const runMutationTick = (org, momentSec)=>{
+    const bars = org.bars || {};
+    const minBar = Math.min(
+      bars.food ?? 0,
+      bars.clean ?? 0,
+      bars.hp ?? 0,
+      bars.mood ?? 0
+    );
+    if (minBar <= 0){
+      reportCriticalState(org, momentSec);
+      return 0;
+    }
+    if (minBar <= 0.1){
+      return 0;
+    }
+
+    let applied = 0;
+    const applyOnce = ()=>{
+      applyMutation(org, momentSec);
+      applied += 1;
+    };
+
+    applyOnce();
+
+    let debt = Number.isFinite(org.mutationDebt) ? org.mutationDebt : 0;
+    const remainingBudget = Math.max(0, maxPerTick - applied);
+    if (debt > 0 && remainingBudget > 0){
+      const extra = Math.min(debt, remainingBudget);
+      for (let i = 0; i < extra; i++){
+        applyOnce();
+      }
+      debt -= extra;
+      org.mutationDebt = debt;
+    }
+    return applied;
   };
 
   state._remainingOfflineSteps = MAX_OFFLINE_STEPS;
   {
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
-      const bars = state.bars || {};
-      const minBar = Math.min(
-        bars.food ?? 0,
-        bars.clean ?? 0,
-        bars.hp ?? 0,
-        bars.mood ?? 0
-      );
-      if (minBar <= 0){
-        reportCriticalState(state, state.lastMutationAt);
-      } else if (minBar > 0.1){
-        applyMutation(state, state.lastMutationAt);
-        mutations++;
-      }
+      mutations += runMutationTick(state, state.lastMutationAt);
       eatBudAppendage(state);
     });
     dueSteps += normalResult.due;
@@ -282,19 +314,7 @@ export function simulate(state, deltaSec){
     if (now > normalWindowEnd){
       const slowResult = applySteps(state, now, anabiosisIntervalSec, ()=>{
         eaten += processCarrotsTick(state, state);
-        const bars = state.bars || {};
-        const minBar = Math.min(
-          bars.food ?? 0,
-          bars.clean ?? 0,
-          bars.hp ?? 0,
-          bars.mood ?? 0
-        );
-        if (minBar <= 0){
-          reportCriticalState(state, state.lastMutationAt);
-        } else if (minBar > 0.1){
-          applyMutation(state, state.lastMutationAt);
-          mutations++;
-        }
+        mutations += runMutationTick(state, state.lastMutationAt);
         eatBudAppendage(state);
       });
       dueSteps += slowResult.due;
@@ -314,37 +334,13 @@ export function simulate(state, deltaSec){
 
       applySteps(bud, budNormalEnd, intervalSec, ()=>{
         eaten += processCarrotsTick(state, bud);
-        const bars = bud.bars || {};
-        const minBar = Math.min(
-          bars.food ?? 0,
-          bars.clean ?? 0,
-          bars.hp ?? 0,
-          bars.mood ?? 0
-        );
-        if (minBar <= 0){
-          reportCriticalState(bud, bud.lastMutationAt);
-        } else if (minBar > 0.1){
-          applyMutation(bud, bud.lastMutationAt);
-          budMutations++;
-        }
+        budMutations += runMutationTick(bud, bud.lastMutationAt);
         eatParentAppendage(state, bud);
       });
       if (budUpTo > budNormalEnd){
         applySteps(bud, budUpTo, anabiosisIntervalSec, ()=>{
           eaten += processCarrotsTick(state, bud);
-          const bars = bud.bars || {};
-          const minBar = Math.min(
-            bars.food ?? 0,
-            bars.clean ?? 0,
-            bars.hp ?? 0,
-            bars.mood ?? 0
-          );
-          if (minBar <= 0){
-            reportCriticalState(bud, bud.lastMutationAt);
-          } else if (minBar > 0.1){
-            applyMutation(bud, bud.lastMutationAt);
-            budMutations++;
-          }
+          budMutations += runMutationTick(bud, bud.lastMutationAt);
           eatParentAppendage(state, bud);
         });
       }
