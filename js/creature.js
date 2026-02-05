@@ -349,6 +349,8 @@ export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
   const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const existingTypes = new Set((state.modules || []).map((m) => m?.type).filter(Boolean));
+  if (!existingTypes.has(type) && existingTypes.size >= 4) return false;
 
   function isTooCloseToSameType(candidateCells){
     if (!candidateCells.length || !Array.isArray(state.modules)) return false;
@@ -430,6 +432,14 @@ export function addModule(state, type, rng, target=null){
   if (type === "tail" || type === "tentacle"){
     movable = true;
     targetLen = 2 + Math.floor(rng()*6);
+    dirForGrowth = baseDir;
+    const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
+    cells = full.slice(0, Math.min(1, full.length));
+  } else if (type === "worm"){
+    movable = true;
+    const maxWormLen = Math.max(1, Math.floor((state.body?.cells?.length || 0) * 2));
+    targetLen = 3 + Math.floor(rng()*7);
+    targetLen = Math.min(targetLen, maxWormLen);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
@@ -599,7 +609,7 @@ export function addModule(state, type, rng, target=null){
     // ----- symmetry: sometimes spawn a mirrored twin organ -----
   const sym = state?.plan?.symmetry ?? 0;
   const canMirror = sym > 0.75 && rng() < 0.45;
-  const linear = (type==="tail" || type==="tentacle" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth" || type==="claw");
+  const linear = (type==="tail" || type==="tentacle" || type==="worm" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth" || type==="claw");
 
   if (canMirror && linear && dirForGrowth){
     const [cx,cy] = state.body.core;
@@ -648,6 +658,7 @@ export function growPlannedModules(state, rng, options = {}){
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
   const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const maxWormLen = (state.body?.cells?.length || 0) * 2;
   const carrotCenters = useTarget
     ? [target]
     : Array.isArray(state.carrots)
@@ -686,6 +697,7 @@ export function growPlannedModules(state, rng, options = {}){
       m.movable ||
       m.type === "tail" ||
       m.type === "tentacle" ||
+      m.type === "worm" ||
       m.type === "limb" ||
       m.type === "antenna" ||
       m.type === "claw";
@@ -750,6 +762,7 @@ export function growPlannedModules(state, rng, options = {}){
       m.growPos = [lastCell[0], lastCell[1]];
     }
     if (maxAppendageLen > 0 && m.cells.length >= maxAppendageLen) continue;
+    if (m.type === "worm" && maxWormLen > 0 && m.cells.length >= maxWormLen) continue;
     if (m.type === "spike" && m.cells.length >= 10) continue;
     if (m.type === "antenna" && m.cells.length >= 27) continue;
     if (m.type === "claw" && m.cells.length >= 9) continue;
@@ -806,6 +819,7 @@ export function growPlannedModules(state, rng, options = {}){
       m.movable ||
       m.type === "tail" ||
       m.type === "tentacle" ||
+      m.type === "worm" ||
       m.type === "limb" ||
       m.type === "antenna" ||
       m.type === "claw";

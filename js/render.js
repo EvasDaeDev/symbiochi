@@ -417,27 +417,71 @@ function tailAmpProfile(u){
   return Math.pow(smooth, 1.35);
 }
 
-function windOffsetPx(i, len, blockPx, offsetSec=0){
+function windOffsetPx(i, len, blockPx, offsetSec=0, type="tail"){
   if (i < 2) return 0;
   const t = (Date.now()/1000) + offsetSec;
-  const omega = 2 * Math.PI / 6;
   const denom = Math.max(1, len - 2);
   const u = Math.min(1, (i - 1) / denom);
   const amp01 = tailAmpProfile(u);
-  const phase = omega * t - u * 3.4;
-  const ampPx = blockPx * 1.05 * amp01 * lengthAmpScale(len);
-  return Math.sin(phase) * ampPx;
+  const omega1 = 2 * Math.PI / 6;
+  const omega2 = 2 * Math.PI / 4.5;
+  const omega3 = 2 * Math.PI / 9;
+  const phase1 = omega1 * t - u * 3.4;
+  const phase2 = omega2 * t - u * 5.1 + 1.3;
+  const phase3 = omega3 * t - u * 2.2 + 2.1;
+  const mix = 0.6 * Math.sin(phase1) + 0.3 * Math.sin(phase2) + 0.1 * Math.sin(phase3);
+  const ampScale = (type === "tentacle") ? 1.5 : 1;
+  const ampPx = blockPx * 1.05 * amp01 * lengthAmpScale(len) * ampScale;
+  return mix * ampPx;
 }
 
-function windOffset(i, len, offsetSec=0){
+function windOffset(i, len, offsetSec=0, type="tail"){
   if (i < 2) return 0;
   const t = (Date.now()/1000) + offsetSec;
-  const omega = 2 * Math.PI / 6;
   const denom = Math.max(1, len - 2);
   const u = Math.min(1, (i - 1) / denom);
   const amp01 = tailAmpProfile(u);
-  const phase = omega * t - u * 3.4;
-  return Math.sin(phase) * 0.57 * amp01 * lengthAmpScale(len);
+  const omega1 = 2 * Math.PI / 6;
+  const omega2 = 2 * Math.PI / 4.5;
+  const omega3 = 2 * Math.PI / 9;
+  const phase1 = omega1 * t - u * 3.4;
+  const phase2 = omega2 * t - u * 5.1 + 1.3;
+  const phase3 = omega3 * t - u * 2.2 + 2.1;
+  const mix = 0.6 * Math.sin(phase1) + 0.3 * Math.sin(phase2) + 0.1 * Math.sin(phase3);
+  const ampScale = (type === "tentacle") ? 1.5 : 1;
+  return mix * 0.57 * amp01 * lengthAmpScale(len) * ampScale;
+}
+
+function wormOffset(i, len, offsetSec, dir, perp){
+  if (!dir || !perp) return { x: 0, y: 0 };
+  const t = (Date.now()/1000) + offsetSec;
+  const denom = Math.max(1, len - 1);
+  const u = i / denom;
+  const peristalsis = Math.sin((t * (2 * Math.PI / 5.5)) - u * 4.2);
+  const twist = Math.sin((t * (2 * Math.PI / 8)) + u * 6.0) * 0.35;
+  const amp = 0.35 * tailAmpProfile(u) * lengthAmpScale(len);
+  const axial = Math.sin((t * (2 * Math.PI / 7)) - u * 3.3) * 0.18 * amp;
+  const cos = Math.cos(twist);
+  const sin = Math.sin(twist);
+  const rx = perp[0] * cos - perp[1] * sin;
+  const ry = perp[0] * sin + perp[1] * cos;
+  return {
+    x: rx * (peristalsis * amp) + dir[0] * axial,
+    y: ry * (peristalsis * amp) + dir[1] * axial
+  };
+}
+
+function eyeBlinkScale(orgId, baseSeed){
+  const t = Date.now() / 1000;
+  const seed = hash01(`${baseSeed}|eye-blink|${orgId}`);
+  const pause = 10 + 7 * seed;
+  const blinkDur = 0.3;
+  const cycle = pause + blinkDur * 2;
+  const phase = (t + seed * 11.7) % cycle;
+  if (phase >= blinkDur * 2) return 1;
+  const local = phase < blinkDur ? phase : (phase - blinkDur);
+  const pulse = Math.sin(Math.PI * (local / blinkDur));
+  return 1 - 0.5 * pulse;
 }
 
 // growth animation: org.anim["x,y"] = {t0, dur}
@@ -789,6 +833,35 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
       continue;
     }
 
+    if (type === "eye"){
+      const blinkScale = eyeBlinkScale(orgId, baseSeed);
+      for (let i=0;i<cells.length;i++){
+        const [wx, wy] = cells[i];
+        const p = worldToScreenPx(cam, wx, wy, view);
+        const x = p.x;
+        const y = p.y + breathY;
+        const nm = neighMaskAt(occ, wx, wy);
+        const kGrow = animProgress(org, wx, wy);
+        if (blinkScale !== 1){
+          const cx = x + s / 2;
+          const cy = y + s / 2;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.scale(1, blinkScale);
+          ctx.translate(-cx, -cy);
+          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+          ctx.restore();
+        } else {
+          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+        }
+
+        if (isSelected && isBoundary(occ, wx, wy)){
+          boundaryCells.push([wx, wy]);
+        }
+      }
+      continue;
+    }
+
     // tails / limbs / antenna / tentacle: wind deformation on segments
     const len = cells.length;
     const dir = moduleDir(cells);
@@ -837,6 +910,7 @@ function thicknessLevel(type, i, len){
   if (type === "antenna") return 1;
   if (type === "limb") return 1;
   if (type === "tail") return len >= 4 ? 2 : 1;
+  if (type === "worm") return 1;
   if (len < 6) return 1;
   if (type === "claw"){
     const mid = (len - 1) / 2;
@@ -915,11 +989,21 @@ function limbPhalanxIndex(lengths, idx){
         }
       }
 
-      // Antennas, claws, and jointed limbs should NOT sway with wind (requested).
-      const off = (type === "antenna" || type === "claw" || isJointedLimb) ? 0 : windOffset(i, len, offsetSec);
+      let off = 0;
+      let wormShift = null;
+      if (type === "worm"){
+        wormShift = wormOffset(i, len, offsetSec, dir, perp);
+      } else if (type !== "antenna" && type !== "claw" && !isJointedLimb){
+        off = windOffset(i, len, offsetSec, type);
+      }
       if (!isJointedLimb){
-        wx += perp[0] * off;
-        wy += perp[1] * off;
+        if (wormShift){
+          wx += wormShift.x;
+          wy += wormShift.y;
+        } else {
+          wx += perp[0] * off;
+          wy += perp[1] * off;
+        }
       }
 
       const p = worldToScreenPx(cam, wx, wy, view);
@@ -945,6 +1029,14 @@ function limbPhalanxIndex(lengths, idx){
         const basePerp = perpOf(baseDir);
         tryDrawSupport(wx0, wy0, x, y, basePerp[0], basePerp[1], shade, kGrow);
         tryDrawSupport(wx0, wy0, x, y, -basePerp[0], -basePerp[1], shade, kGrow);
+      } else if (type === "worm"){
+        if (i === len - 1){
+          const shade = brighten(c, -0.04);
+          const wx0 = cells[i][0];
+          const wy0 = cells[i][1];
+          tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
+          tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
+        }
       } else {
         // variable thickness: tries to be thick, but can stay thin if blocked
         const lvl = thicknessLevel(type, i, len);
@@ -1016,6 +1108,7 @@ function limbPhalanxIndex(lengths, idx){
     const eyeColor = getPartColor(org, "eye", 0) || "#e2e8f0";
     const shape = org?.face?.eyeShape || (hash01(`${baseSeed}|eye-shape|${orgId}`) < 0.5 ? "diamond" : "sphere");
     const offsets = buildEyeOffsets(eyeRadius, shape);
+    const blinkScale = eyeBlinkScale(orgId, baseSeed);
     const eyeOcc = new Set();
     for (const [dx, dy] of offsets){
       const wx = face[0] + dx;
@@ -1030,7 +1123,18 @@ function limbPhalanxIndex(lengths, idx){
       const x = p.x;
       const y = p.y + breathY;
       const nm = neighMaskAt(eyeOcc, wx, wy);
-      drawBlock(ctx, x, y, s, eyeColor, breathK, nm);
+      if (blinkScale !== 1){
+        const cx = x + s / 2;
+        const cy = y + s / 2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(1, blinkScale);
+        ctx.translate(-cx, -cy);
+        drawBlock(ctx, x, y, s, eyeColor, breathK, nm);
+        ctx.restore();
+      } else {
+        drawBlock(ctx, x, y, s, eyeColor, breathK, nm);
+      }
     }
   }
 
@@ -1291,6 +1395,7 @@ export function renderLegend(org, legendEl){
     { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный отросток.	Формируется при попытках «лечить» и вмешиваться." },
     { part:"tentacle", title:organLabel("tentacle"), desc:"Мягкая, подвижная структура." },
     { part:"tail",     title:organLabel("tail"),     desc:"Чем лучше уход, тем дальше он тянется от тела." },
+    { part:"worm",     title:organLabel("worm"),     desc:"Мягкое волнообразное движение и перистальтика." },
     { part:"limb",     title:organLabel("limb"),     desc:"Опора/движение (коричневый)." },
     { part:"spike",    title:organLabel("spike"),    desc:"Защитная реакция.Возникают, когда организм испытывает давление или стресс." },
     { part:"shell",    title:organLabel("shell"),    desc:"Закрытая форма. Тело пытается изолироваться." },
