@@ -409,6 +409,7 @@ export function addModule(state, type, rng, target=null){
     if (wiggle > 0.66) growStyle = "curve";
     else if (wiggle > 0.33) growStyle = "zigzag";
   }
+  if (type === "antenna" || type === "spike") growStyle = "straight";
 
   const styleParams = {
     baseDir: dirForGrowth ? [dirForGrowth[0], dirForGrowth[1]] : null,
@@ -576,6 +577,10 @@ export function growPlannedModules(state, rng, options = {}){
     const growPos = Array.isArray(m.growPos) ? m.growPos : [last[0], last[1]];
     let baseDir = m.growDir;
     const moduleInfluence = useTarget ? targetInfluence(moduleDistance(m, target[0], target[1])) : 0;
+
+    if (m.type === "antenna" || m.type === "spike"){
+      m.growStyle = "straight";
+    }
 
     // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
     let dir = baseDir;

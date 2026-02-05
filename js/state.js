@@ -170,18 +170,9 @@ export function migrateOrNew(){
     state.settings.evoIntervalMin = state.evoIntervalMin;
   }
 
-  // buds
-  if (!Array.isArray(state.buds)) state.buds = [];
-  for (let i=0; i<state.buds.length; i++){
-    const b = state.buds[i];
-    if (!b) continue;
-    normalizeOrg(b, hash32(state.seed||1, i+1));
-    b._isBud = true;
-    if (!Number.isFinite(b.lastMutationAt)) b.lastMutationAt = state.lastMutationAt;
-    if (!Number.isFinite(b.lastSeen)) b.lastSeen = state.lastSeen;
-    if (!b.partHue) b.partHue = state.partHue;
-    if (!b.partColor) b.partColor = {};
-  }
+  // buds are no longer preserved: detached appendages are destroyed
+  state.buds = [];
+  if (state.active !== null && state.active !== -1) state.active = -1;
 
   saveGame(state);
   return state;
