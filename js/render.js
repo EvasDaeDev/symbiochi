@@ -805,8 +805,8 @@ function outwardPerpDir(wx0, wy0){
         }
       }
 
-      // Antennas should NOT sway with wind (requested).
-      const off = (type === "antenna") ? 0 : windOffset(i, len, offsetSec);
+      // Antennas and claws should NOT sway with wind (requested).
+      const off = (type === "antenna" || type === "claw") ? 0 : windOffset(i, len, offsetSec);
       wx += perp[0] * off;
       wy += perp[1] * off;
 

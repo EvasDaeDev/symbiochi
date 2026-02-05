@@ -72,6 +72,57 @@ export function migrateOrNew(){
     }
     for (const m of org.modules){ m.cells = normCells(m.cells); }
 
+    function enforceAppendageRules(){
+      const bodyCells = org.body?.cells || [];
+      const maxAppendageLen = bodyCells.length * 3;
+      const typeLimits = {
+        spike: 10,
+        antenna: 27,
+        claw: 9
+      };
+      const kept = [];
+      const typeBuckets = new Map();
+
+      function isTooCloseToType(cells, existing){
+        if (!existing || existing.length === 0) return false;
+        for (const [cx, cy] of existing){
+          for (const [nx, ny] of cells){
+            const dx = Math.abs(cx - nx);
+            const dy = Math.abs(cy - ny);
+            if (Math.max(dx, dy) <= 2) return true;
+          }
+        }
+        return false;
+      }
+
+      for (const m of org.modules){
+        if (!m) continue;
+        const type = m.type || "organ";
+        let cells = Array.isArray(m.cells) ? m.cells.slice() : [];
+        if (!cells.length) continue;
+        const typeLimit = typeLimits[type] ?? Infinity;
+        const limit = maxAppendageLen > 0 ? Math.min(typeLimit, maxAppendageLen) : typeLimit;
+        if (Number.isFinite(limit) && limit > 0 && cells.length > limit){
+          cells = cells.slice(0, limit);
+        }
+        if (!cells.length) continue;
+        const existing = typeBuckets.get(type);
+        if (isTooCloseToType(cells, existing)) continue;
+        m.cells = cells;
+        if (Number.isFinite(m.growTo)) m.growTo = Math.min(m.growTo, cells.length);
+        kept.push(m);
+        if (existing){
+          existing.push(...cells);
+        } else {
+          typeBuckets.set(type, cells.slice());
+        }
+      }
+
+      org.modules = kept;
+    }
+
+    enforceAppendageRules();
+
     org.face = org.face || { anchor: findFaceAnchor(org.body, seed) };
     org.cam = org.cam || { ox: org.body.core[0], oy: org.body.core[1] };
 
