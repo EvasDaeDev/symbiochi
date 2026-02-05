@@ -197,7 +197,22 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
+  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+
+  function isTooCloseToSameType(candidateCells){
+    if (!candidateCells.length || !Array.isArray(state.modules)) return false;
+    for (const mod of state.modules){
+      if (mod?.type !== type) continue;
+      for (const [cx, cy] of mod.cells || []){
+        for (const [nx, ny] of candidateCells){
+          const dx = Math.abs(cx - nx);
+          const dy = Math.abs(cy - ny);
+          if (Math.max(dx, dy) <= 2) return true;
+        }
+      }
+    }
+    return false;
+  }
 
   let anchor = null;
   let anchorCandidates = null;
@@ -322,6 +337,7 @@ for (const d of dirs){
     // claw: like a limb but more "hook"-like (grows longer)
     movable = true;
     targetLen = 3 + Math.floor(rng()*7);
+    targetLen = Math.min(targetLen, 9);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
@@ -339,6 +355,7 @@ for (const d of dirs){
   }
 
   if (!cells.length) return false;
+  if (isTooCloseToSameType(cells)) return false;
   if (dirForGrowth && maxAppendageLen > 0 && targetLen){
     targetLen = Math.min(targetLen, maxAppendageLen);
   }
@@ -391,7 +408,7 @@ for (const d of dirs){
       const full2 = buildLineFrom([ax2, ay2], dir2, targetLen, state, bodySet);
       const cells2 = full2.slice(0, Math.min(1, full2.length));
 
-      if (cells2.length){
+      if (cells2.length && !isTooCloseToSameType(cells2)){
         for (const [x,y] of cells2) markAnim(state, x, y);
         state.modules.push({
           type,
@@ -425,7 +442,7 @@ export function growPlannedModules(state, rng, options = {}){
   } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
+  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
   const carrotCenters = useTarget
     ? [target]
     : Array.isArray(state.carrots)
@@ -511,6 +528,7 @@ export function growPlannedModules(state, rng, options = {}){
     if (maxAppendageLen > 0 && m.cells.length >= maxAppendageLen) continue;
     if (m.type === "spike" && m.cells.length >= 10) continue;
     if (m.type === "antenna" && m.cells.length >= 27) continue;
+    if (m.type === "claw" && m.cells.length >= 9) continue;
     if (requireSight && !seesCarrot(m)) continue;
 
     const last = m.cells[m.cells.length - 1];

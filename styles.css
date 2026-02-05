@@ -490,22 +490,22 @@ html, body {
 }
 
 #settingsOverlay{
-  position: absolute;
+  position: fixed;
   inset: 0;
   display: none;
   place-items: center;
   padding: 14px;
   background: rgba(0,0,0,.45);
-  z-index: 40;
+  z-index: 120;
 }
 #symbiosisOverlay{
-  position: absolute;
+  position: fixed;
   inset: 0;
   display: none;
   place-items: center;
   padding: 14px;
   background: rgba(0,0,0,.45);
-  z-index: 45;
+  z-index: 125;
 }
 .modal{
   width: 100%;
