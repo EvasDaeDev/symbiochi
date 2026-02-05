@@ -187,6 +187,14 @@ export function simulate(state, deltaSec){
 
   const now = (state.lastSeen || nowSec()) + deltaSec;
   pruneExpiredCarrots(state, now);
+  if (Array.isArray(state.buds)){
+    for (let i = 0; i < state.buds.length; i++){
+      const bud = state.buds[i];
+      if (!bud) continue;
+      bud.__logRoot = state;
+      bud.__orgTag = i;
+    }
+  }
 
   // decay for parent + buds
   const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
@@ -265,7 +273,7 @@ export function simulate(state, deltaSec){
         bars.mood ?? 0
       );
       if (minBar <= 0){
-        applyShrinkDecay(state, state.lastMutationAt);
+        reportCriticalState(state, state.lastMutationAt);
       } else if (minBar > 0.1){
         applyMutation(state, state.lastMutationAt);
         mutations++;
@@ -286,7 +294,7 @@ export function simulate(state, deltaSec){
           bars.mood ?? 0
         );
         if (minBar <= 0){
-          applyShrinkDecay(state, state.lastMutationAt);
+          reportCriticalState(state, state.lastMutationAt);
         } else if (minBar > 0.1){
           applyMutation(state, state.lastMutationAt);
           mutations++;
@@ -318,7 +326,7 @@ export function simulate(state, deltaSec){
           bars.mood ?? 0
         );
         if (minBar <= 0){
-          applyShrinkDecay(bud, bud.lastMutationAt);
+          reportCriticalState(bud, bud.lastMutationAt);
         } else if (minBar > 0.1){
           applyMutation(bud, bud.lastMutationAt);
           budMutations++;
@@ -336,7 +344,7 @@ export function simulate(state, deltaSec){
             bars.mood ?? 0
           );
           if (minBar <= 0){
-            applyShrinkDecay(bud, bud.lastMutationAt);
+            reportCriticalState(bud, bud.lastMutationAt);
           } else if (minBar > 0.1){
             applyMutation(bud, bud.lastMutationAt);
             budMutations++;
@@ -351,8 +359,151 @@ export function simulate(state, deltaSec){
     }
   }
 
+  mergeTouchingOrganisms(state);
   state.lastSeen = now;
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
+}
+
+function reportCriticalState(org, momentSec){
+  const shrunk = applyShrinkDecay(org, momentSec);
+  const msg = shrunk
+    ? "Критическое состояние: параметр на нуле, организм усыхает."
+    : "Критическое состояние: параметр на нуле.";
+  pushLog(org, msg, "alert");
+}
+
+function mergeTouchingOrganisms(state){
+  if (!Array.isArray(state.buds) || state.buds.length === 0) return false;
+  const minTouches = 8;
+  let merged = false;
+  let searching = true;
+
+  while (searching){
+    searching = false;
+    const orgs = [
+      { org: state, index: -1, isParent: true },
+      ...state.buds.map((bud, index) => ({ org: bud, index, isParent: false }))
+    ];
+
+    outer: for (let i = 0; i < orgs.length; i++){
+      for (let j = i + 1; j < orgs.length; j++){
+        const a = orgs[i];
+        const b = orgs[j];
+        if (!a?.org || !b?.org) continue;
+        if (!hasBodyContact(a.org, b.org, minTouches)) continue;
+
+        const aSize = a.org.body?.cells?.length || 0;
+        const bSize = b.org.body?.cells?.length || 0;
+        const main = (bSize > aSize) ? b : a;
+        const other = (main === a) ? b : a;
+        performMerge(state, main, other);
+        merged = true;
+        searching = true;
+        break outer;
+      }
+    }
+  }
+
+  return merged;
+}
+
+function hasBodyContact(orgA, orgB, minTouches){
+  const cellsA = orgA?.body?.cells || [];
+  const cellsB = orgB?.body?.cells || [];
+  if (!cellsA.length || !cellsB.length) return false;
+  const bSet = new Set(cellsB.map(([x, y]) => key(x, y)));
+  const neighbors = [
+    [0, 0],
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0], [1, 0],
+    [-1, 1], [0, 1], [1, 1]
+  ];
+
+  let touches = 0;
+  for (const [x, y] of cellsA){
+    let contact = false;
+    for (const [dx, dy] of neighbors){
+      if (bSet.has(key(x + dx, y + dy))){
+        contact = true;
+        break;
+      }
+    }
+    if (contact){
+      touches++;
+      if (touches >= minTouches) return true;
+    }
+  }
+  return false;
+}
+
+function performMerge(state, mainEntry, otherEntry){
+  const main = mainEntry.org;
+  const other = otherEntry.org;
+  if (!main || !other) return;
+
+  const mergedBody = mergeBodyCells(main.body?.cells || [], other.body?.cells || []);
+  const mergedModules = [...(main.modules || []), ...(other.modules || [])];
+
+  main.body = main.body || { cells: [], core: [0, 0] };
+  main.body.cells = mergedBody;
+  main.modules = mergedModules;
+
+  const promoteToParent = !mainEntry.isParent && otherEntry.isParent;
+  if (promoteToParent){
+    promoteBudToParent(state, main);
+  }
+
+  const removeIndexes = new Set();
+  if (!otherEntry.isParent) removeIndexes.add(otherEntry.index);
+  if (promoteToParent) removeIndexes.add(mainEntry.index);
+  if (removeIndexes.size){
+    state.buds = state.buds.filter((_, idx) => !removeIndexes.has(idx));
+  }
+
+  const mainName = main.name || "Организм";
+  const otherName = other.name || "Организм";
+  const logTarget = promoteToParent ? state : main;
+  pushLog(logTarget, `Слияние: "${mainName}" объединился с "${otherName}".`, "symbiosis");
+}
+
+function mergeBodyCells(cellsA, cellsB){
+  const merged = new Map();
+  for (const [x, y] of cellsA){
+    merged.set(key(x, y), [x, y]);
+  }
+  for (const [x, y] of cellsB){
+    const k = key(x, y);
+    if (!merged.has(k)) merged.set(k, [x, y]);
+  }
+  return Array.from(merged.values());
+}
+
+function promoteBudToParent(state, bud){
+  const fields = [
+    "name",
+    "seed",
+    "plan",
+    "version",
+    "care",
+    "bars",
+    "palette",
+    "body",
+    "modules",
+    "face",
+    "cam",
+    "active",
+    "hueShiftDeg",
+    "partHue",
+    "partColor",
+    "growthTarget",
+    "growthTargetMode",
+    "growthTargetPower",
+    "mutationDebt"
+  ];
+  for (const field of fields){
+    if (bud[field] !== undefined) state[field] = bud[field];
+  }
+  state.active = -1;
 }
 
 function eatParentAppendage(state, bud){
@@ -529,7 +680,7 @@ function processCarrotsTick(state, org = state){
     if (hits >= 2){
       org.bars.food = clamp(org.bars.food + 0.22, 0, BAR_MAX);
       org.bars.mood = clamp(org.bars.mood + 0.06, 0, BAR_MAX);
-      pushLog(state, `Кормление: морковка съедена.`, "care");
+      pushLog(org, `Кормление: морковка съедена.`, "care");
       eaten++;
     } else {
       remaining.push(car);
@@ -605,25 +756,38 @@ export function actOn(rootState, org, kind){
   const target = org || rootState;
   const rng = mulberry32(hash32(rootState.seed, nowSec()));
   const label = (target === rootState) ? "" : ` (цель: ${target.name || "почка"})`;
+  const withTargetLog = (msg)=>{
+    if (target === rootState){
+      pushLog(rootState, msg, "care");
+      return;
+    }
+    const prevRoot = target.__logRoot;
+    const prevTag = target.__orgTag;
+    target.__logRoot = rootState;
+    target.__orgTag = Array.isArray(rootState.buds) ? rootState.buds.indexOf(target) : undefined;
+    pushLog(target, msg, "care");
+    if (prevRoot === undefined) delete target.__logRoot; else target.__logRoot = prevRoot;
+    if (prevTag === undefined) delete target.__orgTag; else target.__orgTag = prevTag;
+  };
 
   if (kind === "feed"){
     const add = addRandom01(rng);
     target.bars.food = clamp(target.bars.food + add, 0, BAR_MAX);
     target.bars.mood = clamp(target.bars.mood + add*0.35, 0, BAR_MAX);
     target.care.feed += 1.0;
-    pushLog(rootState, `Кормление${label}: +${Math.round(add*100)}% к еде.`, "care");
+    withTargetLog(`Кормление${label}: +${Math.round(add*100)}% к еде.`);
   } else if (kind === "wash"){
     const add = addRandom01(rng);
     target.bars.clean = clamp(target.bars.clean + add, 0, BAR_MAX);
     target.bars.mood = clamp(target.bars.mood + add*0.20, 0, BAR_MAX);
     target.care.wash += 1.0;
-    pushLog(rootState, `Мытьё${label}: +${Math.round(add*100)}% к чистоте.`, "care");
+    withTargetLog(`Мытьё${label}: +${Math.round(add*100)}% к чистоте.`);
   } else if (kind === "heal"){
     const add = addRandom01(rng);
     target.bars.hp = clamp(target.bars.hp + add, 0, BAR_MAX);
     target.bars.mood = clamp(target.bars.mood + add*0.15, 0, BAR_MAX);
     target.care.heal += 1.0;
-    pushLog(rootState, `Лечение${label}: +${Math.round(add*100)}% к HP.`, "care");
+    withTargetLog(`Лечение${label}: +${Math.round(add*100)}% к HP.`);
   }
 
   const t = nowSec();
