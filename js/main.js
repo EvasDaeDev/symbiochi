@@ -2,6 +2,7 @@
 import { fmtAgeSeconds, nowSec } from "./util.js";
 import { CARROT } from "./mods/carrots.js";
 import { migrateOrNew, saveGame, simulate } from "./state.js";
+import { initGrowthPatterns } from "./patterns.js";
 
 import {
   syncCanvas,
@@ -374,7 +375,8 @@ function attachPickOrganism(){
   });
 }
 
-function startGame(){
+async function startGame(){
+  await initGrowthPatterns();
   view.state = migrateOrNew();
 
   els.startOverlay.style.display = "none";

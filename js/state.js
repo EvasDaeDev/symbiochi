@@ -4,6 +4,7 @@ import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
+import { ensureGrowthPattern, normalizeGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
@@ -133,6 +134,10 @@ export function migrateOrNew(){
     if (org.growthTarget === undefined) org.growthTarget = null;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
+    if (org.growthPattern === undefined) org.growthPattern = null;
+    if (org.growthPattern) normalizeGrowthPattern(org);
+    if (!org.growthPattern) ensureGrowthPattern(org);
+    syncGrowthPatternProgress(org);
   }
 
   normalizeOrg(state, state.seed || 1);
