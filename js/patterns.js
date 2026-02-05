@@ -4,6 +4,18 @@ import { hash32, mulberry32, pick, key } from "./util.js";
 // Sample PNGs are not bundled; provide your own files in /patterns.
 const PATTERN_FILES = [
   "patterns/pattern_1.png",
+  "patterns/pattern_2.png",
+  "patterns/pattern_3.png",
+  "patterns/pattern_4.png",
+  "patterns/pattern_5.png",
+  "patterns/pattern_6.png",
+  "patterns/pattern_7.png",
+  "patterns/pattern_8.png",
+  "patterns/pattern_9.png",
+  "patterns/pattern_10.png",
+  "patterns/pattern_11.png",
+  "patterns/pattern_12.png",
+  "patterns/pattern_13.png"
   
 ];
 
