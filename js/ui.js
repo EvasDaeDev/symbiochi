@@ -133,15 +133,31 @@ export function attachSymbiosisUI(view, els, toast){
   function openSymbiosis(){
     els.symbiosisOverlay.style.display = "grid";
     if (els.symShareOutput) els.symShareOutput.value = "";
+    if (!view.state){
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
+      }
+      if (els.symShareBtn) els.symShareBtn.disabled = true;
+      if (els.symApplyBtn) els.symApplyBtn.disabled = true;
+    } else {
+      if (els.symShareBtn) els.symShareBtn.disabled = false;
+      updateApplyState();
+    }
   }
 
   function closeSymbiosis(){
     els.symbiosisOverlay.style.display = "none";
     hideConfirm();
+    if (els.symShareBtn) els.symShareBtn.disabled = false;
   }
 
   async function shareGenome(){
-    if (!view.state) return;
+    if (!view.state){
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
+      }
+      return;
+    }
     try {
       const genome = extractGenome(getActiveOrg(view.state));
       const code = await encodeGenome(genome);
