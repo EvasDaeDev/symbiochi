@@ -181,8 +181,7 @@ export function migrateOrNew(){
     state.settings.evoIntervalMin = state.evoIntervalMin;
   }
 
-  // buds are no longer preserved: detached appendages are destroyed
-  state.buds = [];
+  if (!Array.isArray(state.buds)) state.buds = [];
   if (state.active !== null && state.active !== -1) state.active = -1;
 
   saveGame(state);

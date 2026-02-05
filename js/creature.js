@@ -771,12 +771,13 @@ export function growPlannedModules(state, rng, options = {}){
 
   for (const entry of modules){
     const m = entry.m;
-    const minLen = m.growTo ?? 0;
+    const minLen = Number.isFinite(m.growTo) ? m.growTo : 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
     if (!Array.isArray(m.growPos) && m.cells.length){
       const lastCell = m.cells[m.cells.length - 1];
       m.growPos = [lastCell[0], lastCell[1]];
     }
+    if (minLen > 0 && m.cells.length >= minLen) continue;
     if (maxAppendageLen > 0 && m.cells.length >= maxAppendageLen) continue;
     if (m.type === "worm" && maxWormLen > 0 && m.cells.length >= maxWormLen) continue;
     if (m.type === "spike" && m.cells.length >= SPIKE.maxLen) continue;
