@@ -25,6 +25,11 @@ function dirFromAngle(angle){
   return [Math.cos(angle), Math.sin(angle)];
 }
 
+function rotateDir(dir, steps){
+  const angle = Math.atan2(dir[1], dir[0]) + steps * ANGLE_STEP_RAD;
+  return dirFromAngle(angle);
+}
+
 function stepFromDir(pos, dir){
   const nextPos = [pos[0] + dir[0], pos[1] + dir[1]];
   return {
@@ -231,6 +236,31 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
   return out;
 }
 
+function buildLimbPlan(rng, baseDir){
+  const count = 3 + Math.floor(rng() * 5); // 3..7 фаланг
+  const lengths = Array.from({ length: count }, () => 5 + Math.floor(rng() * 3)); // 5..7 блоков
+  const turnSteps = [];
+  const dirs = [baseDir];
+  for (let i = 1; i < count; i++){
+    let step = 0;
+    if (rng() > 0.2){
+      step = rng() < 0.5 ? 1 : -1;
+      if (rng() < 0.35) step *= 2;
+    }
+    turnSteps.push(step);
+    dirs.push(step ? rotateDir(dirs[i - 1], step) : dirs[i - 1]);
+  }
+  const angles = Array.from({ length: count }, () => 10 + Math.floor(rng() * 18)); // 10..27°
+  const animDirection = rng() < 0.5 ? -1 : 1;
+  return {
+    lengths,
+    dirs,
+    turnSteps,
+    totalLength: lengths.reduce((sum, len) => sum + len, 0),
+    anim: { direction: animDirection, angles }
+  };
+}
+
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
@@ -309,6 +339,7 @@ export function addModule(state, type, rng, target=null){
   let movable = false;
   let targetLen = 0;
   let dirForGrowth = null;
+  let limbPlan = null;
 
   if (type === "tail" || type === "tentacle"){
     movable = true;
@@ -318,8 +349,9 @@ export function addModule(state, type, rng, target=null){
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "limb"){
     movable = true;
-    targetLen = 2 + Math.floor(rng()*5);
     const dir = rng()<0.65 ? [0,1] : baseDir;
+    limbPlan = buildLimbPlan(rng, dir);
+    targetLen = limbPlan.totalLength;
     dirForGrowth = dir;
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
@@ -409,6 +441,9 @@ export function addModule(state, type, rng, target=null){
     if (wiggle > 0.66) growStyle = "curve";
     else if (wiggle > 0.33) growStyle = "zigzag";
   }
+  if (type === "limb"){
+    growStyle = "jointed";
+  }
   if (type === "antenna" || type === "spike") growStyle = "straight";
 
   const styleParams = {
@@ -428,6 +463,9 @@ export function addModule(state, type, rng, target=null){
     growDir: dirForGrowth,
     growPos: cells.length ? [cells[cells.length - 1][0], cells[cells.length - 1][1]] : null,
     pigment,
+    phalanxLengths: limbPlan?.lengths,
+    phalanxDirs: limbPlan?.dirs,
+    limbAnim: limbPlan?.anim,
     ...styleParams
   });
     // ----- symmetry: sometimes spawn a mirrored twin organ -----
@@ -497,6 +535,16 @@ export function growPlannedModules(state, rng, options = {}){
   function rotateDir(dir, steps){
     const angle = Math.atan2(dir[1], dir[0]) + steps * ANGLE_STEP_RAD;
     return dirFromAngle(angle);
+  }
+
+  function phalanxIndex(lengths, idx){
+    if (!Array.isArray(lengths) || !lengths.length) return 0;
+    let acc = 0;
+    for (let i = 0; i < lengths.length; i++){
+      acc += lengths[i];
+      if (idx < acc) return i;
+    }
+    return lengths.length - 1;
   }
   function seesCarrot(m){
     if (!hasCarrots) return true;
@@ -584,7 +632,13 @@ export function growPlannedModules(state, rng, options = {}){
 
     // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
     let dir = baseDir;
-    if (m.cells.length >= 3){
+    if (m.growStyle === "jointed" && Array.isArray(m.phalanxLengths) && Array.isArray(m.phalanxDirs)){
+      const segIndex = phalanxIndex(m.phalanxLengths, m.cells.length);
+      const jointedDir = m.phalanxDirs[segIndex] || baseDir;
+      dir = jointedDir;
+      baseDir = jointedDir;
+    } else if (m.cells.length >= 3){
+      // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
       if (m.growStyle === "zigzag"){
         dir = (m.growStep % 2 === 0)
           ? baseDir
@@ -618,14 +672,18 @@ export function growPlannedModules(state, rng, options = {}){
       m.type === "antenna" ||
       m.type === "claw";
 
-    if (appendage) pushDir(baseDir);
-    pushDir(dir);
-    pushDir(rotateDir(dir, 1));
-    pushDir(rotateDir(dir, -1));
-    pushDir(rotateDir(dir, 2));
-    pushDir(rotateDir(dir, -2));
-    pushDir(rotateDir(dir, 3));
-    pushDir(rotateDir(dir, -3));
+    if (m.growStyle === "jointed"){
+      pushDir(dir);
+    } else {
+      if (appendage) pushDir(baseDir);
+      pushDir(dir);
+      pushDir(rotateDir(dir, 1));
+      pushDir(rotateDir(dir, -1));
+      pushDir(rotateDir(dir, 2));
+      pushDir(rotateDir(dir, -2));
+      pushDir(rotateDir(dir, 3));
+      pushDir(rotateDir(dir, -3));
+    }
 
     if (useTarget && moduleInfluence > 0){
       const [tx, ty] = target;
