@@ -142,18 +142,39 @@ export function attachSymbiosisUI(view, els, toast){
   async function shareGenome(){
     if (!view.state) return;
     try {
-      const genome = extractGenome(view.state);
+      const genome = extractGenome(getActiveOrg(view.state));
       const code = await encodeGenome(genome);
+      console.debug("[symbiosis] share genome code length", code.length);
       if (els.symShareOutput) els.symShareOutput.value = code;
+      let copied = false;
       if (navigator.clipboard?.writeText){
-        await navigator.clipboard.writeText(code);
+        try {
+          await navigator.clipboard.writeText(code);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+      if (!copied && els.symShareOutput && document.queryCommandSupported?.("copy")){
+        els.symShareOutput.focus();
+        els.symShareOutput.select();
+        copied = document.execCommand("copy");
+      }
+      if (copied){
         toast("Отпечаток скопирован.");
         if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Отпечаток скопирован в буфер.";
       } else {
         throw new Error("no clipboard");
       }
     } catch (err){
-      if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Скопируй строку вручную — браузер не дал доступ.";
+      console.debug("[symbiosis] share genome failed", err);
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Отпечаток не создан. Проверь консоль для деталей.";
+      }
+      if (els.symShareOutput){
+        const message = err instanceof Error ? err.message : String(err);
+        els.symShareOutput.value = `Ошибка: ${message}`;
+      }
       if (els.symShareOutput){
         els.symShareOutput.focus();
         els.symShareOutput.select();

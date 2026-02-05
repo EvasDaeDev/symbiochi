@@ -6,6 +6,28 @@ const GEN_VERSION = 1;
 const PREFIX = "SYMBIOCHI1:";
 const PREFIX_NOCOMP = "SYMBIOCHI1NOCOMP:";
 
+function encodeTextBytes(text){
+  if (typeof TextEncoder !== "undefined"){
+    return new TextEncoder().encode(text);
+  }
+  const binary = unescape(encodeURIComponent(text));
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function decodeTextBytes(bytes){
+  if (typeof TextDecoder !== "undefined"){
+    return new TextDecoder().decode(bytes);
+  }
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk){
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return decodeURIComponent(escape(binary));
+}
+
 function cleanModuleSpec(spec){
   if (!spec || typeof spec.type !== "string") return null;
   const len = Math.max(1, Math.floor(spec.len || spec.length || 1));
@@ -29,7 +51,9 @@ export function extractGenome(stateOrOrg){
 export async function encodeGenome(genome){
   if (!genome || typeof genome !== "object") throw new Error("bad genome");
   const json = JSON.stringify(genome);
-  const bytes = new TextEncoder().encode(json);
+  console.debug("[symbiosis] genome json length", json.length);
+  const bytes = encodeTextBytes(json);
+  console.debug("[symbiosis] genome bytes length", bytes.length);
   let deflated = { bytes, compressed: false };
   try {
     deflated = await deflateBytes(bytes);
@@ -37,6 +61,7 @@ export async function encodeGenome(genome){
     deflated = { bytes, compressed: false };
   }
   const payload = base64UrlEncode(deflated.bytes);
+  console.debug("[symbiosis] genome payload length", payload.length, "compressed", deflated.compressed);
   return (deflated.compressed ? PREFIX : PREFIX_NOCOMP) + payload;
 }
 
@@ -50,7 +75,7 @@ export async function decodeGenome(str){
   if (!payload) throw new Error("empty payload");
   let bytes = base64UrlDecode(payload);
   if (isDeflated) bytes = await inflateBytes(bytes);
-  const json = new TextDecoder().decode(bytes);
+  const json = decodeTextBytes(bytes);
   const genome = JSON.parse(json);
   if (!genome || typeof genome !== "object") throw new Error("bad genome");
   if ((genome.v | 0) !== GEN_VERSION) throw new Error("bad version");
