@@ -200,6 +200,47 @@ export function growBodyConnected(state, addN, rng, target=null, biases=null){
   const biasList = [];
   if (Array.isArray(target)) biasList.push({ point: target, weight: 3 });
   if (Array.isArray(biases)) biasList.push(...biases);
+  const plan = state?.plan || {};
+  const axisDir = Array.isArray(plan.axisDir) ? plan.axisDir : null;
+  const axisLen = axisDir ? (Math.hypot(axisDir[0], axisDir[1]) || 1) : 1;
+  const axisUnit = axisDir ? [axisDir[0] / axisLen, axisDir[1] / axisLen] : null;
+  let axisScale = 1;
+  switch (plan.ecotype){
+    case "swimmer":
+      axisScale = 1.6;
+      break;
+    case "crawler":
+      axisScale = 1.35;
+      break;
+    case "sentinel":
+      axisScale = 1.1;
+      break;
+    case "tank":
+      axisScale = 0.9;
+      break;
+    default:
+      axisScale = 1.15;
+  }
+  if (Number.isFinite(plan.symmetry)){
+    axisScale += (plan.symmetry - 0.5) * 0.2;
+    axisScale = Math.max(0.75, Math.min(1.9, axisScale));
+  }
+  const wiggle = Number.isFinite(plan.wiggle) ? plan.wiggle : 0;
+  const noiseWeight = 0.08 + 0.22 * wiggle;
+
+  function anisotropicDistance(x, y, origin){
+    const dx = x - origin[0];
+    const dy = y - origin[1];
+    if (!axisUnit) return Math.hypot(dx, dy);
+    const proj = dx * axisUnit[0] + dy * axisUnit[1];
+    const perp = -dx * axisUnit[1] + dy * axisUnit[0];
+    return Math.hypot(proj / axisScale, perp * axisScale);
+  }
+  function jitterScore(x, y){
+    const seed = (state?.seed ?? 1) | 0;
+    const h = hash32(seed, (x * 73856093) ^ (y * 19349663));
+    return ((h & 1023) / 1023) * noiseWeight;
+  }
 
   for (let i=0;i<addN;i++){
     const candidates = [];
@@ -220,16 +261,16 @@ export function growBodyConnected(state, addN, rng, target=null, biases=null){
     // If a growth target is provided (e.g. "carrot"), bias growth towards it,
     // otherwise bias towards the core for compact connected bodies.
     pool.sort((a,b)=>{
-      const daCore = Math.abs(a[0]-core[0]) + Math.abs(a[1]-core[1]);
-      const dbCore = Math.abs(b[0]-core[0]) + Math.abs(b[1]-core[1]);
+      const daCore = anisotropicDistance(a[0], a[1], core) + jitterScore(a[0], a[1]);
+      const dbCore = anisotropicDistance(b[0], b[1], core) + jitterScore(b[0], b[1]);
       if (!biasList.length) return daCore - dbCore;
       let scoreA = daCore;
       let scoreB = dbCore;
       for (const bias of biasList){
         if (!bias || !Array.isArray(bias.point)) continue;
         const w = Number.isFinite(bias.weight) ? bias.weight : 1;
-        const daT = Math.abs(a[0] - bias.point[0]) + Math.abs(a[1] - bias.point[1]);
-        const dbT = Math.abs(b[0] - bias.point[0]) + Math.abs(b[1] - bias.point[1]);
+        const daT = Math.hypot(a[0] - bias.point[0], a[1] - bias.point[1]);
+        const dbT = Math.hypot(b[0] - bias.point[0], b[1] - bias.point[1]);
         scoreA += daT * w;
         scoreB += dbT * w;
       }
