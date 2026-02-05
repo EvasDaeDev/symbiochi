@@ -8,6 +8,30 @@ function markAnim(org, x, y, dur=0.7){
 
 import { pushLog } from "./log.js";
 
+const ANGLE_STEP_DEG = 5;
+const ANGLE_STEP_RAD = (Math.PI / 180) * ANGLE_STEP_DEG;
+const ANGLE_DIRS = Array.from({ length: 360 / ANGLE_STEP_DEG }, (_, i) => {
+  const angle = i * ANGLE_STEP_RAD;
+  return { angle, dir: [Math.cos(angle), Math.sin(angle)] };
+});
+
+function angleDiff(a, b){
+  const diff = Math.atan2(Math.sin(a - b), Math.cos(a - b));
+  return Math.abs(diff);
+}
+
+function dirFromAngle(angle){
+  return [Math.cos(angle), Math.sin(angle)];
+}
+
+function stepFromDir(pos, dir){
+  const nextPos = [pos[0] + dir[0], pos[1] + dir[1]];
+  return {
+    pos: nextPos,
+    cell: [Math.round(nextPos[0]), Math.round(nextPos[1])]
+  };
+}
+
 export function makeSmallConnectedBody(seed, targetCount=12){
   const rng = mulberry32(hash32(seed, 10101));
   const cx = Math.floor(GRID_W*0.55);
@@ -17,10 +41,33 @@ export function makeSmallConnectedBody(seed, targetCount=12){
   set.add(key(cx,cy));
 
   while (set.size < targetCount){
-    const arr = Array.from(set);
-    const [bx,by] = parseKey(arr[Math.floor(rng()*arr.length)]);
-    const [dx,dy] = DIR8[Math.floor(rng()*DIR8.length)];
-    set.add(key(bx + dx, by + dy));
+    const candidates = new Map();
+    for (const k of set){
+      const [bx, by] = parseKey(k);
+      for (const [dx, dy] of DIR8){
+        const nx = bx + dx;
+        const ny = by + dy;
+        const kk = key(nx, ny);
+        if (set.has(kk)) continue;
+        if (!candidates.has(kk)) candidates.set(kk, [nx, ny]);
+      }
+    }
+    const pool = Array.from(candidates.values());
+    pool.sort((a, b) => {
+      const da = Math.abs(a[0] - cx) + Math.abs(a[1] - cy);
+      const db = Math.abs(b[0] - cx) + Math.abs(b[1] - cy);
+      if (da !== db) return da - db;
+      let na = 0;
+      let nb = 0;
+      for (const [dx, dy] of DIR8){
+        if (set.has(key(a[0] + dx, a[1] + dy))) na++;
+        if (set.has(key(b[0] + dx, b[1] + dy))) nb++;
+      }
+      return nb - na;
+    });
+    const pickIdx = Math.floor(rng() * Math.min(6, pool.length));
+    const [px, py] = pool[pickIdx];
+    set.add(key(px, py));
   }
 
   return { core:[cx,cy], cells:Array.from(set).map(parseKey) };
@@ -163,10 +210,12 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
   let x=ax, y=ay;
   for (let i=0;i<len;i++){
     x += dx; y += dy;
-    const kk = key(x,y);
+    const nx = Math.round(x);
+    const ny = Math.round(y);
+    const kk = key(nx,ny);
     if (bodySet.has(kk)) break;
-    if (occupiedByModules(state, x, y)) break;
-    out.push([x,y]);
+    if (occupiedByModules(state, nx, ny)) break;
+    out.push([nx,ny]);
   }
   return out;
 }
@@ -174,7 +223,22 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
+  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+
+  function isTooCloseToSameType(candidateCells){
+    if (!candidateCells.length || !Array.isArray(state.modules)) return false;
+    for (const mod of state.modules){
+      if (mod?.type !== type) continue;
+      for (const [cx, cy] of mod.cells || []){
+        for (const [nx, ny] of candidateCells){
+          const dx = Math.abs(cx - nx);
+          const dy = Math.abs(cy - ny);
+          if (Math.max(dx, dy) <= 2) return true;
+        }
+      }
+    }
+    return false;
+  }
 
   let anchor = null;
   let anchorCandidates = null;
@@ -207,33 +271,28 @@ export function addModule(state, type, rng, target=null){
   const [cx,cy] = state.body.core;
   const [ax,ay] = anchor;
 
-  const dirs = DIR8.slice().sort((d1,d2)=>{
-    const n1=[ax+d1[0], ay+d1[1]];
-    const n2=[ax+d2[0], ay+d2[1]];
-    if (target){
-      const d1t = Math.abs(n1[0]-target[0]) + Math.abs(n1[1]-target[1]);
-      const d2t = Math.abs(n2[0]-target[0]) + Math.abs(n2[1]-target[1]);
-      return d1t - d2t;
-    }
-    const s1=(n1[0]-cx)*(n1[0]-cx)+(n1[1]-cy)*(n1[1]-cy);
-    const s2=(n2[0]-cx)*(n2[0]-cx)+(n2[1]-cy)*(n2[1]-cy);
-    return s2 - s1;
+  const desiredAngle = target
+    ? Math.atan2(target[1] - ay, target[0] - ax)
+    : Math.atan2(ay - cy, ax - cx);
+  const dirs = ANGLE_DIRS.slice().sort((a, b) => {
+    return angleDiff(a.angle, desiredAngle) - angleDiff(b.angle, desiredAngle);
   });
 
-  let baseDir = dirs[0];
+  let baseDir = dirs[0]?.dir;
 
-// если сразу упёрлись — ищем ближайший выход
-for (const d of dirs){
-  const nx = anchor[0] + d[0];
-  const ny = anchor[1] + d[1];
-  if (
-    !bodySet.has(key(nx,ny)) &&
-    !occupiedByModules(state, nx, ny)
-  ){
-    baseDir = d;
-    break;
+  // если сразу упёрлись — ищем ближайший выход
+  for (const entry of dirs){
+    const d = entry.dir;
+    const nx = ax + Math.round(d[0]);
+    const ny = ay + Math.round(d[1]);
+    if (
+      !bodySet.has(key(nx,ny)) &&
+      !occupiedByModules(state, nx, ny)
+    ){
+      baseDir = d;
+      break;
+    }
   }
-}
 
   let cells = [];
   let movable = false;
@@ -270,7 +329,9 @@ for (const d of dirs){
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "shell"){
     movable = false;
-    const [dx,dy] = baseDir;
+    const baseStep = stepFromDir([ax, ay], baseDir).cell;
+    const dx = baseStep[0] - ax;
+    const dy = baseStep[1] - ay;
     const ox = ax + dx, oy = ay + dy;
     const patch = [[ox,oy],[ox+1,oy],[ox,oy+1],[ox+1,oy+1]];
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
@@ -299,13 +360,16 @@ for (const d of dirs){
     // claw: like a limb but more "hook"-like (grows longer)
     movable = true;
     targetLen = 3 + Math.floor(rng()*7);
+    targetLen = Math.min(targetLen, 9);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "fin"){
     // fin: short 2-wide-ish triangle made of blocks, attached sideways
     movable = false;
-    const [dx,dy] = baseDir;
+    const baseStep = stepFromDir([ax, ay], baseDir).cell;
+    const dx = baseStep[0] - ax;
+    const dy = baseStep[1] - ay;
     const ox = ax + dx, oy = ay + dy;
     const patch = [[ox,oy],[ox+dx,oy+dy],[ox+dx,oy+dy+1],[ox+dx,oy+dy-1]];
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
@@ -316,6 +380,7 @@ for (const d of dirs){
   }
 
   if (!cells.length) return false;
+  if (isTooCloseToSameType(cells)) return false;
   if (dirForGrowth && maxAppendageLen > 0 && targetLen){
     targetLen = Math.min(targetLen, maxAppendageLen);
   }
@@ -349,6 +414,7 @@ for (const d of dirs){
     cells,
     growTo: targetLen || cells.length,
     growDir: dirForGrowth,
+    growPos: cells.length ? [cells[cells.length - 1][0], cells[cells.length - 1][1]] : null,
     pigment,
     ...styleParams
   });
@@ -368,7 +434,7 @@ for (const d of dirs){
       const full2 = buildLineFrom([ax2, ay2], dir2, targetLen, state, bodySet);
       const cells2 = full2.slice(0, Math.min(1, full2.length));
 
-      if (cells2.length){
+      if (cells2.length && !isTooCloseToSameType(cells2)){
         for (const [x,y] of cells2) markAnim(state, x, y);
         state.modules.push({
           type,
@@ -376,6 +442,7 @@ for (const d of dirs){
           cells: cells2,
           growTo: targetLen || cells2.length,
           growDir: dir2,
+          growPos: cells2.length ? [cells2[cells2.length - 1][0], cells2[cells2.length - 1][1]] : null,
           pigment: { ...pigment, tone: pigment.tone * 0.8 }, // чуть отличим
           baseDir: [dir2[0], dir2[1]],
           growStyle,
@@ -402,7 +469,7 @@ export function growPlannedModules(state, rng, options = {}){
   } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 6;
+  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
   const carrotCenters = useTarget
     ? [target]
     : Array.isArray(state.carrots)
@@ -416,9 +483,8 @@ export function growPlannedModules(state, rng, options = {}){
   const requireSight = !useTarget;
 
   function rotateDir(dir, steps){
-    let i = DIR8.findIndex(d => d[0]===dir[0] && d[1]===dir[1]);
-    if (i < 0) i = 0;
-    return DIR8[(i + steps + DIR8.length) % DIR8.length];
+    const angle = Math.atan2(dir[1], dir[0]) + steps * ANGLE_STEP_RAD;
+    return dirFromAngle(angle);
   }
   function seesCarrot(m){
     if (!hasCarrots) return true;
@@ -485,12 +551,18 @@ export function growPlannedModules(state, rng, options = {}){
     const m = entry.m;
     const minLen = m.growTo ?? 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
+    if (!Array.isArray(m.growPos) && m.cells.length){
+      const lastCell = m.cells[m.cells.length - 1];
+      m.growPos = [lastCell[0], lastCell[1]];
+    }
     if (maxAppendageLen > 0 && m.cells.length >= maxAppendageLen) continue;
     if (m.type === "spike" && m.cells.length >= 10) continue;
     if (m.type === "antenna" && m.cells.length >= 27) continue;
+    if (m.type === "claw" && m.cells.length >= 9) continue;
     if (requireSight && !seesCarrot(m)) continue;
 
     const last = m.cells[m.cells.length - 1];
+    const growPos = Array.isArray(m.growPos) ? m.growPos : [last[0], last[1]];
     let baseDir = m.growDir;
     const moduleInfluence = useTarget ? targetInfluence(moduleDistance(m, target[0], target[1])) : 0;
 
@@ -514,9 +586,12 @@ export function growPlannedModules(state, rng, options = {}){
 
     // 🔍 ПРОБУЕМ ОБОЙТИ ПРЕПЯТСТВИЕ
     const tryDirs = [];
+    const tryDirKeys = new Set();
     const pushDir = (d)=>{
       if (!d) return;
-      if (tryDirs.some(([x,y]) => x === d[0] && y === d[1])) return;
+      const k = `${Math.round(d[0] * 1000)},${Math.round(d[1] * 1000)}`;
+      if (tryDirKeys.has(k)) return;
+      tryDirKeys.add(k);
       tryDirs.push(d);
     };
     const appendage =
@@ -540,8 +615,10 @@ export function growPlannedModules(state, rng, options = {}){
       const [tx, ty] = target;
       const ordered = tryDirs.map((dir, index) => ({ dir, index }));
       ordered.sort((a,b)=>{
-        const da = Math.abs(last[0] + a.dir[0] - tx) + Math.abs(last[1] + a.dir[1] - ty);
-        const db = Math.abs(last[0] + b.dir[0] - tx) + Math.abs(last[1] + b.dir[1] - ty);
+        const aStep = stepFromDir(growPos, a.dir).cell;
+        const bStep = stepFromDir(growPos, b.dir).cell;
+        const da = Math.abs(aStep[0] - tx) + Math.abs(aStep[1] - ty);
+        const db = Math.abs(bStep[0] - tx) + Math.abs(bStep[1] - ty);
         const scoreA = a.index * (1 - moduleInfluence) + da * moduleInfluence;
         const scoreB = b.index * (1 - moduleInfluence) + db * moduleInfluence;
         return scoreA - scoreB;
@@ -552,9 +629,10 @@ export function growPlannedModules(state, rng, options = {}){
 
     let placed = false;
 
-    for (const [dx,dy] of tryDirs){
-      const nx = last[0] + dx;
-      const ny = last[1] + dy;
+    for (const dir of tryDirs){
+      const step = stepFromDir(growPos, dir);
+      const [nx, ny] = step.cell;
+      if (nx === last[0] && ny === last[1]) continue;
       const k = key(nx, ny);
 
       // ❗ у основания разрешаем рост рядом с телом
@@ -565,6 +643,7 @@ export function growPlannedModules(state, rng, options = {}){
       if (occupiedByModules(state, nx, ny)) continue;
 
       m.cells.push([nx, ny]);
+      m.growPos = step.pos;
       markAnim(state, nx, ny);
       if (Array.isArray(grownModules) && !grownModules.includes(entry.i)){
         grownModules.push(entry.i);

@@ -72,6 +72,57 @@ export function migrateOrNew(){
     }
     for (const m of org.modules){ m.cells = normCells(m.cells); }
 
+    function enforceAppendageRules(){
+      const bodyCells = org.body?.cells || [];
+      const maxAppendageLen = bodyCells.length * 3;
+      const typeLimits = {
+        spike: 10,
+        antenna: 27,
+        claw: 9
+      };
+      const kept = [];
+      const typeBuckets = new Map();
+
+      function isTooCloseToType(cells, existing){
+        if (!existing || existing.length === 0) return false;
+        for (const [cx, cy] of existing){
+          for (const [nx, ny] of cells){
+            const dx = Math.abs(cx - nx);
+            const dy = Math.abs(cy - ny);
+            if (Math.max(dx, dy) <= 2) return true;
+          }
+        }
+        return false;
+      }
+
+      for (const m of org.modules){
+        if (!m) continue;
+        const type = m.type || "organ";
+        let cells = Array.isArray(m.cells) ? m.cells.slice() : [];
+        if (!cells.length) continue;
+        const typeLimit = typeLimits[type] ?? Infinity;
+        const limit = maxAppendageLen > 0 ? Math.min(typeLimit, maxAppendageLen) : typeLimit;
+        if (Number.isFinite(limit) && limit > 0 && cells.length > limit){
+          cells = cells.slice(0, limit);
+        }
+        if (!cells.length) continue;
+        const existing = typeBuckets.get(type);
+        if (isTooCloseToType(cells, existing)) continue;
+        m.cells = cells;
+        if (Number.isFinite(m.growTo)) m.growTo = Math.min(m.growTo, cells.length);
+        kept.push(m);
+        if (existing){
+          existing.push(...cells);
+        } else {
+          typeBuckets.set(type, cells.slice());
+        }
+      }
+
+      org.modules = kept;
+    }
+
+    enforceAppendageRules();
+
     org.face = org.face || { anchor: findFaceAnchor(org.body, seed) };
     org.cam = org.cam || { ox: org.body.core[0], oy: org.body.core[1] };
 
@@ -156,6 +207,11 @@ export function simulate(state, deltaSec){
   }
 
   const intervalSec = Math.max(60, Math.floor(Number(state.evoIntervalMin || 12) * 60));
+  const ANABIOSIS_DELAY_SEC = 60 * 60;
+  const ANABIOSIS_INTERVAL_SEC = 30 * 60;
+  const anabiosisIntervalSec = Math.max(intervalSec, ANABIOSIS_INTERVAL_SEC);
+  const offlineStart = state.lastSeen || nowSec();
+  const anabiosisStart = offlineStart + ANABIOSIS_DELAY_SEC;
 
   // feeding tick == mutation tick (reset per tick carrot limit)
   const tickId = Math.floor(state.lastSeen / intervalSec);
@@ -169,54 +225,89 @@ export function simulate(state, deltaSec){
   let budMutations = 0;
   let eaten = 0;
   let skipped = 0;
-
-  const upTo = now;
-  const dueSteps = Math.floor((upTo - state.lastMutationAt) / intervalSec);
+  let dueSteps = 0;
 
   // OFFLINE: apply instantly (no debt)
   const MAX_OFFLINE_STEPS = 5000;
-  const stepsToApply = Math.min(Math.max(0, dueSteps), MAX_OFFLINE_STEPS);
+  const normalWindowEnd = Math.min(now, anabiosisStart);
 
-  for (let k=0; k<stepsToApply; k++){
-    state.lastMutationAt += intervalSec;
-    eaten += processCarrotsTick(state, state);
-    applyMutation(state, state.lastMutationAt);
-    eatBudAppendage(state);
-    mutations++;
-  }
+  const applySteps = (org, windowEnd, stepIntervalSec, onTick)=>{
+    if (windowEnd <= (org.lastMutationAt || 0)) return { due: 0, applied: 0, skipped: 0 };
+    const due = Math.floor((windowEnd - (org.lastMutationAt || 0)) / stepIntervalSec);
+    if (due <= 0) return { due: 0, applied: 0, skipped: 0 };
+    const applied = Math.min(due, org._remainingOfflineSteps ?? MAX_OFFLINE_STEPS);
 
-  if (dueSteps > stepsToApply){
-    skipped = dueSteps - stepsToApply;
-    state.lastMutationAt += skipped * intervalSec;
+    for (let k=0; k<applied; k++){
+      org.lastMutationAt = (org.lastMutationAt || 0) + stepIntervalSec;
+      onTick(org);
+    }
+
+    org._remainingOfflineSteps = (org._remainingOfflineSteps ?? MAX_OFFLINE_STEPS) - applied;
+
+    let skippedLocal = 0;
+    if (due > applied){
+      skippedLocal = due - applied;
+      org.lastMutationAt = (org.lastMutationAt || 0) + skippedLocal * stepIntervalSec;
+    }
+
+    return { due, applied, skipped: skippedLocal };
+  };
+
+  state._remainingOfflineSteps = MAX_OFFLINE_STEPS;
+  {
+    const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
+      eaten += processCarrotsTick(state, state);
+      applyMutation(state, state.lastMutationAt);
+      eatBudAppendage(state);
+      mutations++;
+    });
+    dueSteps += normalResult.due;
+    skipped += normalResult.skipped;
+
+    if (now > normalWindowEnd){
+      const slowResult = applySteps(state, now, anabiosisIntervalSec, ()=>{
+        eaten += processCarrotsTick(state, state);
+        applyMutation(state, state.lastMutationAt);
+        eatBudAppendage(state);
+        mutations++;
+      });
+      dueSteps += slowResult.due;
+      skipped += slowResult.skipped;
+    }
   }
+  delete state._remainingOfflineSteps;
 
   // buds: evolve instantly too
   if (Array.isArray(state.buds)){
     for (const bud of state.buds){
       if (!bud) continue;
       const budUpTo = (bud.lastSeen || state.lastSeen) + deltaSec;
-      const budDue = Math.floor((budUpTo - (bud.lastMutationAt || state.lastMutationAt)) / intervalSec);
-      const budApply = Math.min(Math.max(0, budDue), MAX_OFFLINE_STEPS);
+      bud.lastMutationAt = Number.isFinite(bud.lastMutationAt) ? bud.lastMutationAt : state.lastMutationAt;
+      bud._remainingOfflineSteps = MAX_OFFLINE_STEPS;
+      const budNormalEnd = Math.min(budUpTo, anabiosisStart);
 
-      for (let k=0; k<budApply; k++){
-        bud.lastMutationAt = (bud.lastMutationAt || state.lastMutationAt) + intervalSec;
+      applySteps(bud, budNormalEnd, intervalSec, ()=>{
         eaten += processCarrotsTick(state, bud);
         applyMutation(bud, bud.lastMutationAt);
         eatParentAppendage(state, bud);
         budMutations++;
+      });
+      if (budUpTo > budNormalEnd){
+        applySteps(bud, budUpTo, anabiosisIntervalSec, ()=>{
+          eaten += processCarrotsTick(state, bud);
+          applyMutation(bud, bud.lastMutationAt);
+          eatParentAppendage(state, bud);
+          budMutations++;
+        });
       }
-
-      if (budDue > budApply){
-        const budSkip = budDue - budApply;
-        bud.lastMutationAt = (bud.lastMutationAt || state.lastMutationAt) + budSkip * intervalSec;
-      }
+      delete bud._remainingOfflineSteps;
 
       // IMPORTANT: advance bud.lastSeen, иначе оффлайн будет считаться снова и снова
       bud.lastSeen = budUpTo;
     }
   }
 
-  state.lastSeen = upTo;
+  state.lastSeen = now;
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
 }
 
