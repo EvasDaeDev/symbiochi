@@ -243,7 +243,7 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
 function computeMorphology(state){
   const bodyBlocks = state.body.cells.length;
 
-  // total blocks (body + modules) used for late-game rules
+  // total blocks (body + modules) used for analytics/telemetry
   let totalBlocks = bodyBlocks;
   for (const m of (state.modules || [])) totalBlocks += (m.cells?.length || 0);
 
@@ -309,8 +309,8 @@ export function applyMutation(state, momentSec){
   const k = 0.35 + 0.65 * power;
 
   // Late game thresholds
-  const isGiant = M.totalBlocks >= 350;
-  const isBigForBud = M.totalBlocks >= 230;
+  const isGiant = M.bodyBlocks >= 350;
+  const isBigForBud = M.bodyBlocks >= 230;
 
   // Базовые веса (как раньше)
   let weights = [
@@ -337,14 +337,14 @@ export function applyMutation(state, momentSec){
 
   // === Ранние стадии роста ===
   // До 50 блоков: тело растёт в 2 раза активнее других.
-  if (M.totalBlocks <= 50){
+  if (M.bodyBlocks <= 50){
     mul("grow_body", 2);
-  } else if (M.totalBlocks <= 70){
+  } else if (M.bodyBlocks <= 70){
     // До 70 блоков: тело получает +50% к текущему приоритету.
     mul("grow_body", 1.5);
   }
   // С 50 блоков добавляем приоритет одному случайному отростку до 83 блоков.
-  if (M.totalBlocks >= 50 && M.totalBlocks <= 83){
+  if (M.bodyBlocks >= 50 && M.bodyBlocks <= 83){
     const favoredAppendage = pick(rng, ["tail", "tentacle", "limb", "antenna"]);
     mul(favoredAppendage, 1.5);
   }
