@@ -142,11 +142,24 @@ export function attachSymbiosisUI(view, els, toast){
   async function shareGenome(){
     if (!view.state) return;
     try {
-      const genome = extractGenome(view.state);
+      const genome = extractGenome(getActiveOrg(view.state));
       const code = await encodeGenome(genome);
       if (els.symShareOutput) els.symShareOutput.value = code;
+      let copied = false;
       if (navigator.clipboard?.writeText){
-        await navigator.clipboard.writeText(code);
+        try {
+          await navigator.clipboard.writeText(code);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+      if (!copied && els.symShareOutput && document.queryCommandSupported?.("copy")){
+        els.symShareOutput.focus();
+        els.symShareOutput.select();
+        copied = document.execCommand("copy");
+      }
+      if (copied){
         toast("Отпечаток скопирован.");
         if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Отпечаток скопирован в буфер.";
       } else {
