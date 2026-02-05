@@ -161,6 +161,7 @@ export function attachSymbiosisUI(view, els, toast){
     try {
       const genome = extractGenome(getActiveOrg(view.state));
       const code = await encodeGenome(genome);
+      console.debug("[symbiosis] share genome code length", code.length);
       if (els.symShareOutput) els.symShareOutput.value = code;
       let copied = false;
       if (navigator.clipboard?.writeText){
