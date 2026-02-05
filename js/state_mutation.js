@@ -569,7 +569,8 @@ export function applyMutation(state, momentSec){
   }
 
   let forcedKind = null;
-  if (Array.isArray(state.growthTarget)){
+  const targetPower = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
+  if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
     if (state.growthTargetMode === "appendage" && (state.modules?.length || 0) > 0){
       forcedKind = "grow_appendage";
     } else {
