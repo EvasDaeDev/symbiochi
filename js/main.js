@@ -310,7 +310,7 @@ function attachPickOrganism(){
       }
 
       // max carrots per feeding tick (same as mutation tick)
-      const intervalSec = Math.max(60, Math.floor(Number(s.evoIntervalMin || 12) * 60));
+      const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
       const tickId = Math.floor(nowSec() / intervalSec);
       s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
       if (s.carrotTick.id !== tickId){ s.carrotTick.id = tickId; s.carrotTick.used = 0; }
