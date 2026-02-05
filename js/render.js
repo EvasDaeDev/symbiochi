@@ -373,23 +373,32 @@ function lengthAmpScale(len){
   return Math.min(2.6, 1 + Math.max(0, len - 4) * 0.05);
 }
 
+function tailAmpProfile(u){
+  const smooth = u * u * (3 - 2 * u);
+  return Math.pow(smooth, 1.35);
+}
+
 function windOffsetPx(i, len, blockPx, offsetSec=0){
   if (i < 2) return 0;
   const t = (Date.now()/1000) + offsetSec;
-  const omega = 2*Math.PI/5;
-  const phase = omega*t + i*0.55;
-  const denom = Math.max(1, len-2);
-  const amp01 = Math.min(1, (i-1)/denom);
-  const ampPx = blockPx * 0.65 * amp01 * lengthAmpScale(len);
+  const omega = 2 * Math.PI / 6;
+  const denom = Math.max(1, len - 2);
+  const u = Math.min(1, (i - 1) / denom);
+  const amp01 = tailAmpProfile(u);
+  const phase = omega * t - u * 3.4;
+  const ampPx = blockPx * 0.7 * amp01 * lengthAmpScale(len);
   return Math.sin(phase) * ampPx;
 }
 
 function windOffset(i, len, offsetSec=0){
   if (i < 2) return 0;
   const t = (Date.now()/1000) + offsetSec;
-  const phase = t*2 + i*0.55;
-  const amp01 = Math.min(1, (i-1)/Math.max(1,len-2));
-  return Math.sin(phase) * 0.35 * amp01 * lengthAmpScale(len);
+  const omega = 2 * Math.PI / 6;
+  const denom = Math.max(1, len - 2);
+  const u = Math.min(1, (i - 1) / denom);
+  const amp01 = tailAmpProfile(u);
+  const phase = omega * t - u * 3.4;
+  return Math.sin(phase) * 0.38 * amp01 * lengthAmpScale(len);
 }
 
 // growth animation: org.anim["x,y"] = {t0, dur}
