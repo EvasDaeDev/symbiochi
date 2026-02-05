@@ -220,7 +220,7 @@ export function simulate(state, deltaSec){
   }
 
   const intervalSec = Math.max(60, Math.floor(Number(state.evoIntervalMin || 12) * 60));
-  const ANABIOSIS_DELAY_SEC = 60 * 60;
+  const ANABIOSIS_DELAY_SEC = 45 * 60;
   const ANABIOSIS_INTERVAL_SEC = 30 * 60;
   const anabiosisIntervalSec = Math.max(intervalSec, ANABIOSIS_INTERVAL_SEC);
   const offlineStart = state.lastSeen || nowSec();
