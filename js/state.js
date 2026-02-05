@@ -168,7 +168,7 @@ export function migrateOrNew(){
       ? state.settings.evoIntervalMin
       : state.evoIntervalMin;
     const v = Number(raw);
-    state.evoIntervalMin = clamp(Number.isFinite(v) ? v : 12, 1, 240);
+    state.evoIntervalMin = clamp(Number.isFinite(v) ? v : 12, 0.1, 240);
     state.settings.evoIntervalMin = state.evoIntervalMin;
   }
 
@@ -178,6 +178,24 @@ export function migrateOrNew(){
 
   saveGame(state);
   return state;
+}
+
+function applyNonLinearDecay(value, ratePerSec, deltaSec){
+  if (!Number.isFinite(value) || !Number.isFinite(ratePerSec) || !Number.isFinite(deltaSec)) return 0;
+  if (value <= 0 || ratePerSec <= 0 || deltaSec <= 0) return Math.max(0, value || 0);
+  const threshold = 0.1;
+  const baseRate = ratePerSec;
+  if (value > threshold){
+    const timeToThreshold = (value - threshold) / baseRate;
+    if (deltaSec <= timeToThreshold){
+      return Math.max(0, value - baseRate * deltaSec);
+    }
+    const remaining = deltaSec - timeToThreshold;
+    const slowedRate = baseRate * 0.5;
+    return Math.max(0, threshold - slowedRate * remaining);
+  }
+  const slowedRate = baseRate * 0.5;
+  return Math.max(0, value - slowedRate * deltaSec);
 }
 
 export function simulate(state, deltaSec){
@@ -197,9 +215,9 @@ export function simulate(state, deltaSec){
   // decay for parent + buds
   const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
   for (const org of orgs){
-    org.bars.food  = clamp(org.bars.food  - DECAY.food_per_sec  * deltaSec, 0, BAR_MAX);
-    org.bars.clean = clamp(org.bars.clean - DECAY.clean_per_sec * deltaSec, 0, BAR_MAX);
-    org.bars.mood  = clamp(org.bars.mood  - DECAY.mood_per_sec  * deltaSec, 0, BAR_MAX);
+    org.bars.food  = clamp(applyNonLinearDecay(org.bars.food, DECAY.food_per_sec, deltaSec), 0, BAR_MAX);
+    org.bars.clean = clamp(applyNonLinearDecay(org.bars.clean, DECAY.clean_per_sec, deltaSec), 0, BAR_MAX);
+    org.bars.mood  = clamp(applyNonLinearDecay(org.bars.mood, DECAY.mood_per_sec, deltaSec), 0, BAR_MAX);
 
     const hungerFactor = clamp01(1 - org.bars.food);
     const dirtFactor   = clamp01(1 - org.bars.clean);
@@ -212,7 +230,7 @@ export function simulate(state, deltaSec){
     org.care.neglect += deltaSec * (0.00012 * (0.5 + stress));
   }
 
-  const intervalSec = Math.max(60, Math.floor(Number(state.evoIntervalMin || 12) * 60));
+  const intervalSec = Math.max(1, Math.floor(Number(state.evoIntervalMin || 12) * 60));
   const ANABIOSIS_DELAY_SEC = 45 * 60;
   const ANABIOSIS_INTERVAL_SEC = 30 * 60;
   const anabiosisIntervalSec = Math.max(intervalSec, ANABIOSIS_INTERVAL_SEC);

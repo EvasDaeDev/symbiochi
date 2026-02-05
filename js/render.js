@@ -1396,7 +1396,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
 
   // footer text is still set in main.js usually; keep compatible if present:
   if (els.footerInfo){
-    const intervalSec = Math.max(60, Math.floor(state.evoIntervalMin * 60));
+    const intervalSec = Math.max(1, Math.floor(state.evoIntervalMin * 60));
     const until = Math.max(0, (state.lastMutationAt + intervalSec) - state.lastSeen);
     els.footerInfo.textContent =
       `Мутация через ~${fmtAgeSeconds(until)} (интервал ${state.evoIntervalMin} мин) • max 140% • drag • zoom:${zoom ?? ""}`;

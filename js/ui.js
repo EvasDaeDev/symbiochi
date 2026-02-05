@@ -79,8 +79,8 @@ export function attachSettings(view, els, toast){
   }
   function saveSettings(){
     if (!view.state) return;
-    const v = parseInt(els.evoInput.value, 10);
-    view.state.evoIntervalMin = clamp(isFinite(v) ? v : 12, 1, 240);
+    const v = parseFloat(els.evoInput.value);
+    view.state.evoIntervalMin = clamp(isFinite(v) ? v : 12, 0.1, 240);
 	
 	if (!view.state.settings) view.state.settings = {};
 	view.state.settings.evoIntervalMin = view.state.evoIntervalMin;
