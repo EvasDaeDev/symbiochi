@@ -360,6 +360,42 @@ function clawRotationRad(offsetSec=0){
   return 0;
 }
 
+function limbPhalanxAngleRad(maxDeg, direction, offsetSec=0){
+  const cycle = 7; // 2s to bend + 2s return + 3s pause
+  const phase = ((Date.now()/1000) + offsetSec) % cycle;
+  const amp = (Math.PI/180) * maxDeg * direction;
+  if (phase < 2){
+    return (phase / 2) * amp;
+  }
+  if (phase < 4){
+    const t = (phase - 2) / 2;
+    return (1 - t) * amp;
+  }
+  return 0;
+}
+
+function jointedLimbPositions(cells, phalanxLengths, anglesRad){
+  const out = cells.map(([x, y]) => ({ x, y }));
+  if (!Array.isArray(phalanxLengths) || !phalanxLengths.length) return out;
+  let start = 0;
+  for (let p = 0; p < phalanxLengths.length && start < out.length; p++){
+    const origin = out[start];
+    const angle = anglesRad?.[p] || 0;
+    if (angle !== 0){
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      for (let i = start; i < out.length; i++){
+        const dx = out[i].x - origin.x;
+        const dy = out[i].y - origin.y;
+        out[i].x = origin.x + dx * cos - dy * sin;
+        out[i].y = origin.y + dx * sin + dy * cos;
+      }
+    }
+    start += phalanxLengths[p];
+  }
+  return out;
+}
+
 function moduleDir(cells){
   if (!cells || cells.length < 2) return [1,0];
   const dx = cells[1][0] - cells[0][0];
@@ -742,6 +778,34 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
     const offsetSec = ((orgId || 0) * 0.37 + mi) * 0.1;
     const baseCell = cells[0];
     const coreCell = org?.body?.core || baseCell;
+    const isJointedLimb = type === "limb" && Array.isArray(m.phalanxLengths) && m.phalanxLengths.length;
+    const limbAnim = isJointedLimb ? (m.limbAnim || {}) : null;
+    const limbDirection = isJointedLimb
+      ? (Number.isFinite(limbAnim?.direction)
+        ? limbAnim.direction
+        : (hash01(`${baseSeed}|limb-dir|${orgId}|${mi}`) < 0.5 ? -1 : 1))
+      : 1;
+    const limbAnglesDeg = isJointedLimb
+      ? m.phalanxLengths.map((_, idx) => {
+        const stored = limbAnim?.angles?.[idx];
+        if (Number.isFinite(stored)) return stored;
+        return 10 + Math.floor(hash01(`${baseSeed}|limb-angle|${orgId}|${mi}|${idx}`) * 18);
+      })
+      : null;
+    const limbAnglesRad = isJointedLimb
+      ? limbAnglesDeg.map((deg) => limbPhalanxAngleRad(deg, limbDirection, offsetSec))
+      : null;
+    const limbCells = isJointedLimb ? jointedLimbPositions(cells, m.phalanxLengths, limbAnglesRad) : null;
+    const jointStarts = isJointedLimb ? (() => {
+      const set = new Set();
+      let acc = 0;
+      for (let i = 0; i < m.phalanxLengths.length; i++){
+        if (i > 0 && acc < cells.length) set.add(acc);
+        acc += m.phalanxLengths[i];
+        if (acc >= cells.length) break;
+      }
+      return set;
+    })() : null;
 
 // Variable thickness profile (visual-only)
 // Goal:
@@ -752,6 +816,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
 // - antenna is always thin
 function thicknessLevel(type, i, len){
   if (type === "antenna") return 1;
+  if (type === "limb") return 1;
   if (len < 6) return 1;
   if (type === "claw"){
     const mid = (len - 1) / 2;
@@ -795,8 +860,24 @@ function outwardPerpDir(wx0, wy0){
   return da >= db ? candA : candB;
 }
 
+function limbPhalanxIndex(lengths, idx){
+  let acc = 0;
+  for (let i = 0; i < lengths.length; i++){
+    acc += lengths[i];
+    if (idx < acc) return i;
+  }
+  return lengths.length - 1;
+}
+
     for (let i=0;i<len;i++){
-      let [wx,wy] = cells[i];
+      let wx;
+      let wy;
+      if (isJointedLimb){
+        wx = limbCells[i].x;
+        wy = limbCells[i].y;
+      } else {
+        [wx,wy] = cells[i];
+      }
 
       if (type === "claw" && baseCell){
         const baseX = baseCell[0];
@@ -814,10 +895,12 @@ function outwardPerpDir(wx0, wy0){
         }
       }
 
-      // Antennas and claws should NOT sway with wind (requested).
-      const off = (type === "antenna" || type === "claw") ? 0 : windOffset(i, len, offsetSec);
-      wx += perp[0] * off;
-      wy += perp[1] * off;
+      // Antennas, claws, and jointed limbs should NOT sway with wind (requested).
+      const off = (type === "antenna" || type === "claw" || isJointedLimb) ? 0 : windOffset(i, len, offsetSec);
+      if (!isJointedLimb){
+        wx += perp[0] * off;
+        wy += perp[1] * off;
+      }
 
       const p = worldToScreenPx(cam, wx, wy, view);
       const x = p.x;
@@ -833,34 +916,68 @@ function outwardPerpDir(wx0, wy0){
 
       drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
 
-// variable thickness: tries to be thick, but can stay thin if blocked
-const lvl = thicknessLevel(type, i, len);
-const shade = brighten(c, -0.04);
+      if (isJointedLimb && jointStarts?.has(i)){
+        const shade = brighten(c, -0.04);
+        const wx0 = cells[i][0];
+        const wy0 = cells[i][1];
+        const segIndex = limbPhalanxIndex(m.phalanxLengths, i);
+        const baseDir = Array.isArray(m.phalanxDirs) ? (m.phalanxDirs[segIndex] || dir) : dir;
+        const basePerp = perpOf(baseDir);
+        const da = Math.abs((wx0 + basePerp[0]) - coreCell[0]) + Math.abs((wy0 + basePerp[1]) - coreCell[1]);
+        const db = Math.abs((wx0 - basePerp[0]) - coreCell[0]) + Math.abs((wy0 - basePerp[1]) - coreCell[1]);
+        const sign = da >= db ? 1 : -1;
+        const occKey = `${wx0 + basePerp[0] * sign},${wy0 + basePerp[1] * sign}`;
+        if (!occ.has(occKey)){
+          let dx = 0;
+          let dy = 0;
+          if (i + 1 < limbCells.length){
+            dx = limbCells[i + 1].x - limbCells[i].x;
+            dy = limbCells[i + 1].y - limbCells[i].y;
+          } else if (i > 0){
+            dx = limbCells[i].x - limbCells[i - 1].x;
+            dy = limbCells[i].y - limbCells[i - 1].y;
+          }
+          const dLen = Math.hypot(dx, dy);
+          if (dLen > 0){
+            const perpX = (-dy / dLen) * sign;
+            const perpY = (dx / dLen) * sign;
+            const support = worldToScreenPx(cam, wx + perpX, wy + perpY, view);
+            drawBlockAnim(ctx, support.x, support.y + breathY, s, shade, breathK, 0, kGrow);
+            if (isSelected){
+              boundaryRects.push({ x: support.x, y: support.y + breathY, w: s, h: s });
+            }
+          }
+        }
+      } else {
+        // variable thickness: tries to be thick, but can stay thin if blocked
+        const lvl = thicknessLevel(type, i, len);
+        const shade = brighten(c, -0.04);
 
-// IMPORTANT: use real cell coords for occupancy test
-const wx0 = cells[i][0];
-const wy0 = cells[i][1];
+        // IMPORTANT: use real cell coords for occupancy test
+        const wx0 = cells[i][0];
+        const wy0 = cells[i][1];
 
-if (lvl === 2){
-  if (type === "claw"){
-    const [ox, oy] = outwardPerpDir(wx0, wy0);
-    tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
-  } else {
-    // thick: one-sided support if possible
-    tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
-  }
-}
-else if (lvl === 3){
-  if (type === "claw"){
-    const [ox, oy] = outwardPerpDir(wx0, wy0);
-    tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
-    tryDrawSupport(wx0, wy0, x, y, ox * 2, oy * 2, shade, kGrow);
-  } else {
-    // max thickness: try both sides; if blocked, it will draw only what fits
-    tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
-    tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
-  }
-}
+        if (lvl === 2){
+          if (type === "claw"){
+            const [ox, oy] = outwardPerpDir(wx0, wy0);
+            tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
+          } else {
+            // thick: one-sided support if possible
+            tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
+          }
+        }
+        else if (lvl === 3){
+          if (type === "claw"){
+            const [ox, oy] = outwardPerpDir(wx0, wy0);
+            tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
+            tryDrawSupport(wx0, wy0, x, y, ox * 2, oy * 2, shade, kGrow);
+          } else {
+            // max thickness: try both sides; if blocked, it will draw only what fits
+            tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
+            tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
+          }
+        }
+      }
 
       if (isSelected && isBoundary(occ, cells[i][0], cells[i][1])){
         if (Number.isInteger(wx) && Number.isInteger(wy)){
