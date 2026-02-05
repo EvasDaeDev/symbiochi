@@ -77,9 +77,6 @@ export function applyShrinkDecay(state, momentSec){
     } else {
       const lastCell = target.cells[target.cells.length - 1];
       target.growPos = [lastCell[0], lastCell[1]];
-      if (Number.isFinite(target.growTo)){
-        target.growTo = Math.min(target.growTo, target.cells.length);
-      }
     }
     return true;
   }
@@ -191,15 +188,6 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
   const budSeg = cells.slice(cut);
   if (budSeg.length < 4) return false;
 
-  // у родителя остаётся укороченный орган
-  const parentSeg = cells.slice(0, cut);
-  if (parentSeg.length >= 1) {
-    m.cells = parentSeg;
-  } else {
-    // если вдруг нечего оставить - удаляем модуль
-    state.modules.splice(modIdx, 1);
-  }
-
   // в буд вставляем маленькое тело вокруг budSeg[0], чтобы было похоже на организм
   const budSeed = (rng() * 2**31) | 0;
   const baseBody = makeSmallConnectedBody(budSeed, 5);
@@ -293,12 +281,18 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
     },
     body: { cells: budBodyCells, core: budCore },
     modules: [],
-    face: { anchor: budCore.slice(), extraEye: false },
+    face: {
+      anchor: budCore.slice(),
+      eyeSize: 1,
+      eyeShape: rng() < 0.5 ? "diamond" : "sphere",
+      eyeRadius: 0
+    },
     cam: { ox: budCore[0], oy: budCore[1] },
   };
 
   assignGrowthPattern(bud, rng);
   state.buds.push(bud);
+  state.modules.splice(modIdx, 1);
   return true;
 }
 
@@ -316,9 +310,6 @@ function detachAppendageAndDestroy(state, modIdx){
     m.cells = parentSeg;
     const lastCell = parentSeg[parentSeg.length - 1];
     m.growPos = [lastCell[0], lastCell[1]];
-    if (Number.isFinite(m.growTo)){
-      m.growTo = Math.min(m.growTo, m.cells.length);
-    }
   } else {
     state.modules.splice(modIdx, 1);
   }
@@ -332,7 +323,7 @@ function computeMorphology(state){
   let totalBlocks = bodyBlocks;
   for (const m of (state.modules || [])) totalBlocks += (m.cells?.length || 0);
 
-  let tailLen=0, tentLen=0, limbLen=0, antLen=0, spikeLen=0, shellCells=0;
+  let tailLen=0, tentLen=0, limbLen=0, antLen=0, spikeLen=0, shellCells=0, eyeCount=0;
   let movableCount=0, defenseCount=0, sensoryCount=0;
 
   for (const m of state.modules){
@@ -344,13 +335,14 @@ function computeMorphology(state){
     if (m.type === "antenna") antLen += len;
     if (m.type === "spike") { spikeLen += len; defenseCount++; }
     if (m.type === "shell") { shellCells += len; defenseCount++; }
+    if (m.type === "eye") eyeCount += 1;
   }
 
-  sensoryCount = (antLen > 0 ? 1 : 0) + (state.face?.extraEye ? 1 : 0);
+  sensoryCount = (antLen > 0 ? 1 : 0) + (state.face?.anchor ? 1 : 0) + (eyeCount > 0 ? 1 : 0);
 
   const mobilityScore = (tailLen + tentLen + limbLen) / Math.max(1, bodyBlocks);   // 0..?
   const defenseScore  = (spikeLen + shellCells) / Math.max(1, bodyBlocks);
-  const sensoryScore  = (antLen + (state.face?.extraEye ? 2 : 1)) / Math.max(1, bodyBlocks);
+  const sensoryScore  = (antLen + (state.face?.anchor ? 1 : 0) + eyeCount) / Math.max(1, bodyBlocks);
 
   return {
     bodyBlocks,
@@ -517,6 +509,9 @@ export function applyMutation(state, momentSec){
     });
   }
 
+  // lower body-growth priority vs organs by ~15%
+  weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * 0.85] : [k, w]));
+
   // Анти-зацикливание: если уже очень много шипов (относительно тела) — режем шанс шипов
   if (M.defenseScore > 0.95 && M.spikeLen > M.shellCells){
     weights = weights.map(([k,w]) => {
@@ -582,7 +577,9 @@ export function applyMutation(state, momentSec){
     const ok = createBudFromModule(state, idx, rng, isBigForBud ? BUD.bigParentSuccessMult : 1);
     if (ok){
       state.bars.food = clamp01(state.bars.food - 0.20);
+      state.bars.clean = clamp01(state.bars.clean - 0.20);
       state.bars.hp = clamp01(state.bars.hp - 0.20);
+      state.bars.mood = clamp01(state.bars.mood - 0.20);
       pushLog(state, `Мутация: отделилась почка.`, "bud_ok", { part: budType, mi: idx });
     } else {
       const addN = 1 + Math.floor(rng()*2);
