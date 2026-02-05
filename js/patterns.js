@@ -21,6 +21,7 @@ const PATTERN_FILES = [
 
 const PATTERN_POWER_MIN = 0.55;
 const PATTERN_POWER_MAX = 0.77;
+const GROWTH_PATTERNS_ENABLED = false;
 
 let cachedPatterns = null;
 
@@ -76,6 +77,7 @@ async function loadPattern(path){
 }
 
 export async function initGrowthPatterns(){
+  if (!GROWTH_PATTERNS_ENABLED) return [];
   if (cachedPatterns) return cachedPatterns;
   const loaded = [];
   for (const file of PATTERN_FILES){
@@ -91,10 +93,12 @@ export async function initGrowthPatterns(){
 }
 
 export function getGrowthPatterns(){
+  if (!GROWTH_PATTERNS_ENABLED) return [];
   return cachedPatterns || [];
 }
 
 export function assignGrowthPattern(org, rng){
+  if (!GROWTH_PATTERNS_ENABLED) return;
   const patterns = getGrowthPatterns();
   if (!patterns.length || !org?.body?.core) return;
   const pattern = pick(rng, patterns);
@@ -115,6 +119,7 @@ export function assignGrowthPattern(org, rng){
 }
 
 export function ensureGrowthPattern(org){
+  if (!GROWTH_PATTERNS_ENABLED) return;
   if (!org || org.growthPattern) return;
   const seed = (org.seed ?? 1) | 0;
   const rng = mulberry32(hash32(seed, 8191));
@@ -160,6 +165,7 @@ function pickNearestToCore(org, remaining){
 }
 
 export function getGrowthPatternBias(org, mode="body"){
+  if (!GROWTH_PATTERNS_ENABLED) return null;
   if (!org?.growthPattern || org.growthPattern.done) return null;
   const remaining = mode === "appendage"
     ? (Array.isArray(org.growthPattern.remainingDynamic) ? org.growthPattern.remainingDynamic : [])
@@ -176,6 +182,7 @@ export function getGrowthPatternBias(org, mode="body"){
 }
 
 export function isGrowthPatternActive(org){
+  if (!GROWTH_PATTERNS_ENABLED) return false;
   if (!org?.growthPattern || org.growthPattern.done) return false;
   const remainingStatic = Array.isArray(org.growthPattern.remainingStatic)
     ? org.growthPattern.remainingStatic

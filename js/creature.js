@@ -30,6 +30,32 @@ function rotateDir(dir, steps){
   return dirFromAngle(angle);
 }
 
+function quantizeDirTo8(dir){
+  if (!dir) return dir;
+  const len = Math.hypot(dir[0], dir[1]) || 1;
+  let best = DIR8[0];
+  let bestDot = -Infinity;
+  for (const d of DIR8){
+    const dot = (dir[0] * d[0] + dir[1] * d[1]) / len;
+    if (dot > bestDot){
+      bestDot = dot;
+      best = d;
+    }
+  }
+  return [best[0], best[1]];
+}
+
+function rotateDir8(dir, steps){
+  if (!dir) return dir;
+  const q = quantizeDirTo8(dir);
+  let idx = 0;
+  for (let i = 0; i < DIR8.length; i++){
+    if (DIR8[i][0] === q[0] && DIR8[i][1] === q[1]){ idx = i; break; }
+  }
+  const next = (idx + steps + DIR8.length) % DIR8.length;
+  return [DIR8[next][0], DIR8[next][1]];
+}
+
 function stepFromDir(pos, dir){
   const nextPos = [pos[0] + dir[0], pos[1] + dir[1]];
   return {
@@ -113,6 +139,7 @@ export function newGame(){
 
   const body = makeSmallConnectedBody(seed, 12);
   const face = findFaceAnchor(body, seed);
+  const eyeShape = rng() < 0.5 ? "diamond" : "sphere";
 
  const plan = {
     // предпочитаемое направление роста (силуэт)
@@ -138,7 +165,7 @@ export function newGame(){
     care: { feed: 0, wash: 0, heal: 0, neglect: 0 },
     bars: { food: 1.00, clean: 1.00, hp: 1.00, mood: 1.00 },
     body,
-    face: { anchor: face, eyeSize: 1 },
+    face: { anchor: face, eyeSize: 1, eyeShape, eyeRadius: 0 },
     modules: [],
     buds: [],
     // Feeding items placed by the player
@@ -240,7 +267,7 @@ function buildLimbPlan(rng, baseDir){
   const count = 3 + Math.floor(rng() * 5); // 3..7 фаланг
   const lengths = Array.from({ length: count }, () => 5 + Math.floor(rng() * 3)); // 5..7 блоков
   const turnSteps = [];
-  const dirs = [baseDir];
+  const dirs = [quantizeDirTo8(baseDir)];
   for (let i = 1; i < count; i++){
     let step = 0;
     if (rng() > 0.2){
@@ -248,7 +275,7 @@ function buildLimbPlan(rng, baseDir){
       if (rng() < 0.35) step *= 2;
     }
     turnSteps.push(step);
-    dirs.push(step ? rotateDir(dirs[i - 1], step) : dirs[i - 1]);
+    dirs.push(step ? rotateDir8(dirs[i - 1], step) : dirs[i - 1]);
   }
   const angles = Array.from({ length: count }, () => 10 + Math.floor(rng() * 18)); // 10..27°
   const animDirection = rng() < 0.5 ? -1 : 1;
@@ -259,6 +286,22 @@ function buildLimbPlan(rng, baseDir){
     totalLength: lengths.reduce((sum, len) => sum + len, 0),
     anim: { direction: animDirection, angles }
   };
+}
+
+function buildEyeOffsets(radius, shape){
+  const out = [];
+  const r = Math.max(0, radius | 0);
+  for (let dy = -r; dy <= r; dy++){
+    for (let dx = -r; dx <= r; dx++){
+      if (shape === "sphere"){
+        if ((dx * dx + dy * dy) <= r * r) out.push([dx, dy]);
+      } else {
+        if (Math.abs(dx) + Math.abs(dy) <= r) out.push([dx, dy]);
+      }
+    }
+  }
+  if (out.length === 0) out.push([0, 0]);
+  return out;
 }
 
 export function addModule(state, type, rng, target=null){
@@ -340,6 +383,8 @@ export function addModule(state, type, rng, target=null){
   let targetLen = 0;
   let dirForGrowth = null;
   let limbPlan = null;
+  let eyeShape = null;
+  let eyeRadius = null;
 
   if (type === "tail" || type === "tentacle"){
     movable = true;
@@ -349,7 +394,7 @@ export function addModule(state, type, rng, target=null){
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "limb"){
     movable = true;
-    const dir = rng()<0.65 ? [0,1] : baseDir;
+    const dir = rng()<0.65 ? [0,1] : quantizeDirTo8(baseDir);
     limbPlan = buildLimbPlan(rng, dir);
     targetLen = limbPlan.totalLength;
     dirForGrowth = dir;
@@ -358,7 +403,7 @@ export function addModule(state, type, rng, target=null){
   } else if (type === "antenna"){
     movable = true;
     targetLen = 2 + Math.floor(rng()*5);
-    const dir = rng()<0.7 ? [0,-1] : baseDir;
+    const dir = rng()<0.7 ? [0,-1] : quantizeDirTo8(baseDir);
     dirForGrowth = dir;
     targetLen = Math.min(targetLen, 27);
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
@@ -379,9 +424,42 @@ export function addModule(state, type, rng, target=null){
     const patch = [[ox,oy],[ox+1,oy],[ox,oy+1],[ox+1,oy+1]];
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
   } else if (type === "eye"){
-    state.face.extraEye = true;
-    state.face.eyeSize = Math.min(3, Math.max(1, (state.face.eyeSize || 1) + 1));
-    return true;
+    eyeShape = rng() < 0.5 ? "diamond" : "sphere";
+    eyeRadius = (state.body?.cells?.length || 0) < 20
+      ? 1
+      : (rng() < 0.5 ? 1 : 2);
+    const faceAnchor = state.face?.anchor;
+    const faceEyeRadius = Math.max(0, (state.face?.eyeRadius ?? ((state.face?.eyeSize ?? 1) - 1)) | 0);
+    const faceEyeShape = state.face?.eyeShape || (rng() < 0.5 ? "diamond" : "sphere");
+    const faceEyeSet = new Set();
+    if (faceAnchor && faceEyeRadius >= 0){
+      for (const [dx, dy] of buildEyeOffsets(faceEyeRadius, faceEyeShape)){
+        faceEyeSet.add(key(faceAnchor[0] + dx, faceAnchor[1] + dy));
+      }
+    }
+    const options = DIR8.slice();
+    for (let i = options.length - 1; i > 0; i--){
+      const j = Math.floor(rng() * (i + 1));
+      [options[i], options[j]] = [options[j], options[i]];
+    }
+    let placed = null;
+    for (const d of options){
+      const center = stepFromDir([ax, ay], d).cell;
+    const offsets = buildEyeOffsets(eyeRadius, eyeShape);
+      const candidate = offsets.map(([dx, dy]) => [center[0] + dx, center[1] + dy]);
+      if (candidate.some(([x, y]) => x === state.body.core[0] && y === state.body.core[1])) continue;
+      if (candidate.some(([x, y]) => bodySet.has(key(x, y)))) continue;
+      if (candidate.some(([x, y]) => occupiedByModules(state, x, y))) continue;
+      if (candidate.some(([x, y]) => faceEyeSet.has(key(x, y)))) continue;
+      if (isTooCloseToSameType(candidate)) continue;
+      placed = candidate;
+      break;
+    }
+    if (!placed) return false;
+    cells = placed;
+    movable = false;
+    targetLen = cells.length;
+    dirForGrowth = null;
   } else if (type === "mouth"){
     // mouth: small 2x2 patch near face anchor (front)
     const fa = state.face?.anchor || anchor;
@@ -414,7 +492,14 @@ export function addModule(state, type, rng, target=null){
     const dx = baseStep[0] - ax;
     const dy = baseStep[1] - ay;
     const ox = ax + dx, oy = ay + dy;
-    const patch = [[ox,oy],[ox+dx,oy+dy],[ox+dx,oy+dy+1],[ox+dx,oy+dy-1]];
+    const patch = [
+      [ox, oy],
+      [ox + dx, oy + dy],
+      [ox + dx, oy + dy + 1],
+      [ox + dx, oy + dy - 1],
+      [ox + dx * 2, oy + dy + 1],
+      [ox + dx * 2, oy + dy - 1]
+    ];
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
     targetLen = cells.length;
     dirForGrowth = baseDir;
@@ -466,6 +551,8 @@ export function addModule(state, type, rng, target=null){
     phalanxLengths: limbPlan?.lengths,
     phalanxDirs: limbPlan?.dirs,
     limbAnim: limbPlan?.anim,
+    eyeShape: type === "eye" ? eyeShape : undefined,
+    eyeRadius: type === "eye" ? eyeRadius : undefined,
     ...styleParams
   });
     // ----- symmetry: sometimes spawn a mirrored twin organ -----
@@ -535,6 +622,12 @@ export function growPlannedModules(state, rng, options = {}){
   function rotateDir(dir, steps){
     const angle = Math.atan2(dir[1], dir[0]) + steps * ANGLE_STEP_RAD;
     return dirFromAngle(angle);
+  }
+  function rotateDirForModule(m, dir, steps){
+    if (m?.type === "limb" || m?.type === "antenna"){
+      return rotateDir8(dir, steps);
+    }
+    return rotateDir(dir, steps);
   }
 
   function phalanxIndex(lengths, idx){
@@ -625,6 +718,10 @@ export function growPlannedModules(state, rng, options = {}){
     const growPos = Array.isArray(m.growPos) ? m.growPos : [last[0], last[1]];
     let baseDir = m.growDir;
     const moduleInfluence = useTarget ? targetInfluence(moduleDistance(m, target[0], target[1])) : 0;
+    if (m.type === "limb" || m.type === "antenna"){
+      baseDir = quantizeDirTo8(baseDir);
+      m.growDir = baseDir;
+    }
 
     if (m.type === "antenna" || m.type === "spike"){
       m.growStyle = "straight";
@@ -647,7 +744,7 @@ export function growPlannedModules(state, rng, options = {}){
       }
       else if (m.growStyle === "curve"){
         if (rng() < (m.turnChance || 0.2)){
-          baseDir = rotateDir(baseDir, m.curveSign || 1);
+          baseDir = rotateDirForModule(m, baseDir, m.curveSign || 1);
           m.growDir = baseDir;
         }
         dir = baseDir;
@@ -677,12 +774,12 @@ export function growPlannedModules(state, rng, options = {}){
     } else {
       if (appendage) pushDir(baseDir);
       pushDir(dir);
-      pushDir(rotateDir(dir, 1));
-      pushDir(rotateDir(dir, -1));
-      pushDir(rotateDir(dir, 2));
-      pushDir(rotateDir(dir, -2));
-      pushDir(rotateDir(dir, 3));
-      pushDir(rotateDir(dir, -3));
+      pushDir(rotateDirForModule(m, dir, 1));
+      pushDir(rotateDirForModule(m, dir, -1));
+      pushDir(rotateDirForModule(m, dir, 2));
+      pushDir(rotateDirForModule(m, dir, -2));
+      pushDir(rotateDirForModule(m, dir, 3));
+      pushDir(rotateDirForModule(m, dir, -3));
     }
 
     if (useTarget && moduleInfluence > 0){

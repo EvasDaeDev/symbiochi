@@ -124,7 +124,15 @@ export function migrateOrNew(){
 
     enforceAppendageRules();
 
-    org.face = org.face || { anchor: findFaceAnchor(org.body, seed) };
+    if (!org.face) org.face = { anchor: findFaceAnchor(org.body, seed) };
+    if (!org.face.eyeShape){
+      const prng = mulberry32(hash32(seed, 9191));
+      org.face.eyeShape = prng() < 0.5 ? "diamond" : "sphere";
+    }
+    if (!Number.isFinite(org.face.eyeRadius)){
+      const size = Math.max(1, (org.face.eyeSize ?? 1) | 0);
+      org.face.eyeRadius = Math.max(0, size - 1);
+    }
     org.cam = org.cam || { ox: org.body.core[0], oy: org.body.core[1] };
 
     if (org.active === undefined) org.active = null;

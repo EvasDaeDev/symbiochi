@@ -119,6 +119,7 @@ const view = {
     smoothedFrame: 16.7,
     smoothedRender: 0,
   },
+  lastActive: null,
 
   // resize observer
   _ro: null,
@@ -210,6 +211,10 @@ function startLoops(){
     renderGrid(view.state, els.canvas, els.grid, view);
     const renderTime = performance.now() - renderStart;
     perf.smoothedRender = perf.smoothedRender * 0.9 + renderTime * 0.1;
+    if (view.lastActive !== view.state.active){
+      view.lastActive = view.state.active;
+      rerenderAll(0);
+    }
 
     if (now - perf.lastStatAt >= 250){
       const span = now - perf.lastStatAt || 1;
@@ -377,6 +382,7 @@ function attachPickOrganism(){
 async function startGame(){
   await initGrowthPatterns();
   view.state = migrateOrNew();
+  view.lastActive = view.state?.active ?? null;
 
   els.startOverlay.style.display = "none";
 

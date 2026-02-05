@@ -361,14 +361,17 @@ function clawRotationRad(offsetSec=0){
 }
 
 function limbPhalanxAngleRad(maxDeg, direction, offsetSec=0){
-  const cycle = 7; // 2s to bend + 2s return + 3s pause
+  const bendDur = 2 * 1.5;
+  const returnDur = 2 * 1.5;
+  const pauseDur = 3 * 2;
+  const cycle = bendDur + returnDur + pauseDur;
   const phase = ((Date.now()/1000) + offsetSec) % cycle;
-  const amp = (Math.PI/180) * maxDeg * direction;
-  if (phase < 2){
-    return (phase / 2) * amp;
+  const amp = (Math.PI/180) * maxDeg * 1.15 * direction;
+  if (phase < bendDur){
+    return (phase / bendDur) * amp;
   }
-  if (phase < 4){
-    const t = (phase - 2) / 2;
+  if (phase < bendDur + returnDur){
+    const t = (phase - bendDur) / returnDur;
     return (1 - t) * amp;
   }
   return 0;
@@ -406,7 +409,7 @@ function moduleDir(cells){
 function perpOf([dx,dy]){ return [-dy, dx]; }
 
 function lengthAmpScale(len){
-  return Math.min(2.6, 1 + Math.max(0, len - 4) * 0.05);
+  return Math.min(4.0, 1 + Math.max(0, len - 4) * 0.08);
 }
 
 function tailAmpProfile(u){
@@ -605,13 +608,29 @@ function computeCorePx(view, bodyBlocks){
   return Math.max(8, Math.min(base, maxSide));
 }
 
-function computeEyeSideBlocks(org, bodyBlocks){
-  // Eyes are rendered as block-shapes (not px), up to 3x3 = 9 blocks.
-  // Outer corners are rounded by the block corner-cut.
-  const wanted = clamp(org?.face?.eyeSize ?? 1, 1, 3);
-  // early stage: keep tiny
-  if (bodyBlocks < 16) return 1;
+function computeEyeRadius(org, bodyBlocks){
+  const raw = Number.isFinite(org?.face?.eyeRadius)
+    ? org.face.eyeRadius
+    : Math.max(0, (org?.face?.eyeSize ?? 1) - 1);
+  const wanted = clamp(raw, 0, 2);
+  if (bodyBlocks < 16) return 0;
   return wanted;
+}
+
+function buildEyeOffsets(radius, shape){
+  const out = [];
+  const r = Math.max(0, radius | 0);
+  for (let dy = -r; dy <= r; dy++){
+    for (let dx = -r; dx <= r; dx++){
+      if (shape === "sphere"){
+        if ((dx * dx + dy * dy) <= r * r) out.push([dx, dy]);
+      } else {
+        if (Math.abs(dx) + Math.abs(dy) <= r) out.push([dx, dy]);
+      }
+    }
+  }
+  if (out.length === 0) out.push([0, 0]);
+  return out;
 }
 
 // =====================
@@ -817,11 +836,12 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
 function thicknessLevel(type, i, len){
   if (type === "antenna") return 1;
   if (type === "limb") return 1;
+  if (type === "tail") return len >= 4 ? 2 : 1;
   if (len < 6) return 1;
   if (type === "claw"){
     const mid = (len - 1) / 2;
     const dist = Math.abs(i - mid);
-    const maxThickness = len >= 10 ? 3 : 2;
+    const maxThickness = 2;
     if (dist <= len * 0.2) return maxThickness;
     if (dist <= len * 0.35) return Math.min(2, maxThickness);
     return 1;
@@ -830,7 +850,7 @@ function thicknessLevel(type, i, len){
   const maxZone = Math.max(1, Math.floor(len * 0.25));
   const midZone = Math.max(maxZone, Math.floor(len * (2/3)));
 
-  if (i < maxZone) return 3;   // max thickness
+  if (i < maxZone) return 2;   // max thickness
   if (i < midZone) return 2;   // thick
   return 1;                    // thin
 }
@@ -923,31 +943,8 @@ function limbPhalanxIndex(lengths, idx){
         const segIndex = limbPhalanxIndex(m.phalanxLengths, i);
         const baseDir = Array.isArray(m.phalanxDirs) ? (m.phalanxDirs[segIndex] || dir) : dir;
         const basePerp = perpOf(baseDir);
-        const da = Math.abs((wx0 + basePerp[0]) - coreCell[0]) + Math.abs((wy0 + basePerp[1]) - coreCell[1]);
-        const db = Math.abs((wx0 - basePerp[0]) - coreCell[0]) + Math.abs((wy0 - basePerp[1]) - coreCell[1]);
-        const sign = da >= db ? 1 : -1;
-        const occKey = `${wx0 + basePerp[0] * sign},${wy0 + basePerp[1] * sign}`;
-        if (!occ.has(occKey)){
-          let dx = 0;
-          let dy = 0;
-          if (i + 1 < limbCells.length){
-            dx = limbCells[i + 1].x - limbCells[i].x;
-            dy = limbCells[i + 1].y - limbCells[i].y;
-          } else if (i > 0){
-            dx = limbCells[i].x - limbCells[i - 1].x;
-            dy = limbCells[i].y - limbCells[i - 1].y;
-          }
-          const dLen = Math.hypot(dx, dy);
-          if (dLen > 0){
-            const perpX = (-dy / dLen) * sign;
-            const perpY = (dx / dLen) * sign;
-            const support = worldToScreenPx(cam, wx + perpX, wy + perpY, view);
-            drawBlockAnim(ctx, support.x, support.y + breathY, s, shade, breathK, 0, kGrow);
-            if (isSelected){
-              boundaryRects.push({ x: support.x, y: support.y + breathY, w: s, h: s });
-            }
-          }
-        }
+        tryDrawSupport(wx0, wy0, x, y, basePerp[0], basePerp[1], shade, kGrow);
+        tryDrawSupport(wx0, wy0, x, y, -basePerp[0], -basePerp[1], shade, kGrow);
       } else {
         // variable thickness: tries to be thick, but can stay thin if blocked
         const lvl = thicknessLevel(type, i, len);
@@ -964,17 +961,6 @@ function limbPhalanxIndex(lengths, idx){
           } else {
             // thick: one-sided support if possible
             tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
-          }
-        }
-        else if (lvl === 3){
-          if (type === "claw"){
-            const [ox, oy] = outwardPerpDir(wx0, wy0);
-            tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
-            tryDrawSupport(wx0, wy0, x, y, ox * 2, oy * 2, shade, kGrow);
-          } else {
-            // max thickness: try both sides; if blocked, it will draw only what fits
-            tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
-            tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
           }
         }
       }
@@ -1023,32 +1009,28 @@ function limbPhalanxIndex(lengths, idx){
     boundaryRects.push({x:coreX, y:coreY, w:corePx, h:corePx});
   }
 
-  // EYES (always on top of body). Size can grow up to 9 blocks (3x3).
+  // EYES (always on top of body).
   const face = org?.face?.anchor;
   if (face){
-    const eyeSide = computeEyeSideBlocks(org, bodyBlocks);
+    const eyeRadius = computeEyeRadius(org, bodyBlocks);
     const eyeColor = getPartColor(org, "eye", 0) || "#e2e8f0";
-
-    const sx = face[0] - Math.floor(eyeSide/2);
-    const sy = face[1] - Math.floor(eyeSide/2);
-
-    // local occ for neighbor shading within the eye blob
+    const shape = org?.face?.eyeShape || (hash01(`${baseSeed}|eye-shape|${orgId}`) < 0.5 ? "diamond" : "sphere");
+    const offsets = buildEyeOffsets(eyeRadius, shape);
     const eyeOcc = new Set();
-    for (let yy=0; yy<eyeSide; yy++){
-      for (let xx=0; xx<eyeSide; xx++){
-        eyeOcc.add(`${sx+xx},${sy+yy}`);
-      }
+    for (const [dx, dy] of offsets){
+      const wx = face[0] + dx;
+      const wy = face[1] + dy;
+      if (wx === core[0] && wy === core[1]) continue;
+      eyeOcc.add(`${wx},${wy}`);
     }
 
-    for (let yy=0; yy<eyeSide; yy++){
-      for (let xx=0; xx<eyeSide; xx++){
-        const wx = sx+xx, wy = sy+yy;
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
-        const nm = neighMaskAt(eyeOcc, wx, wy);
-        drawBlock(ctx, x, y, s, eyeColor, breathK, nm);
-      }
+    for (const key of eyeOcc){
+      const [wx, wy] = key.split(",").map((v) => parseInt(v, 10));
+      const p = worldToScreenPx(cam, wx, wy, view);
+      const x = p.x;
+      const y = p.y + breathY;
+      const nm = neighMaskAt(eyeOcc, wx, wy);
+      drawBlock(ctx, x, y, s, eyeColor, breathK, nm);
     }
   }
 

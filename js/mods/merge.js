@@ -209,7 +209,12 @@ export function instantiateParentFromGenome(state, genomeOut){
   state.plan = genomeOut.plan ? JSON.parse(JSON.stringify(genomeOut.plan)) : state.plan;
   state.palette = genomeOut.palette ? JSON.parse(JSON.stringify(genomeOut.palette)) : state.palette;
   state.body = body;
-  state.face = { anchor: findFaceAnchor(body, seed), eyeSize: 1, extraEye: false };
+  state.face = {
+    anchor: findFaceAnchor(body, seed),
+    eyeSize: 1,
+    eyeShape: (mulberry32(seed)() < 0.5 ? "diamond" : "sphere"),
+    eyeRadius: 0
+  };
   state.modules = [];
   state.anim = {};
   state.cam = { ox: body.core[0], oy: body.core[1] };

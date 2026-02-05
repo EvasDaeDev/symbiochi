@@ -26,7 +26,8 @@ export function makeToast(){
 }
 
 export function renderLog(state, els){
-  const log = state.log || [];
+  const root = (state && state.__logRoot) ? state.__logRoot : state;
+  const log = root?.log || [];
 
   els.logBody.innerHTML = log.slice().reverse().map((e) => {
     const cls =
