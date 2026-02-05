@@ -184,7 +184,14 @@ export function attachSymbiosisUI(view, els, toast){
         throw new Error("no clipboard");
       }
     } catch (err){
-      if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Скопируй строку вручную — браузер не дал доступ.";
+      console.debug("[symbiosis] share genome failed", err);
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Отпечаток не создан. Проверь консоль для деталей.";
+      }
+      if (els.symShareOutput){
+        const message = err instanceof Error ? err.message : String(err);
+        els.symShareOutput.value = `Ошибка: ${message}`;
+      }
       if (els.symShareOutput){
         els.symShareOutput.focus();
         els.symShareOutput.select();
