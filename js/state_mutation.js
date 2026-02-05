@@ -35,6 +35,37 @@ export async function applySymbiosisMerge(state, foreignGenomeOrString){
   }
 }
 
+export function applyShrinkDecay(state, momentSec){
+  if (!state || !state.body || !Array.isArray(state.body.cells)) return false;
+  const rng = mulberry32(hash32(state.seed, momentSec | 0, 7777));
+  const modules = Array.isArray(state.modules) ? state.modules : [];
+  const sortedModules = modules
+    .map((mod, idx) => ({ mod, idx }))
+    .filter(({ mod }) => Array.isArray(mod?.cells) && mod.cells.length > 0)
+    .sort((a, b) => b.mod.cells.length - a.mod.cells.length);
+
+  if (sortedModules.length > 0){
+    const pickIdx = Math.floor(rng() * Math.min(3, sortedModules.length));
+    const target = sortedModules[pickIdx].mod;
+    target.cells.pop();
+    if (target.cells.length === 0){
+      state.modules.splice(sortedModules[pickIdx].idx, 1);
+    }
+    return true;
+  }
+
+  if (state.body.cells.length <= 16) return false;
+  const coreKey = key(state.body.core[0], state.body.core[1]);
+  const removable = state.body.cells.filter(([x, y]) => key(x, y) !== coreKey);
+  if (!removable.length) return false;
+  const pick = removable[Math.floor(rng() * removable.length)];
+  const pickKey = key(pick[0], pick[1]);
+  const remaining = state.body.cells.filter(([x, y]) => key(x, y) !== pickKey);
+  if (remaining.length < 16) return false;
+  state.body.cells = remaining;
+  return true;
+}
+
 function weightedPick(rng, pairs){
   let sum = 0;
   for (const [,w] of pairs) sum += Math.max(0, w);
@@ -497,6 +528,8 @@ export function applyMutation(state, momentSec){
     // Large parents get extra placement attempts (boosts "success" chance).
     const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
     if (ok){
+      state.bars.food = clamp01(state.bars.food - 0.20);
+      state.bars.hp = clamp01(state.bars.hp - 0.20);
       pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
     } else {
       const addN = 1 + Math.floor(rng()*2);
