@@ -683,7 +683,24 @@ export function applyMutation(state, momentSec){
           grownModules
         });
       } else {
-        pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
+        const { biases: bodyBiases } = getGrowthBiases(state, "body");
+        const addN = 1 + Math.floor(rng() * 2); // +1..2
+        const grownBody = growBodyConnected(state, addN, rng, null, bodyBiases);
+        if (grownBody){
+          pushLog(
+            state,
+            `Мутация: рост отростков не удался → тело выросло (+${addN}).`,
+            "mut_fail",
+            { part: "appendage" }
+          );
+        } else {
+          pushLog(
+            state,
+            `Мутация: рост отростков не удался и рост тела не удался.`,
+            "mut_fail",
+            { part: "appendage" }
+          );
+        }
       }
       continue;
     }
