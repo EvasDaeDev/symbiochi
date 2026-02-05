@@ -15,7 +15,7 @@ export const PARTS = {
 
   // поздние мутации
   teeth:    { label: "Зубы",       baseHue: 20,  wind: false },
-  claw:     { label: "Клешня",     baseHue: 25,  wind: true  },
+  claw:     { label: "Клешня",     baseHue: 25,  wind: false },
   mouth:    { label: "Рот",        baseHue: 57,  wind: false },
   fin:      { label: "Плавник",    baseHue: 190, wind: true  },
 };
