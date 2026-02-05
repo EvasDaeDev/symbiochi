@@ -64,20 +64,61 @@ export function barPct(x){
 }
 
 export function base64UrlEncode(bytes){
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk){
-    const slice = bytes.subarray(i, i + chunk);
-    binary += String.fromCharCode(...slice);
+  const toUrl = (str) => str.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  if (typeof btoa !== "undefined"){
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk){
+      const slice = bytes.subarray(i, i + chunk);
+      binary += String.fromCharCode(...slice);
+    }
+    return toUrl(btoa(binary));
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  const table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3){
+    const b1 = bytes[i];
+    const b2 = bytes[i + 1];
+    const b3 = bytes[i + 2];
+    const t1 = b1 >> 2;
+    const t2 = ((b1 & 3) << 4) | (b2 != null ? (b2 >> 4) : 0);
+    const t3 = b2 != null ? (((b2 & 15) << 2) | (b3 != null ? (b3 >> 6) : 0)) : 64;
+    const t4 = b3 != null ? (b3 & 63) : 64;
+    out += table[t1] + table[t2] + (t3 === 64 ? "=" : table[t3]) + (t4 === 64 ? "=" : table[t4]);
+  }
+  return toUrl(out);
 }
 
 export function base64UrlDecode(str){
   const padded = str.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((str.length + 3) % 4);
-  const binary = atob(padded);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  if (typeof atob !== "undefined"){
+    const binary = atob(padded);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  }
+  const table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const rev = new Uint8Array(256);
+  rev.fill(255);
+  for (let i = 0; i < table.length; i++) rev[table.charCodeAt(i)] = i;
+  let validLen = padded.length;
+  if (padded.endsWith("==")) validLen -= 2;
+  else if (padded.endsWith("=")) validLen -= 1;
+  const outLen = Math.floor((validLen * 3) / 4);
+  const out = new Uint8Array(outLen);
+  let outIdx = 0;
+  for (let i = 0; i < padded.length; i += 4){
+    const c1 = rev[padded.charCodeAt(i)];
+    const c2 = rev[padded.charCodeAt(i + 1)];
+    const c3 = rev[padded.charCodeAt(i + 2)];
+    const c4 = rev[padded.charCodeAt(i + 3)];
+    const b1 = (c1 << 2) | (c2 >> 4);
+    const b2 = ((c2 & 15) << 4) | (c3 >> 2);
+    const b3 = ((c3 & 3) << 6) | c4;
+    if (outIdx < outLen) out[outIdx++] = b1;
+    if (outIdx < outLen && c3 !== 255) out[outIdx++] = b2;
+    if (outIdx < outLen && c4 !== 255) out[outIdx++] = b3;
+  }
   return out;
 }
 
