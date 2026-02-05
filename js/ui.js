@@ -33,6 +33,7 @@ export function renderLog(state, els){
       e.kind === "mut_ok" ? "logEntry good" :
       e.kind === "bud_ok" ? "logEntry bud" :
       e.kind === "mut_fail" ? "logEntry warn" :
+      e.kind === "alert" ? "logEntry alert" :
       "logEntry";
 
     const meta = e.meta || {};
