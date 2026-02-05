@@ -188,6 +188,7 @@ export function newGame(){
     growthTarget: null,
     growthTargetMode: null, // "body" | "appendage"
     growthTargetPower: 0,
+    growthQueueIndex: 0,
     active: null,
     log: [],
     cam: { ox: body.core[0], oy: body.core[1] },
@@ -762,6 +763,13 @@ export function growPlannedModules(state, rng, options = {}){
       const scoreB = b.i * (1 - ib) + db * ib;
       return scoreA - scoreB;
     });
+    if (modules.length > 1){
+      const rawIndex = Number.isFinite(state.growthQueueIndex) ? state.growthQueueIndex : 0;
+      const start = ((rawIndex % modules.length) + modules.length) % modules.length;
+      if (start){
+        modules.push(...modules.splice(0, start));
+      }
+    }
   } else if (shuffle){
     for (let i = modules.length - 1; i > 0; i--){
       const j = Math.floor(rng() * (i + 1));
@@ -769,7 +777,9 @@ export function growPlannedModules(state, rng, options = {}){
     }
   }
 
-  for (const entry of modules){
+  let lastGrownPos = null;
+  for (let pos = 0; pos < modules.length; pos++){
+    const entry = modules[pos];
     const m = entry.m;
     const minLen = Number.isFinite(m.growTo) ? m.growTo : 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
@@ -908,7 +918,13 @@ export function growPlannedModules(state, rng, options = {}){
       }
       grew++;
       placed = true;
-      if (grew >= maxGrows) return grew;
+      lastGrownPos = pos;
+      if (grew >= maxGrows){
+        if (lastGrownPos !== null && modules.length > 0){
+          state.growthQueueIndex = (lastGrownPos + 1) % modules.length;
+        }
+        return grew;
+      }
       break;
     }
 
@@ -916,6 +932,9 @@ export function growPlannedModules(state, rng, options = {}){
     if (!placed){
       continue;
     }
+  }
+  if (lastGrownPos !== null && modules.length > 0){
+    state.growthQueueIndex = (lastGrownPos + 1) % modules.length;
   }
 
   return grew;
