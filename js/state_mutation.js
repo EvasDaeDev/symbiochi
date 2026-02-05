@@ -74,6 +74,12 @@ export function applyShrinkDecay(state, momentSec){
     target.cells.pop();
     if (target.cells.length === 0){
       state.modules.splice(sortedModules[pickIdx].idx, 1);
+    } else {
+      const lastCell = target.cells[target.cells.length - 1];
+      target.growPos = [lastCell[0], lastCell[1]];
+      if (Number.isFinite(target.growTo)){
+        target.growTo = Math.min(target.growTo, target.cells.length);
+      }
     }
     return true;
   }
