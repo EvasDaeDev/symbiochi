@@ -1,4 +1,4 @@
-import { BAR_MAX, clamp, clamp01, key, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
+import { clamp, clamp01, key, nowSec, mulberry32, hash32, pick } from "./util.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
@@ -6,6 +6,7 @@ import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
 import { ensureGrowthPattern, normalizeGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
+import { BAR_MAX, CARROT_BODY_RANGE, PALETTES } from "./world.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
 
@@ -740,8 +741,11 @@ function processCarrotsTick(state, org = state){
   }
 
   org.growthTarget = best;
-  org.growthTargetMode = (bestModuleD < bestBodyD) ? "appendage" : "body";
-  org.growthTargetPower = Math.max(0, Math.min(1, 1 - bestD / 45));
+  const moduleFaster = bestModuleD < bestBodyD;
+  const bodyInRange = bestBodyD <= CARROT_BODY_RANGE;
+  org.growthTargetMode = (moduleFaster || !bodyInRange) ? "appendage" : "body";
+  const activeDist = (org.growthTargetMode === "appendage") ? bestModuleD : bestBodyD;
+  org.growthTargetPower = Math.max(0, Math.min(1, 1 - activeDist / 45));
   return eaten;
 }
 
