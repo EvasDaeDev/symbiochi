@@ -3,8 +3,8 @@ import { hash32, mulberry32, pick, key } from "./util.js";
 // Add new pattern PNGs here (store files in /patterns, naming: pattern-*.png).
 // Sample PNGs are not bundled; provide your own files in /patterns.
 const PATTERN_FILES = [
-  "patterns/pattern-x.png",
-  "patterns/pattern-ring.png"
+  "patterns/pattern_1.png",
+  
 ];
 
 const PATTERN_POWER_MIN = 0.55;
