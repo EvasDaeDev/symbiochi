@@ -741,8 +741,10 @@ function processCarrotsTick(state, org = state){
 
   org.growthTarget = best;
   const moduleFaster = bestModuleD < bestBodyD;
-  const bodyInRange = bestBodyD <= CARROT_BODY_RANGE;
-  org.growthTargetMode = (moduleFaster || !bodyInRange) ? "appendage" : "body";
+  const nearDist = Number.isFinite(CARROT.nearDist) ? CARROT.nearDist : CARROT_BODY_RANGE;
+  const farDist = Number.isFinite(CARROT.farDist) ? CARROT.farDist : nearDist;
+  const bodyInRange = bestBodyD <= nearDist;
+  org.growthTargetMode = (moduleFaster || bestBodyD > farDist || !bodyInRange) ? "appendage" : "body";
   const activeDist = (org.growthTargetMode === "appendage") ? bestModuleD : bestBodyD;
   org.growthTargetPower = Math.max(0, Math.min(1, 1 - activeDist / 45));
   return eaten;
