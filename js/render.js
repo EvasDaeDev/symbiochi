@@ -422,7 +422,7 @@ function windOffsetPx(i, len, blockPx, offsetSec=0){
   const u = Math.min(1, (i - 1) / denom);
   const amp01 = tailAmpProfile(u);
   const phase = omega * t - u * 3.4;
-  const ampPx = blockPx * 0.7 * amp01 * lengthAmpScale(len);
+  const ampPx = blockPx * 1.05 * amp01 * lengthAmpScale(len);
   return Math.sin(phase) * ampPx;
 }
 
@@ -434,7 +434,7 @@ function windOffset(i, len, offsetSec=0){
   const u = Math.min(1, (i - 1) / denom);
   const amp01 = tailAmpProfile(u);
   const phase = omega * t - u * 3.4;
-  return Math.sin(phase) * 0.38 * amp01 * lengthAmpScale(len);
+  return Math.sin(phase) * 0.57 * amp01 * lengthAmpScale(len);
 }
 
 // growth animation: org.anim["x,y"] = {t0, dur}
@@ -1079,14 +1079,18 @@ function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
       for (const [x,y] of m.cells) set.add(`${x},${y}`);
     }
   } else {
-    // 3) иначе по part: "body" — тело; иначе — все модули нужного типа
+    // 3) иначе по part: "body" — тело; иначе — модуль по типу (если однозначно)
     if (flash.part === "body"){
       for (const [x,y] of (org.body?.cells || [])) set.add(`${x},${y}`);
     } else if (flash.part){
+      const matches = [];
       for (let mi=0; mi<(org.modules||[]).length; mi++){
         const m = org.modules[mi];
         if (!m || m.type !== flash.part) continue;
-        for (const [x,y] of (m.cells || [])) set.add(`${x},${y}`);
+        matches.push(m);
+      }
+      if (matches.length === 1){
+        for (const [x,y] of (matches[0].cells || [])) set.add(`${x},${y}`);
       }
     }
   }

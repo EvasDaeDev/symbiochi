@@ -302,6 +302,29 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
   return true;
 }
 
+function detachAppendageAndDestroy(state, modIdx){
+  const m = state.modules[modIdx];
+  if (!m || !Array.isArray(m.cells)) return false;
+  const cells = m.cells.slice();
+  const len = cells.length;
+  const minCut = Math.max(2, Math.ceil(len * (2/3)));
+  const maxCut = len - 4;
+  if (minCut > maxCut) return false;
+  const cut = Math.min(minCut, maxCut);
+  const parentSeg = cells.slice(0, cut);
+  if (parentSeg.length >= 1){
+    m.cells = parentSeg;
+    const lastCell = parentSeg[parentSeg.length - 1];
+    m.growPos = [lastCell[0], lastCell[1]];
+    if (Number.isFinite(m.growTo)){
+      m.growTo = Math.min(m.growTo, m.cells.length);
+    }
+  } else {
+    state.modules.splice(modIdx, 1);
+  }
+  return true;
+}
+
 function computeMorphology(state){
   const bodyBlocks = state.body.cells.length;
 
@@ -556,13 +579,11 @@ export function applyMutation(state, momentSec){
     }
 
     const budType = state.modules[idx]?.type || "tail";
-
-    // Large parents get extra placement attempts (boosts "success" chance).
-    const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
+    const ok = detachAppendageAndDestroy(state, idx);
     if (ok){
       state.bars.food = clamp01(state.bars.food - 0.20);
       state.bars.hp = clamp01(state.bars.hp - 0.20);
-      pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
+      pushLog(state, `Мутация: отросток отделился и был уничтожен.`, "mut_ok", { part: budType, mi: idx });
     } else {
       const addN = 1 + Math.floor(rng()*2);
       const { biases } = getGrowthBiases(state, "body");
@@ -570,8 +591,8 @@ export function applyMutation(state, momentSec){
       pushLog(
         state,
         grown
-          ? `Мутация: почкование не поместилось → тело выросло (+${addN}).`
-          : `Мутация: почкование не поместилось и рост тела не удался.`,
+          ? `Мутация: отделение отростка не удалось → тело выросло (+${addN}).`
+          : `Мутация: отделение отростка не удалось и рост тела не удался.`,
         "mut_fail",
         { part: budType }
       );
@@ -621,8 +642,10 @@ export function applyMutation(state, momentSec){
       grownModules
     });
     if (grew){
+      const primaryMi = (grownModules.length === 1) ? grownModules[0] : null;
       pushLog(state, `Мутация: отросток вырос.`, "mut_ok", {
         part: "appendage",
+        mi: primaryMi,
         grownModules
       });
     } else {

@@ -444,6 +444,7 @@ export function addModule(state, type, rng, target=null){
   if (type === "limb"){
     growStyle = "jointed";
   }
+  if (type === "antenna" || type === "spike") growStyle = "straight";
 
   const styleParams = {
     baseDir: dirForGrowth ? [dirForGrowth[0], dirForGrowth[1]] : null,
@@ -625,6 +626,11 @@ export function growPlannedModules(state, rng, options = {}){
     let baseDir = m.growDir;
     const moduleInfluence = useTarget ? targetInfluence(moduleDistance(m, target[0], target[1])) : 0;
 
+    if (m.type === "antenna" || m.type === "spike"){
+      m.growStyle = "straight";
+    }
+
+    // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
     let dir = baseDir;
     if (m.growStyle === "jointed" && Array.isArray(m.phalanxLengths) && Array.isArray(m.phalanxDirs)){
       const segIndex = phalanxIndex(m.phalanxLengths, m.cells.length);
