@@ -1,4 +1,5 @@
 import { DIR8, GRID_W, GRID_H, key, parseKey, mulberry32, hash32, pick, PALETTES } from "./util.js";
+import { assignGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
 
 function markAnim(org, x, y, dur=0.7){
   if (!org) return;
@@ -148,6 +149,7 @@ export function newGame(){
   };
 
   pushLog(state, `Вылупился питомец "${state.name}".`, "system");
+  assignGrowthPattern(state, rng);
   return state;
 }
 
@@ -160,9 +162,12 @@ export function occupiedByModules(state, x, y){
   return false;
 }
 
-export function growBodyConnected(state, addN, rng, target=null){
+export function growBodyConnected(state, addN, rng, target=null, biases=null){
   const set = bodyCellSet(state.body);
   const core = state.body.core;
+  const biasList = [];
+  if (Array.isArray(target)) biasList.push({ point: target, weight: 3 });
+  if (Array.isArray(biases)) biasList.push(...biases);
 
   for (let i=0;i<addN;i++){
     const candidates = [];
@@ -182,16 +187,21 @@ export function growBodyConnected(state, addN, rng, target=null){
 
     // If a growth target is provided (e.g. "carrot"), bias growth towards it,
     // otherwise bias towards the core for compact connected bodies.
-    const tx = Array.isArray(target) ? target[0] : null;
-    const ty = Array.isArray(target) ? target[1] : null;
     pool.sort((a,b)=>{
       const daCore = Math.abs(a[0]-core[0]) + Math.abs(a[1]-core[1]);
       const dbCore = Math.abs(b[0]-core[0]) + Math.abs(b[1]-core[1]);
-      if (tx === null || ty === null) return daCore - dbCore;
-      const daT = Math.abs(a[0]-tx) + Math.abs(a[1]-ty);
-      const dbT = Math.abs(b[0]-tx) + Math.abs(b[1]-ty);
-      // target dominates, core keeps silhouette cohesive
-      return (daT*3 + daCore) - (dbT*3 + dbCore);
+      if (!biasList.length) return daCore - dbCore;
+      let scoreA = daCore;
+      let scoreB = dbCore;
+      for (const bias of biasList){
+        if (!bias || !Array.isArray(bias.point)) continue;
+        const w = Number.isFinite(bias.weight) ? bias.weight : 1;
+        const daT = Math.abs(a[0] - bias.point[0]) + Math.abs(a[1] - bias.point[1]);
+        const dbT = Math.abs(b[0] - bias.point[0]) + Math.abs(b[1] - bias.point[1]);
+        scoreA += daT * w;
+        scoreB += dbT * w;
+      }
+      return scoreA - scoreB;
     });
 
     const pickIdx = Math.floor(rng()*Math.min(12, pool.length));
@@ -200,6 +210,7 @@ export function growBodyConnected(state, addN, rng, target=null){
   }
 
   state.body.cells = Array.from(set).map(parseKey);
+  syncGrowthPatternProgress(state);
   return true;
 }
 
