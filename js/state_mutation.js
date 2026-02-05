@@ -570,155 +570,158 @@ export function applyMutation(state, momentSec){
     weights.push(["fin",   0.06 + 0.20*pw]);
   }
 
-  let forcedKind = null;
   const targetPower = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
-  if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
-    if (state.growthTargetMode === "appendage" && (state.modules?.length || 0) > 0){
-      forcedKind = "grow_appendage";
-    } else {
-      forcedKind = "grow_body";
-    }
-  }
-  const kind = forcedKind ?? weightedPick(rng, weights);
-  const appendageBudget = Number.isFinite(mutationContext?.appendageBudget)
-    ? mutationContext.appendageBudget
-    : null;
-  const shouldThrottleAppendage = appendageBudget !== null && appendageBudget <= 0 && appendageKinds.has(kind);
-
-  // 1) Почкование
-  if (kind === "bud"){
-    const idx = pickBuddingModule(state, rng);
-    if (idx === -1){
-      // нет подходящих модулей - просто рост тела
-      const addN = 1 + Math.floor(rng()*2);
-      const { biases } = getGrowthBiases(state, "body");
-      const grown = growBodyConnected(state, addN, rng, null, biases);
-      pushLog(state, grown
-        ? `Мутация: почкование не удалось → тело выросло (+${addN}).`
-        : `Мутация: почкование не удалось и рост тела не удался.`,
-        "mut_fail",
-        { part: "body" }
-      );
-      return;
-    }
-
-    const budType = state.modules[idx]?.type || "tail";
-    const ok = createBudFromModule(state, idx, rng, isBigForBud ? BUD.bigParentSuccessMult : 1);
-    if (ok){
-      state.bars.food = clamp01(state.bars.food - 0.20);
-      state.bars.clean = clamp01(state.bars.clean - 0.20);
-      state.bars.hp = clamp01(state.bars.hp - 0.20);
-      state.bars.mood = clamp01(state.bars.mood - 0.20);
-      pushLog(state, `Мутация: отделилась почка.`, "bud_ok", { part: budType, mi: idx });
-    } else {
-      const addN = 1 + Math.floor(rng()*2);
-      const { biases } = getGrowthBiases(state, "body");
-      const grown = growBodyConnected(state, addN, rng, null, biases);
-      pushLog(
-        state,
-        grown
-          ? `Мутация: отделение почки не удалось → тело выросло (+${addN}).`
-          : `Мутация: отделение почки не удалось и рост тела не удался.`,
-        "mut_fail",
-        { part: budType }
-      );
-    }
-    return;
-  }
-
-  // 2) Рост тела
-  if (kind === "grow_body" || shouldThrottleAppendage){
-    // Growth per mutation increased by ~1/3.
-    const base = 1 + Math.floor(rng() * 3); // 1..3
-    const addN = Math.max(1, Math.round(base * (EVO.bodyGrowMult || 1)));
-    const { biases } = getGrowthBiases(state, "body");
-    const grown = growBodyConnected(state, addN, rng, null, biases);
-
-    if (grown) pushLog(state, `Мутация: тело выросло (+${addN}).`, "mut_ok", { part: "body" });
-    else pushLog(state, `Мутация: рост тела не удался.`, "mut_fail", { part: "body" });
-    return;
-  }
-
-  // 3) Рост отростков (один сегмент)
-  if (kind === "grow_appendage"){
-    const { biases, patternBias } = getGrowthBiases(state, "appendage");
-    const target = blendBiasTargets(biases);
-    const carrotStrength = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : null;
-    const patternStrength = patternBias ? Math.min(1, patternBias.weight / 3) : null;
-    let strength = null;
-    if (patternStrength !== null && carrotStrength !== null){
-      strength = Math.min(1, (patternStrength + carrotStrength * 0.5) / 2);
-    } else if (patternStrength !== null){
-      strength = patternStrength;
-    } else if (carrotStrength !== null){
-      strength = carrotStrength;
-    }
-    const baseGrows = 1 + Math.floor(rng() * 2); // 1..2
-    const moduleBoost = Math.floor((state.modules?.length || 0) / 4); // +1 per 4 modules
-    let maxGrows = Math.max(
-      1,
-      Math.round((baseGrows + moduleBoost) * (EVO.appendageGrowMult || 1))
-    );
-    if (appendageBudget !== null){
-      maxGrows = Math.min(maxGrows, appendageBudget);
-    }
-    const grownModules = [];
-    const grew = growPlannedModules(state, rng, {
-      target,
-      maxGrows,
-      strength,
-      shuffle: !target,
-      grownModules
-    });
-    if (grew){
-      if (appendageBudget !== null){
-        mutationContext.appendageBudget = Math.max(0, appendageBudget - grew);
+  const growthCount = 1 + Math.floor(rng() * 4);
+  for (let step = 0; step < growthCount; step++){
+    let forcedKind = null;
+    if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
+      if (state.growthTargetMode === "appendage" && (state.modules?.length || 0) > 0){
+        forcedKind = "grow_appendage";
+      } else {
+        forcedKind = "grow_body";
       }
-      const primaryMi = (grownModules.length === 1) ? grownModules[0] : null;
-      pushLog(state, `Мутация: отросток вырос.`, "mut_ok", {
-        part: "appendage",
-        mi: primaryMi,
+    }
+    const kind = forcedKind ?? weightedPick(rng, weights);
+    const appendageBudget = Number.isFinite(mutationContext?.appendageBudget)
+      ? mutationContext.appendageBudget
+      : null;
+    const shouldThrottleAppendage = appendageBudget !== null && appendageBudget <= 0 && appendageKinds.has(kind);
+
+    // 1) Почкование
+    if (kind === "bud"){
+      const idx = pickBuddingModule(state, rng);
+      if (idx === -1){
+        // нет подходящих модулей - просто рост тела
+        const addN = 1 + Math.floor(rng()*2);
+        const { biases } = getGrowthBiases(state, "body");
+        const grown = growBodyConnected(state, addN, rng, null, biases);
+        pushLog(state, grown
+          ? `Мутация: почкование не удалось → тело выросло (+${addN}).`
+          : `Мутация: почкование не удалось и рост тела не удался.`,
+          "mut_fail",
+          { part: "body" }
+        );
+        continue;
+      }
+
+      const budType = state.modules[idx]?.type || "tail";
+      const ok = createBudFromModule(state, idx, rng, isBigForBud ? BUD.bigParentSuccessMult : 1);
+      if (ok){
+        state.bars.food = clamp01(state.bars.food - 0.20);
+        state.bars.clean = clamp01(state.bars.clean - 0.20);
+        state.bars.hp = clamp01(state.bars.hp - 0.20);
+        state.bars.mood = clamp01(state.bars.mood - 0.20);
+        pushLog(state, `Мутация: отделилась почка.`, "bud_ok", { part: budType, mi: idx });
+      } else {
+        const addN = 1 + Math.floor(rng()*2);
+        const { biases } = getGrowthBiases(state, "body");
+        const grown = growBodyConnected(state, addN, rng, null, biases);
+        pushLog(
+          state,
+          grown
+            ? `Мутация: отделение почки не удалось → тело выросло (+${addN}).`
+            : `Мутация: отделение почки не удалось и рост тела не удался.`,
+          "mut_fail",
+          { part: budType }
+        );
+      }
+      continue;
+    }
+
+    // 2) Рост тела
+    if (kind === "grow_body" || shouldThrottleAppendage){
+      // Growth per mutation increased by ~1/3.
+      const base = 1 + Math.floor(rng() * 3); // 1..3
+      const addN = Math.max(1, Math.round(base * (EVO.bodyGrowMult || 1)));
+      const { biases } = getGrowthBiases(state, "body");
+      const grown = growBodyConnected(state, addN, rng, null, biases);
+
+      if (grown) pushLog(state, `Мутация: тело выросло (+${addN}).`, "mut_ok", { part: "body" });
+      else pushLog(state, `Мутация: рост тела не удался.`, "mut_fail", { part: "body" });
+      continue;
+    }
+
+    // 3) Рост отростков (один сегмент)
+    if (kind === "grow_appendage"){
+      const { biases, patternBias } = getGrowthBiases(state, "appendage");
+      const target = blendBiasTargets(biases);
+      const carrotStrength = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : null;
+      const patternStrength = patternBias ? Math.min(1, patternBias.weight / 3) : null;
+      let strength = null;
+      if (patternStrength !== null && carrotStrength !== null){
+        strength = Math.min(1, (patternStrength + carrotStrength * 0.5) / 2);
+      } else if (patternStrength !== null){
+        strength = patternStrength;
+      } else if (carrotStrength !== null){
+        strength = carrotStrength;
+      }
+      const baseGrows = 1 + Math.floor(rng() * 2); // 1..2
+      const moduleBoost = Math.floor((state.modules?.length || 0) / 4); // +1 per 4 modules
+      let maxGrows = Math.max(
+        1,
+        Math.round((baseGrows + moduleBoost) * (EVO.appendageGrowMult || 1))
+      );
+      if (appendageBudget !== null){
+        maxGrows = Math.min(maxGrows, appendageBudget);
+      }
+      const grownModules = [];
+      const grew = growPlannedModules(state, rng, {
+        target,
+        maxGrows,
+        strength,
+        shuffle: !target,
         grownModules
       });
+      if (grew){
+        if (appendageBudget !== null){
+          mutationContext.appendageBudget = Math.max(0, appendageBudget - grew);
+        }
+        const primaryMi = (grownModules.length === 1) ? grownModules[0] : null;
+        pushLog(state, `Мутация: отросток вырос.`, "mut_ok", {
+          part: "appendage",
+          mi: primaryMi,
+          grownModules
+        });
+      } else {
+        pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
+      }
+      continue;
+    }
+
+    // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
+    const beforeN = (state.modules ? state.modules.length : 0);
+    const { biases } = getGrowthBiases(state, "body");
+    const target = blendBiasTargets(biases);
+    const added = addModule(state, kind, rng, target);
+    const afterN = (state.modules ? state.modules.length : 0);
+    const newMi = (added && afterN > beforeN) ? beforeN : null;
+
+    if (added){
+      if (appendageBudget !== null && appendageKinds.has(kind)){
+        mutationContext.appendageBudget = Math.max(0, appendageBudget - 1);
+      }
+      pushLog(state, `Мутация: появился орган (${organLabel(kind)}).`, "mut_ok", { part: kind, mi: newMi });
+      continue;
+    }
+
+    // Если орган не поместился -> вместо него растим тело (+1..2)
+    const addN = 1 + Math.floor(rng() * 2); // +1..2
+    const grown = growBodyConnected(state, addN, rng, null, biases);
+
+    if (grown){
+      pushLog(
+        state,
+        `Мутация: орган (${organLabel(kind)}) не поместился → тело выросло (+${addN}) для следующей попытки.`,
+        "mut_fail",
+        { part: kind }
+      );
     } else {
-      pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
+      pushLog(
+        state,
+        `Мутация: орган (${organLabel(kind)}) не поместился и рост тела не удался.`,
+        "mut_fail",
+        { part: kind }
+      );
     }
-    return;
-  }
-
-  // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
-  const beforeN = (state.modules ? state.modules.length : 0);
-  const { biases } = getGrowthBiases(state, "body");
-  const target = blendBiasTargets(biases);
-  const added = addModule(state, kind, rng, target);
-  const afterN = (state.modules ? state.modules.length : 0);
-  const newMi = (added && afterN > beforeN) ? beforeN : null;
-
-  if (added){
-    if (appendageBudget !== null && appendageKinds.has(kind)){
-      mutationContext.appendageBudget = Math.max(0, appendageBudget - 1);
-    }
-    pushLog(state, `Мутация: появился орган (${organLabel(kind)}).`, "mut_ok", { part: kind, mi: newMi });
-    return;
-  }
-
-  // Если орган не поместился -> вместо него растим тело (+1..2)
-  const addN = 1 + Math.floor(rng() * 2); // +1..2
-  const grown = growBodyConnected(state, addN, rng, null, biases);
-
-  if (grown){
-    pushLog(
-      state,
-      `Мутация: орган (${organLabel(kind)}) не поместился → тело выросло (+${addN}) для следующей попытки.`,
-      "mut_fail",
-      { part: kind }
-    );
-  } else {
-    pushLog(
-      state,
-      `Мутация: орган (${organLabel(kind)}) не поместился и рост тела не удался.`,
-      "mut_fail",
-      { part: kind }
-    );
   }
 }
