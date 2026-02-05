@@ -289,6 +289,13 @@ export function simulate(state, deltaSec){
   };
 
   const maxPerTick = Math.max(1, Math.floor(EVO.maxMutationsPerTick || 2));
+  const getMutationContext = (momentSec)=>{
+    const tickIndex = Math.floor(momentSec / intervalSec);
+    if (!state._mutationContext || state._mutationContext.tickIndex !== tickIndex){
+      state._mutationContext = { tickIndex, appendageBudget: 4 };
+    }
+    return state._mutationContext;
+  };
   const runMutationTick = (org, momentSec)=>{
     const bars = org.bars || {};
     const minBar = Math.min(
@@ -307,6 +314,7 @@ export function simulate(state, deltaSec){
 
     let applied = 0;
     const applyOnce = ()=>{
+      org._mutationContext = getMutationContext(momentSec);
       applyMutation(org, momentSec);
       applied += 1;
     };
