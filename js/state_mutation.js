@@ -420,6 +420,10 @@ export function applyMutation(state, momentSec){
     // До 70 блоков: тело получает +50% к текущему приоритету.
     mul("grow_body", 1.5);
   }
+  if (M.bodyBlocks <= 70){
+    // Ранние стадии: +20% к приоритету роста тела относительно органов.
+    mul("grow_body", 1.2);
+  }
   // С 50 блоков добавляем приоритет одному случайному отростку до 83 блоков.
   if (M.bodyBlocks >= 50 && M.bodyBlocks <= 83){
     const favoredAppendage = pick(rng, ["tail", "tentacle", "limb", "antenna"]);
