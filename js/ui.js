@@ -87,7 +87,9 @@ export function attachSettings(view, els, toast){
 	view.state.settings.evoIntervalMin = view.state.evoIntervalMin;
 	
     if (els.lenPrio){
-      const lp = clamp(parseInt(els.lenPrio.value, 10) / 100, 0, 1);
+      const parsed = parseInt(els.lenPrio.value, 10);
+      const raw = Number.isFinite(parsed) ? parsed / 100 : (view.state.settings?.lengthPriority ?? 0.65);
+      const lp = clamp(raw, 0, 1);
       view.state.settings.lengthPriority = lp;
     }
 

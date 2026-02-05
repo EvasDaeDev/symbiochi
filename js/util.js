@@ -11,8 +11,15 @@ export function mulberry32(seed) {
   };
 }
 
-export function hash32(seed, n){
-  let x = (seed ^ (n*0x9E3779B1)) >>> 0;
+export function hash32(seed, n, ...rest){
+  let x = (seed >>> 0);
+  if (n !== undefined){
+    x = (x ^ ((n * 0x9E3779B1) >>> 0)) >>> 0;
+  }
+  for (const extra of rest){
+    if (extra === undefined) continue;
+    x = (x ^ ((extra * 0x9E3779B1) >>> 0)) >>> 0;
+  }
   x ^= x >>> 16; x = Math.imul(x, 0x7feb352d) >>> 0;
   x ^= x >>> 15; x = Math.imul(x, 0x846ca68b) >>> 0;
   x ^= x >>> 16;

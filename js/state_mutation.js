@@ -185,7 +185,9 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
   const minCut = Math.max(2, Math.ceil(len * (2/3)));
   const maxCut = len - 4;
   if (minCut > maxCut) return false;
-  const cut = Math.min(minCut, maxCut);
+  const cut = (minCut === maxCut)
+    ? minCut
+    : (minCut + Math.floor(rng() * (maxCut - minCut + 1)));
   const budSeg = cells.slice(cut);
   if (budSeg.length < 4) return false;
 
