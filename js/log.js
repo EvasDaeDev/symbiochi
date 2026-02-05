@@ -1,4 +1,5 @@
-import { MAX_LOG, nowSec } from "./util.js";
+import { nowSec } from "./util.js";
+import { MAX_LOG } from "./world.js";
 
 /**
  * pushLog(stateOrOrg, msg, kind?, meta?)
