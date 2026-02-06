@@ -662,15 +662,23 @@ export function applyMutation(state, momentSec){
     const target = blendBiasTargets(biases);
     const added = addModule(state, kind, rng, target);
     const afterN = (state.modules ? state.modules.length : 0);
-    const newMi = (added && afterN > beforeN) ? beforeN : null;
+    const newMi = (added?.ok && afterN > beforeN) ? beforeN : null;
 
-    if (added){
+    if (added?.ok){
       if (appendageBudget !== null && appendageKinds.has(kind)){
         mutationContext.appendageBudget = Math.max(0, appendageBudget - 1);
       }
       pushLog(state, `Мутация: появился орган (${organLabel(kind)}).`, "mut_ok", { part: kind, mi: newMi });
       continue;
     }
+
+    const reason = added?.reason || "blocked";
+    const reasonLabel = {
+      type_cap: "достигнут лимит типов",
+      too_close: "слишком близко к органу того же типа",
+      no_anchor: "не найден якорь",
+      blocked: "не поместился"
+    }[reason] || "не поместился";
 
     // Если орган не поместился -> вместо него растим тело (+1..2)
     const addN = 1 + Math.floor(rng() * 2); // +1..2
@@ -679,14 +687,14 @@ export function applyMutation(state, momentSec){
     if (grown){
       pushLog(
         state,
-        `Мутация: орган (${organLabel(kind)}) не поместился → тело выросло (+${addN}) для следующей попытки.`,
+        `Мутация: орган (${organLabel(kind)}) ${reasonLabel} → тело выросло (+${addN}) для следующей попытки.`,
         "mut_fail",
         { part: kind }
       );
     } else {
       pushLog(
         state,
-        `Мутация: орган (${organLabel(kind)}) не поместился и рост тела не удался.`,
+        `Мутация: орган (${organLabel(kind)}) ${reasonLabel} и рост тела не удался.`,
         "mut_fail",
         { part: kind }
       );

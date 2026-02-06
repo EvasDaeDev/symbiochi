@@ -357,7 +357,7 @@ export function addModule(state, type, rng, target=null){
   const bodyCells = state.body.cells.slice();
   const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
   const existingTypes = new Set((state.modules || []).map((m) => m?.type).filter(Boolean));
-  if (!existingTypes.has(type) && existingTypes.size >= 4) return false;
+  if (!existingTypes.has(type) && existingTypes.size >= 4) return { ok: false, reason: "type_cap" };
 
   function isTooCloseToSameType(candidateCells){
     if (!candidateCells.length || !Array.isArray(state.modules)) return false;
@@ -374,33 +374,58 @@ export function addModule(state, type, rng, target=null){
     return false;
   }
 
+  function hasFreeNeighbor(ax, ay){
+    for (const [dx,dy] of DIR8){
+      const nx = ax + dx;
+      const ny = ay + dy;
+      if (bodySet.has(key(nx, ny))) continue;
+      if (occupiedByModules(state, nx, ny)) continue;
+      return true;
+    }
+    return false;
+  }
+
+  function sortAnchorsByTarget(list){
+    return list.slice().sort((a, b) => {
+      if (!Array.isArray(target)){
+        if (a[0] !== b[0]) return a[0] - b[0];
+        return a[1] - b[1];
+      }
+      const da = Math.abs(a[0] - target[0]) + Math.abs(a[1] - target[1]);
+      const db = Math.abs(b[0] - target[0]) + Math.abs(b[1] - target[1]);
+      if (da !== db) return da - db;
+      if (a[0] !== b[0]) return a[0] - b[0];
+      return a[1] - b[1];
+    });
+  }
+
   let anchor = null;
   let anchorCandidates = null;
   for (let tries=0; tries<60 && !anchor; tries++){
     const [ax,ay] = bodyCells[Math.floor(rng()*bodyCells.length)];
-    let free = 0;
-    for (const [dx,dy] of DIR8){
-      const nx=ax+dx, ny=ay+dy;
-      if (bodySet.has(key(nx,ny))) continue;
-      if (occupiedByModules(state,nx,ny)) continue;
-      free++;
-    }
-    if (free>0) anchor=[ax,ay];
+    const free = hasFreeNeighbor(ax, ay);
+    if (free) anchor = [ax, ay];
     if (target){
       if (!anchorCandidates) anchorCandidates = [];
-      if (free > 0) anchorCandidates.push([ax,ay]);
+      if (free) anchorCandidates.push([ax, ay]);
     }
   }
   if (target && anchorCandidates && anchorCandidates.length){
-    anchorCandidates.sort((a,b)=>{
-      const da = Math.abs(a[0]-target[0]) + Math.abs(a[1]-target[1]);
-      const db = Math.abs(b[0]-target[0]) + Math.abs(b[1]-target[1]);
-      return da - db;
-    });
-    const pickIdx = Math.floor(rng() * Math.min(6, anchorCandidates.length));
-    anchor = anchorCandidates[pickIdx];
+    const sorted = sortAnchorsByTarget(anchorCandidates);
+    const pickIdx = Math.floor(rng() * Math.min(6, sorted.length));
+    anchor = sorted[pickIdx];
   }
-  if (!anchor) return false;
+  if (!anchor){
+    const allCandidates = [];
+    for (const [ax, ay] of bodyCells){
+      if (hasFreeNeighbor(ax, ay)) allCandidates.push([ax, ay]);
+    }
+    if (allCandidates.length){
+      const sorted = sortAnchorsByTarget(allCandidates);
+      anchor = sorted[0];
+    }
+  }
+  if (!anchor) return { ok: false, reason: "no_anchor" };
 
   const [cx,cy] = state.body.core;
   const [ax,ay] = anchor;
@@ -507,19 +532,21 @@ export function addModule(state, type, rng, target=null){
       [options[i], options[j]] = [options[j], options[i]];
     }
     let placed = null;
+    let sawTooClose = false;
+    let sawBlocked = false;
     for (const d of options){
       const center = stepFromDir([ax, ay], d).cell;
     const offsets = buildEyeOffsets(eyeRadius, eyeShape);
       const candidate = offsets.map(([dx, dy]) => [center[0] + dx, center[1] + dy]);
-      if (candidate.some(([x, y]) => x === state.body.core[0] && y === state.body.core[1])) continue;
-      if (candidate.some(([x, y]) => bodySet.has(key(x, y)))) continue;
-      if (candidate.some(([x, y]) => occupiedByModules(state, x, y))) continue;
-      if (candidate.some(([x, y]) => faceEyeSet.has(key(x, y)))) continue;
-      if (isTooCloseToSameType(candidate)) continue;
+      if (candidate.some(([x, y]) => x === state.body.core[0] && y === state.body.core[1])){ sawBlocked = true; continue; }
+      if (candidate.some(([x, y]) => bodySet.has(key(x, y)))){ sawBlocked = true; continue; }
+      if (candidate.some(([x, y]) => occupiedByModules(state, x, y))){ sawBlocked = true; continue; }
+      if (candidate.some(([x, y]) => faceEyeSet.has(key(x, y)))){ sawBlocked = true; continue; }
+      if (isTooCloseToSameType(candidate)){ sawTooClose = true; continue; }
       placed = candidate;
       break;
     }
-    if (!placed) return false;
+    if (!placed) return { ok: false, reason: (sawTooClose && !sawBlocked) ? "too_close" : (sawTooClose ? "too_close" : "blocked") };
     cells = placed;
     movable = false;
     targetLen = cells.length;
@@ -569,11 +596,11 @@ export function addModule(state, type, rng, target=null){
     targetLen = cells.length;
     dirForGrowth = baseDir;
   } else {
-    return false;
+    return { ok: false, reason: "blocked" };
   }
 
-  if (!cells.length) return false;
-  if (isTooCloseToSameType(cells)) return false;
+  if (!cells.length) return { ok: false, reason: "blocked" };
+  if (isTooCloseToSameType(cells)) return { ok: false, reason: "too_close" };
   if (dirForGrowth && maxAppendageLen > 0 && targetLen){
     targetLen = Math.min(targetLen, maxAppendageLen);
   }
@@ -656,7 +683,7 @@ export function addModule(state, type, rng, target=null){
       }
     }
   }
-  return true;
+  return { ok: true };
 }
 
 export function growPlannedModules(state, rng, options = {}){
