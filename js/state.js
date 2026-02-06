@@ -293,7 +293,7 @@ export function simulate(state, deltaSec){
   const getMutationContext = (momentSec)=>{
     const tickIndex = Math.floor(momentSec / intervalSec);
     if (!state._mutationContext || state._mutationContext.tickIndex !== tickIndex){
-      state._mutationContext = { tickIndex, appendageBudget: 6 };
+      state._mutationContext = { tickIndex, appendageBudget: 200 };
     }
     return state._mutationContext;
   };
