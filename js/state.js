@@ -4,7 +4,7 @@ import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
-import { applyMutation } from "./state_mutation.js";
+import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
 
@@ -228,7 +228,7 @@ export function simulate(state, deltaSec){
   let dueSteps = 0;
 
   // OFFLINE: apply instantly (no debt)
-  const MAX_OFFLINE_STEPS = 5000;
+  const MAX_OFFLINE_STEPS = 666;
   const normalWindowEnd = Math.min(now, anabiosisStart);
 
   const applySteps = (org, windowEnd, stepIntervalSec, onTick)=>{
@@ -257,9 +257,20 @@ export function simulate(state, deltaSec){
   {
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
-      applyMutation(state, state.lastMutationAt);
+      const bars = state.bars || {};
+      const minBar = Math.min(
+        bars.food ?? 0,
+        bars.clean ?? 0,
+        bars.hp ?? 0,
+        bars.mood ?? 0
+      );
+      if (minBar <= 0){
+        applyShrinkDecay(state, state.lastMutationAt);
+      } else {
+        applyMutation(state, state.lastMutationAt);
+        mutations++;
+      }
       eatBudAppendage(state);
-      mutations++;
     });
     dueSteps += normalResult.due;
     skipped += normalResult.skipped;
@@ -267,9 +278,20 @@ export function simulate(state, deltaSec){
     if (now > normalWindowEnd){
       const slowResult = applySteps(state, now, anabiosisIntervalSec, ()=>{
         eaten += processCarrotsTick(state, state);
-        applyMutation(state, state.lastMutationAt);
+        const bars = state.bars || {};
+        const minBar = Math.min(
+          bars.food ?? 0,
+          bars.clean ?? 0,
+          bars.hp ?? 0,
+          bars.mood ?? 0
+        );
+        if (minBar <= 0){
+          applyShrinkDecay(state, state.lastMutationAt);
+        } else {
+          applyMutation(state, state.lastMutationAt);
+          mutations++;
+        }
         eatBudAppendage(state);
-        mutations++;
       });
       dueSteps += slowResult.due;
       skipped += slowResult.skipped;
@@ -288,16 +310,38 @@ export function simulate(state, deltaSec){
 
       applySteps(bud, budNormalEnd, intervalSec, ()=>{
         eaten += processCarrotsTick(state, bud);
-        applyMutation(bud, bud.lastMutationAt);
+        const bars = bud.bars || {};
+        const minBar = Math.min(
+          bars.food ?? 0,
+          bars.clean ?? 0,
+          bars.hp ?? 0,
+          bars.mood ?? 0
+        );
+        if (minBar <= 0){
+          applyShrinkDecay(bud, bud.lastMutationAt);
+        } else {
+          applyMutation(bud, bud.lastMutationAt);
+          budMutations++;
+        }
         eatParentAppendage(state, bud);
-        budMutations++;
       });
       if (budUpTo > budNormalEnd){
         applySteps(bud, budUpTo, anabiosisIntervalSec, ()=>{
           eaten += processCarrotsTick(state, bud);
-          applyMutation(bud, bud.lastMutationAt);
+          const bars = bud.bars || {};
+          const minBar = Math.min(
+            bars.food ?? 0,
+            bars.clean ?? 0,
+            bars.hp ?? 0,
+            bars.mood ?? 0
+          );
+          if (minBar <= 0){
+            applyShrinkDecay(bud, bud.lastMutationAt);
+          } else {
+            applyMutation(bud, bud.lastMutationAt);
+            budMutations++;
+          }
           eatParentAppendage(state, bud);
-          budMutations++;
         });
       }
       delete bud._remainingOfflineSteps;
