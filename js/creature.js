@@ -360,7 +360,6 @@ export function addModule(state, type, rng, target=null){
   const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
   const existingTypes = new Set((state.modules || []).map((m) => m?.type).filter(Boolean));
   if (state?.face?.anchor) existingTypes.add("eye");
-  if (!existingTypes.has(type) && existingTypes.size >= 7) return { ok: false, reason: "type_cap" };
 
   function isTooCloseToSameType(candidateCells){
     if (!candidateCells.length || !Array.isArray(state.modules)) return false;
