@@ -394,7 +394,7 @@ export function applyMutation(state, momentSec){
 
   // Стресс (на основе текущих баров)
   const stress = clamp01(
-    ((1 - state.bars.food) + (1 - state.bars.clean) + (1 - state.bars.hp)) / 3
+    (state.bars.food + state.bars.clean + state.bars.hp) / 3
   );
 
   const M = computeMorphology(state);
