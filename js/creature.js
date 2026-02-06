@@ -12,6 +12,7 @@ import { TEETH } from "./organs/teeth.js";
 import { TENTACLE } from "./organs/tentacle.js";
 import { WORM } from "./organs/worm.js";
 import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
+import { getMaxAppendageLen } from "./config.js";
 
 function markAnim(org, x, y, dur=0.7){
   if (!org) return;
@@ -357,7 +358,7 @@ function buildEyeOffsets(radius, shape){
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const maxAppendageLen = getMaxAppendageLen(state.body?.cells?.length || 0);
   const existingTypes = new Set((state.modules || []).map((m) => m?.type).filter(Boolean));
   if (state?.face?.anchor) existingTypes.add("eye");
   if (!existingTypes.has(type) && existingTypes.size >= 7) return { ok: false, reason: "type_cap" };
@@ -701,7 +702,7 @@ export function growPlannedModules(state, rng, options = {}){
   } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const maxAppendageLen = getMaxAppendageLen(state.body?.cells?.length || 0);
   const maxWormLen = (state.body?.cells?.length || 0) * WORM.maxBodyMult;
   const carrotCenters = useTarget
     ? [target]
