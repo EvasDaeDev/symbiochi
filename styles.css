@@ -643,6 +643,7 @@ html, body {
 }
 .logEntry.good .msg { color: #34d399; }     /* зелёный */
 .logEntry.warn .msg { color: #fbbf24; opacity: .75; } /* бледно-оранжевый */
+.logEntry.alert .msg { color: #ef4444; font-weight: 700; } /* красный */
 
 
 /* Pixel renderer */

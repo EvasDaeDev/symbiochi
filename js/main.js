@@ -2,6 +2,7 @@
 import { fmtAgeSeconds, nowSec } from "./util.js";
 import { CARROT } from "./mods/carrots.js";
 import { migrateOrNew, saveGame, simulate } from "./state.js";
+import { initGrowthPatterns } from "./patterns.js";
 
 import {
   syncCanvas,
@@ -41,7 +42,6 @@ const els = {
   hudStage: document.getElementById("hudStage"),
   hudMeta: document.getElementById("hudMeta"),
   hudMeta2: document.getElementById("hudMeta2"),
-  hudSeed: document.getElementById("hudSeed"),
   lifePill: document.getElementById("lifePill"),
   gpuStat: document.getElementById("gpuStat"),
   cpuStat: document.getElementById("cpuStat"),
@@ -119,6 +119,7 @@ const view = {
     smoothedFrame: 16.7,
     smoothedRender: 0,
   },
+  lastActive: null,
 
   // resize observer
   _ro: null,
@@ -210,6 +211,10 @@ function startLoops(){
     renderGrid(view.state, els.canvas, els.grid, view);
     const renderTime = performance.now() - renderStart;
     perf.smoothedRender = perf.smoothedRender * 0.9 + renderTime * 0.1;
+    if (view.lastActive !== view.state.active){
+      view.lastActive = view.state.active;
+      rerenderAll(0);
+    }
 
     if (now - perf.lastStatAt >= 250){
       const span = now - perf.lastStatAt || 1;
@@ -310,7 +315,7 @@ function attachPickOrganism(){
       }
 
       // max carrots per feeding tick (same as mutation tick)
-      const intervalSec = Math.max(60, Math.floor(Number(s.evoIntervalMin || 12) * 60));
+      const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
       const tickId = Math.floor(nowSec() / intervalSec);
       s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
       if (s.carrotTick.id !== tickId){ s.carrotTick.id = tickId; s.carrotTick.used = 0; }
@@ -374,8 +379,10 @@ function attachPickOrganism(){
   });
 }
 
-function startGame(){
+async function startGame(){
+  await initGrowthPatterns();
   view.state = migrateOrNew();
+  view.lastActive = view.state?.active ?? null;
 
   els.startOverlay.style.display = "none";
 

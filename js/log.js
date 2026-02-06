@@ -1,4 +1,5 @@
-import { MAX_LOG, nowSec } from "./util.js";
+import { nowSec } from "./util.js";
+import { MAX_LOG } from "./world.js";
 
 /**
  * pushLog(stateOrOrg, msg, kind?, meta?)
@@ -19,12 +20,17 @@ export function pushLog(state, msg, kind = "event", meta = null){
 
   root.log = root.log || [];
 
+  const orgName = (state && state.name) ? state.name : "Организм";
+  const prefixedMsg = (typeof msg === "string" && !msg.startsWith(`[${orgName}]`))
+    ? `[${orgName}] ${msg}`
+    : msg;
+
   const orgTag =
     (meta && Number.isFinite(meta.org)) ? meta.org :
     (state && Number.isFinite(state.__orgTag)) ? state.__orgTag :
     -1;
 
-  const entry = { t: nowSec(), kind, msg };
+  const entry = { t: nowSec(), kind, msg: prefixedMsg };
 
   if (meta || Number.isFinite(orgTag)){
     entry.meta = Object.assign({}, meta || {});

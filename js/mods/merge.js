@@ -51,7 +51,9 @@ export function extractGenome(stateOrOrg){
 export async function encodeGenome(genome){
   if (!genome || typeof genome !== "object") throw new Error("bad genome");
   const json = JSON.stringify(genome);
+  console.debug("[symbiosis] genome json length", json.length);
   const bytes = encodeTextBytes(json);
+  console.debug("[symbiosis] genome bytes length", bytes.length);
   let deflated = { bytes, compressed: false };
   try {
     deflated = await deflateBytes(bytes);
@@ -59,6 +61,7 @@ export async function encodeGenome(genome){
     deflated = { bytes, compressed: false };
   }
   const payload = base64UrlEncode(deflated.bytes);
+  console.debug("[symbiosis] genome payload length", payload.length, "compressed", deflated.compressed);
   return (deflated.compressed ? PREFIX : PREFIX_NOCOMP) + payload;
 }
 
@@ -206,7 +209,12 @@ export function instantiateParentFromGenome(state, genomeOut){
   state.plan = genomeOut.plan ? JSON.parse(JSON.stringify(genomeOut.plan)) : state.plan;
   state.palette = genomeOut.palette ? JSON.parse(JSON.stringify(genomeOut.palette)) : state.palette;
   state.body = body;
-  state.face = { anchor: findFaceAnchor(body, seed), eyeSize: 1, extraEye: false };
+  state.face = {
+    anchor: findFaceAnchor(body, seed),
+    eyeSize: 1,
+    eyeShape: (mulberry32(seed)() < 0.5 ? "diamond" : "sphere"),
+    eyeRadius: 0
+  };
   state.modules = [];
   state.anim = {};
   state.cam = { ox: body.core[0], oy: body.core[1] };

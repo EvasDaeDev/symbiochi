@@ -26,13 +26,15 @@ export function makeToast(){
 }
 
 export function renderLog(state, els){
-  const log = state.log || [];
+  const root = (state && state.__logRoot) ? state.__logRoot : state;
+  const log = root?.log || [];
 
   els.logBody.innerHTML = log.slice().reverse().map((e) => {
     const cls =
       e.kind === "mut_ok" ? "logEntry good" :
       e.kind === "bud_ok" ? "logEntry bud" :
       e.kind === "mut_fail" ? "logEntry warn" :
+      e.kind === "alert" ? "logEntry alert" :
       "logEntry";
 
     const meta = e.meta || {};
@@ -78,14 +80,16 @@ export function attachSettings(view, els, toast){
   }
   function saveSettings(){
     if (!view.state) return;
-    const v = parseInt(els.evoInput.value, 10);
-    view.state.evoIntervalMin = clamp(isFinite(v) ? v : 12, 1, 240);
+    const v = parseFloat(els.evoInput.value);
+    view.state.evoIntervalMin = clamp(isFinite(v) ? v : 12, 0.1, 240);
 	
 	if (!view.state.settings) view.state.settings = {};
 	view.state.settings.evoIntervalMin = view.state.evoIntervalMin;
 	
     if (els.lenPrio){
-      const lp = clamp(parseInt(els.lenPrio.value, 10) / 100, 0, 1);
+      const parsed = parseInt(els.lenPrio.value, 10);
+      const raw = Number.isFinite(parsed) ? parsed / 100 : (view.state.settings?.lengthPriority ?? 0.65);
+      const lp = clamp(raw, 0, 1);
       view.state.settings.lengthPriority = lp;
     }
 
@@ -132,18 +136,35 @@ export function attachSymbiosisUI(view, els, toast){
   function openSymbiosis(){
     els.symbiosisOverlay.style.display = "grid";
     if (els.symShareOutput) els.symShareOutput.value = "";
+    if (!view.state){
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
+      }
+      if (els.symShareBtn) els.symShareBtn.disabled = true;
+      if (els.symApplyBtn) els.symApplyBtn.disabled = true;
+    } else {
+      if (els.symShareBtn) els.symShareBtn.disabled = false;
+      updateApplyState();
+    }
   }
 
   function closeSymbiosis(){
     els.symbiosisOverlay.style.display = "none";
     hideConfirm();
+    if (els.symShareBtn) els.symShareBtn.disabled = false;
   }
 
   async function shareGenome(){
-    if (!view.state) return;
+    if (!view.state){
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
+      }
+      return;
+    }
     try {
       const genome = extractGenome(getActiveOrg(view.state));
       const code = await encodeGenome(genome);
+      console.debug("[symbiosis] share genome code length", code.length);
       if (els.symShareOutput) els.symShareOutput.value = code;
       let copied = false;
       if (navigator.clipboard?.writeText){
@@ -166,7 +187,14 @@ export function attachSymbiosisUI(view, els, toast){
         throw new Error("no clipboard");
       }
     } catch (err){
-      if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Скопируй строку вручную — браузер не дал доступ.";
+      console.debug("[symbiosis] share genome failed", err);
+      if (els.symPermissionsHint){
+        els.symPermissionsHint.textContent = "Отпечаток не создан. Проверь консоль для деталей.";
+      }
+      if (els.symShareOutput){
+        const message = err instanceof Error ? err.message : String(err);
+        els.symShareOutput.value = `Ошибка: ${message}`;
+      }
       if (els.symShareOutput){
         els.symShareOutput.focus();
         els.symShareOutput.select();

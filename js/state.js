@@ -1,4 +1,4 @@
-import { BAR_MAX, clamp, clamp01, key, nowSec, mulberry32, hash32, pick, PALETTES } from "./util.js";
+import { clamp, clamp01, key, nowSec, mulberry32, hash32, pick } from "./util.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
@@ -123,16 +123,30 @@ export function migrateOrNew(){
 
     enforceAppendageRules();
 
-    org.face = org.face || { anchor: findFaceAnchor(org.body, seed) };
+    if (!org.face) org.face = { anchor: findFaceAnchor(org.body, seed) };
+    if (!org.face.eyeShape){
+      const prng = mulberry32(hash32(seed, 9191));
+      org.face.eyeShape = prng() < 0.5 ? "diamond" : "sphere";
+    }
+    if (!Number.isFinite(org.face.eyeRadius)){
+      const size = Math.max(1, (org.face.eyeSize ?? 1) | 0);
+      org.face.eyeRadius = Math.max(0, size - 1);
+    }
     org.cam = org.cam || { ox: org.body.core[0], oy: org.body.core[1] };
 
     if (org.active === undefined) org.active = null;
     if (!Number.isFinite(org.hueShiftDeg)) org.hueShiftDeg = 0;
     if (!org.partHue) org.partHue = {};
     if (!org.partColor) org.partColor = {};
+    if (!Number.isFinite(org.mutationDebt)) org.mutationDebt = 0;
     if (org.growthTarget === undefined) org.growthTarget = null;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
+    if (!Number.isFinite(org.growthQueueIndex)) org.growthQueueIndex = 0;
+    if (org.growthPattern === undefined) org.growthPattern = null;
+    if (org.growthPattern) normalizeGrowthPattern(org);
+    if (!org.growthPattern) ensureGrowthPattern(org);
+    syncGrowthPatternProgress(org);
   }
 
   normalizeOrg(state, state.seed || 1);
@@ -148,6 +162,7 @@ export function migrateOrNew(){
   if (state.growthTarget === undefined) state.growthTarget = null;
   if (state.growthTargetMode === undefined) state.growthTargetMode = null;
   if (!Number.isFinite(state.growthTargetPower)) state.growthTargetPower = 0;
+  if (!Number.isFinite(state.mutationDebt)) state.mutationDebt = 0;
 
   // UI / tuning settings
   if (!state.settings) state.settings = {};
@@ -161,25 +176,33 @@ export function migrateOrNew(){
       ? state.settings.evoIntervalMin
       : state.evoIntervalMin;
     const v = Number(raw);
-    state.evoIntervalMin = clamp(Number.isFinite(v) ? v : 12, 1, 240);
+    state.evoIntervalMin = clamp(Number.isFinite(v) ? v : 12, 0.1, 240);
     state.settings.evoIntervalMin = state.evoIntervalMin;
   }
 
-  // buds
   if (!Array.isArray(state.buds)) state.buds = [];
-  for (let i=0; i<state.buds.length; i++){
-    const b = state.buds[i];
-    if (!b) continue;
-    normalizeOrg(b, hash32(state.seed||1, i+1));
-    b._isBud = true;
-    if (!Number.isFinite(b.lastMutationAt)) b.lastMutationAt = state.lastMutationAt;
-    if (!Number.isFinite(b.lastSeen)) b.lastSeen = state.lastSeen;
-    if (!b.partHue) b.partHue = state.partHue;
-    if (!b.partColor) b.partColor = {};
-  }
+  if (state.active !== null && state.active !== -1) state.active = -1;
 
   saveGame(state);
   return state;
+}
+
+function applyNonLinearDecay(value, ratePerSec, deltaSec){
+  if (!Number.isFinite(value) || !Number.isFinite(ratePerSec) || !Number.isFinite(deltaSec)) return 0;
+  if (value <= 0 || ratePerSec <= 0 || deltaSec <= 0) return Math.max(0, value || 0);
+  const threshold = 0.1;
+  const baseRate = ratePerSec;
+  if (value > threshold){
+    const timeToThreshold = (value - threshold) / baseRate;
+    if (deltaSec <= timeToThreshold){
+      return Math.max(0, value - baseRate * deltaSec);
+    }
+    const remaining = deltaSec - timeToThreshold;
+    const slowedRate = baseRate * 0.5;
+    return Math.max(0, threshold - slowedRate * remaining);
+  }
+  const slowedRate = baseRate * 0.5;
+  return Math.max(0, value - slowedRate * deltaSec);
 }
 
 export function simulate(state, deltaSec){
@@ -187,13 +210,21 @@ export function simulate(state, deltaSec){
 
   const now = (state.lastSeen || nowSec()) + deltaSec;
   pruneExpiredCarrots(state, now);
+  if (Array.isArray(state.buds)){
+    for (let i = 0; i < state.buds.length; i++){
+      const bud = state.buds[i];
+      if (!bud) continue;
+      bud.__logRoot = state;
+      bud.__orgTag = i;
+    }
+  }
 
   // decay for parent + buds
   const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
   for (const org of orgs){
-    org.bars.food  = clamp(org.bars.food  - DECAY.food_per_sec  * deltaSec, 0, BAR_MAX);
-    org.bars.clean = clamp(org.bars.clean - DECAY.clean_per_sec * deltaSec, 0, BAR_MAX);
-    org.bars.mood  = clamp(org.bars.mood  - DECAY.mood_per_sec  * deltaSec, 0, BAR_MAX);
+    org.bars.food  = clamp(applyNonLinearDecay(org.bars.food, DECAY.food_per_sec, deltaSec), 0, BAR_MAX);
+    org.bars.clean = clamp(applyNonLinearDecay(org.bars.clean, DECAY.clean_per_sec, deltaSec), 0, BAR_MAX);
+    org.bars.mood  = clamp(applyNonLinearDecay(org.bars.mood, DECAY.mood_per_sec, deltaSec), 0, BAR_MAX);
 
     const hungerFactor = clamp01(1 - org.bars.food);
     const dirtFactor   = clamp01(1 - org.bars.clean);
@@ -206,8 +237,8 @@ export function simulate(state, deltaSec){
     org.care.neglect += deltaSec * (0.00012 * (0.5 + stress));
   }
 
-  const intervalSec = Math.max(60, Math.floor(Number(state.evoIntervalMin || 12) * 60));
-  const ANABIOSIS_DELAY_SEC = 60 * 60;
+  const intervalSec = Math.max(1, Math.floor(Number(state.evoIntervalMin || 12) * 60));
+  const ANABIOSIS_DELAY_SEC = 45 * 60;
   const ANABIOSIS_INTERVAL_SEC = 30 * 60;
   const anabiosisIntervalSec = Math.max(intervalSec, ANABIOSIS_INTERVAL_SEC);
   const offlineStart = state.lastSeen || nowSec();
@@ -249,8 +280,57 @@ export function simulate(state, deltaSec){
       skippedLocal = due - applied;
       org.lastMutationAt = (org.lastMutationAt || 0) + skippedLocal * stepIntervalSec;
     }
+    if (skippedLocal > 0){
+      org.mutationDebt = Math.max(0, (org.mutationDebt || 0) + skippedLocal);
+    }
 
     return { due, applied, skipped: skippedLocal };
+  };
+
+  const maxPerTick = Math.max(1, Math.floor(EVO.maxMutationsPerTick || 2));
+  const getMutationContext = (momentSec)=>{
+    const tickIndex = Math.floor(momentSec / intervalSec);
+    if (!state._mutationContext || state._mutationContext.tickIndex !== tickIndex){
+      state._mutationContext = { tickIndex, appendageBudget: 200 };
+    }
+    return state._mutationContext;
+  };
+  const runMutationTick = (org, momentSec)=>{
+    const bars = org.bars || {};
+    const minBar = Math.min(
+      bars.food ?? 0,
+      bars.clean ?? 0,
+      bars.hp ?? 0,
+      bars.mood ?? 0
+    );
+    if (minBar <= 0){
+      reportCriticalState(org, momentSec);
+      return 0;
+    }
+    if (minBar <= 0.1){
+      return 0;
+    }
+
+    let applied = 0;
+    const applyOnce = ()=>{
+      org._mutationContext = getMutationContext(momentSec);
+      applyMutation(org, momentSec);
+      applied += 1;
+    };
+
+    applyOnce();
+
+    let debt = Number.isFinite(org.mutationDebt) ? org.mutationDebt : 0;
+    const remainingBudget = Math.max(0, maxPerTick - applied);
+    if (debt > 0 && remainingBudget > 0){
+      const extra = Math.min(debt, remainingBudget);
+      for (let i = 0; i < extra; i++){
+        applyOnce();
+      }
+      debt -= extra;
+      org.mutationDebt = debt;
+    }
+    return applied;
   };
 
   state._remainingOfflineSteps = MAX_OFFLINE_STEPS;
@@ -351,8 +431,151 @@ export function simulate(state, deltaSec){
     }
   }
 
+  mergeTouchingOrganisms(state);
   state.lastSeen = now;
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
+}
+
+function reportCriticalState(org, momentSec){
+  const shrunk = applyShrinkDecay(org, momentSec);
+  const msg = shrunk
+    ? "Критическое состояние: параметр на нуле, организм усыхает."
+    : "Критическое состояние: параметр на нуле.";
+  pushLog(org, msg, "alert");
+}
+
+function mergeTouchingOrganisms(state){
+  if (!Array.isArray(state.buds) || state.buds.length === 0) return false;
+  const minTouches = 8;
+  let merged = false;
+  let searching = true;
+
+  while (searching){
+    searching = false;
+    const orgs = [
+      { org: state, index: -1, isParent: true },
+      ...state.buds.map((bud, index) => ({ org: bud, index, isParent: false }))
+    ];
+
+    outer: for (let i = 0; i < orgs.length; i++){
+      for (let j = i + 1; j < orgs.length; j++){
+        const a = orgs[i];
+        const b = orgs[j];
+        if (!a?.org || !b?.org) continue;
+        if (!hasBodyContact(a.org, b.org, minTouches)) continue;
+
+        const aSize = a.org.body?.cells?.length || 0;
+        const bSize = b.org.body?.cells?.length || 0;
+        const main = (bSize > aSize) ? b : a;
+        const other = (main === a) ? b : a;
+        performMerge(state, main, other);
+        merged = true;
+        searching = true;
+        break outer;
+      }
+    }
+  }
+
+  return merged;
+}
+
+function hasBodyContact(orgA, orgB, minTouches){
+  const cellsA = orgA?.body?.cells || [];
+  const cellsB = orgB?.body?.cells || [];
+  if (!cellsA.length || !cellsB.length) return false;
+  const bSet = new Set(cellsB.map(([x, y]) => key(x, y)));
+  const neighbors = [
+    [0, 0],
+    [-1, -1], [0, -1], [1, -1],
+    [-1, 0], [1, 0],
+    [-1, 1], [0, 1], [1, 1]
+  ];
+
+  let touches = 0;
+  for (const [x, y] of cellsA){
+    let contact = false;
+    for (const [dx, dy] of neighbors){
+      if (bSet.has(key(x + dx, y + dy))){
+        contact = true;
+        break;
+      }
+    }
+    if (contact){
+      touches++;
+      if (touches >= minTouches) return true;
+    }
+  }
+  return false;
+}
+
+function performMerge(state, mainEntry, otherEntry){
+  const main = mainEntry.org;
+  const other = otherEntry.org;
+  if (!main || !other) return;
+
+  const mergedBody = mergeBodyCells(main.body?.cells || [], other.body?.cells || []);
+  const mergedModules = [...(main.modules || []), ...(other.modules || [])];
+
+  main.body = main.body || { cells: [], core: [0, 0] };
+  main.body.cells = mergedBody;
+  main.modules = mergedModules;
+
+  const promoteToParent = !mainEntry.isParent && otherEntry.isParent;
+  if (promoteToParent){
+    promoteBudToParent(state, main);
+  }
+
+  const removeIndexes = new Set();
+  if (!otherEntry.isParent) removeIndexes.add(otherEntry.index);
+  if (promoteToParent) removeIndexes.add(mainEntry.index);
+  if (removeIndexes.size){
+    state.buds = state.buds.filter((_, idx) => !removeIndexes.has(idx));
+  }
+
+  const mainName = main.name || "Организм";
+  const otherName = other.name || "Организм";
+  const logTarget = promoteToParent ? state : main;
+  pushLog(logTarget, `Слияние: "${mainName}" объединился с "${otherName}".`, "symbiosis");
+}
+
+function mergeBodyCells(cellsA, cellsB){
+  const merged = new Map();
+  for (const [x, y] of cellsA){
+    merged.set(key(x, y), [x, y]);
+  }
+  for (const [x, y] of cellsB){
+    const k = key(x, y);
+    if (!merged.has(k)) merged.set(k, [x, y]);
+  }
+  return Array.from(merged.values());
+}
+
+function promoteBudToParent(state, bud){
+  const fields = [
+    "name",
+    "seed",
+    "plan",
+    "version",
+    "care",
+    "bars",
+    "palette",
+    "body",
+    "modules",
+    "face",
+    "cam",
+    "active",
+    "hueShiftDeg",
+    "partHue",
+    "partColor",
+    "growthTarget",
+    "growthTargetMode",
+    "growthTargetPower",
+    "mutationDebt"
+  ];
+  for (const field of fields){
+    if (bud[field] !== undefined) state[field] = bud[field];
+  }
+  state.active = -1;
 }
 
 function eatParentAppendage(state, bud){
@@ -507,6 +730,32 @@ function processCarrotsTick(state, org = state){
     return best;
   }
 
+  const appendageTypes = new Set([
+    "tail",
+    "tentacle",
+    "worm",
+    "limb",
+    "antenna",
+    "claw"
+  ]);
+  const cos45 = Math.SQRT1_2;
+  function moduleSeesTarget(m, tx, ty){
+    if (!m) return false;
+    const appendage = m.movable || appendageTypes.has(m.type);
+    if (!appendage) return false;
+    const dir = m.growDir || m.baseDir;
+    if (!dir) return false;
+    const base = m.cells?.[0] || m.cells?.[m.cells.length - 1];
+    if (!base) return false;
+    const vx = tx - base[0];
+    const vy = ty - base[1];
+    const vLen = Math.hypot(vx, vy);
+    if (vLen === 0) return true;
+    const dirLen = Math.hypot(dir[0], dir[1]) || 1;
+    const dot = (vx * dir[0] + vy * dir[1]) / (vLen * dirLen);
+    return dot >= cos45;
+  }
+
   // Eat only if touches >= 2 cells. If target is appendage, count only modules.
   const remaining = [];
   for (const car of state.carrots){
@@ -529,7 +778,7 @@ function processCarrotsTick(state, org = state){
     if (hits >= 2){
       org.bars.food = clamp(org.bars.food + 0.22, 0, BAR_MAX);
       org.bars.mood = clamp(org.bars.mood + 0.06, 0, BAR_MAX);
-      pushLog(state, `Кормление: морковка съедена.`, "care");
+      pushLog(org, `Кормление: морковка съедена.`, "care");
       eaten++;
     } else {
       remaining.push(car);
@@ -544,28 +793,51 @@ function processCarrotsTick(state, org = state){
     return eaten;
   }
 
-  // Choose nearest carrot as a growth target
+  // Choose nearest carrot as a growth target with carrot visibility rules.
   let best = null;
-  let bestD = Infinity;
-  let bestBodyD = Infinity;
-  let bestModuleD = Infinity;
+  let bestMode = null;
+  let bestDist = Infinity;
+  const bodyRange = Number.isFinite(CARROT.nearDist) ? CARROT.nearDist : 7;
+  const maxRange = Number.isFinite(CARROT.farDist) ? CARROT.farDist : 15;
   for (const car of state.carrots){
     const tx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
     const ty = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, tx, ty);
-    const moduleD = minDistToCells(moduleCells, tx, ty);
-    const d = Math.min(bodyD, moduleD);
-    if (d < bestD){
-      bestD = d;
-      bestBodyD = bodyD;
-      bestModuleD = moduleD;
-      best = [tx,ty];
+    let seeingModuleD = Infinity;
+    for (const m of (org.modules || [])){
+      if (!moduleSeesTarget(m, tx, ty)) continue;
+      const d = minDistToCells(m?.cells || [], tx, ty);
+      if (d < seeingModuleD) seeingModuleD = d;
+    }
+    const closestD = Math.min(bodyD, seeingModuleD);
+    if (closestD > maxRange) continue;
+
+    const hasSeeingBetween = seeingModuleD < bodyD;
+    let mode = null;
+    let activeDist = Infinity;
+    if (bodyD <= bodyRange && !hasSeeingBetween){
+      mode = "body";
+      activeDist = bodyD;
+    } else if (seeingModuleD <= maxRange){
+      mode = "appendage";
+      activeDist = seeingModuleD;
+    } else if (bodyD <= maxRange){
+      mode = "body";
+      activeDist = bodyD;
+    }
+    if (!mode) continue;
+    if (activeDist < bestDist){
+      bestDist = activeDist;
+      bestMode = mode;
+      best = [tx, ty];
     }
   }
 
   org.growthTarget = best;
-  org.growthTargetMode = (bestModuleD < bestBodyD) ? "appendage" : "body";
-  org.growthTargetPower = Math.max(0, Math.min(1, 1 - bestD / 45));
+  org.growthTargetMode = bestMode;
+  org.growthTargetPower = (bestDist !== Infinity)
+    ? Math.max(0, Math.min(1, 1 - bestDist / 45))
+    : 0;
   return eaten;
 }
 
@@ -605,25 +877,38 @@ export function actOn(rootState, org, kind){
   const target = org || rootState;
   const rng = mulberry32(hash32(rootState.seed, nowSec()));
   const label = (target === rootState) ? "" : ` (цель: ${target.name || "почка"})`;
+  const withTargetLog = (msg)=>{
+    if (target === rootState){
+      pushLog(rootState, msg, "care");
+      return;
+    }
+    const prevRoot = target.__logRoot;
+    const prevTag = target.__orgTag;
+    target.__logRoot = rootState;
+    target.__orgTag = Array.isArray(rootState.buds) ? rootState.buds.indexOf(target) : undefined;
+    pushLog(target, msg, "care");
+    if (prevRoot === undefined) delete target.__logRoot; else target.__logRoot = prevRoot;
+    if (prevTag === undefined) delete target.__orgTag; else target.__orgTag = prevTag;
+  };
 
   if (kind === "feed"){
     const add = addRandom01(rng);
     target.bars.food = clamp(target.bars.food + add, 0, BAR_MAX);
     target.bars.mood = clamp(target.bars.mood + add*0.35, 0, BAR_MAX);
     target.care.feed += 1.0;
-    pushLog(rootState, `Кормление${label}: +${Math.round(add*100)}% к еде.`, "care");
+    withTargetLog(`Кормление${label}: +${Math.round(add*100)}% к еде.`);
   } else if (kind === "wash"){
     const add = addRandom01(rng);
     target.bars.clean = clamp(target.bars.clean + add, 0, BAR_MAX);
     target.bars.mood = clamp(target.bars.mood + add*0.20, 0, BAR_MAX);
     target.care.wash += 1.0;
-    pushLog(rootState, `Мытьё${label}: +${Math.round(add*100)}% к чистоте.`, "care");
+    withTargetLog(`Мытьё${label}: +${Math.round(add*100)}% к чистоте.`);
   } else if (kind === "heal"){
     const add = addRandom01(rng);
     target.bars.hp = clamp(target.bars.hp + add, 0, BAR_MAX);
     target.bars.mood = clamp(target.bars.mood + add*0.15, 0, BAR_MAX);
     target.care.heal += 1.0;
-    pushLog(rootState, `Лечение${label}: +${Math.round(add*100)}% к HP.`, "care");
+    withTargetLog(`Лечение${label}: +${Math.round(add*100)}% к HP.`);
   }
 
   const t = nowSec();

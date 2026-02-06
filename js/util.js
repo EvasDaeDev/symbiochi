@@ -1,21 +1,4 @@
-export const GRID_W = 36;
-export const GRID_H = 18;
-
-export const BAR_MAX = 1.4;
-export const MAX_LOG = 180;
-
-export const PALETTES = [
-  { body: "#fbbf24", accent: "#22d3ee", eye: "#a3e635", core: "#f472b6" },
-  { body: "#60a5fa", accent: "#fca5a5", eye: "#fef08a", core: "#34d399" },
-  { body: "#fda4af", accent: "#c4b5fd", eye: "#67e8f9", core: "#f59e0b" },
-  { body: "#a7f3d0", accent: "#fde68a", eye: "#fda4af", core: "#93c5fd" },
-  { body: "#fde68a", accent: "#93c5fd", eye: "#f472b6", core: "#34d399" },
-];
-
-export const DIR8 = [
-  [1,0],[-1,0],[0,1],[0,-1],
-  [1,1],[1,-1],[-1,1],[-1,-1]
-];
+import { BAR_MAX } from "./world.js";
 
 
 export function mulberry32(seed) {
@@ -28,8 +11,15 @@ export function mulberry32(seed) {
   };
 }
 
-export function hash32(seed, n){
-  let x = (seed ^ (n*0x9E3779B1)) >>> 0;
+export function hash32(seed, n, ...rest){
+  let x = (seed >>> 0);
+  if (n !== undefined){
+    x = (x ^ ((n * 0x9E3779B1) >>> 0)) >>> 0;
+  }
+  for (const extra of rest){
+    if (extra === undefined) continue;
+    x = (x ^ ((extra * 0x9E3779B1) >>> 0)) >>> 0;
+  }
   x ^= x >>> 16; x = Math.imul(x, 0x7feb352d) >>> 0;
   x ^= x >>> 15; x = Math.imul(x, 0x846ca68b) >>> 0;
   x ^= x >>> 16;

@@ -9,6 +9,7 @@ export const PARTS = {
   antenna:  { label: "Антенна",    baseHue: 12,  wind: false }, // антенны не качаются
   tentacle: { label: "Щупальце",   baseHue: 330, wind: true  },
   tail:     { label: "Хвост",      baseHue: 175, wind: true  },
+  worm:     { label: "Червь",      baseHue: 15,  wind: false },
   limb:     { label: "Лапка",      baseHue: 30,  wind: true  },
   spike:    { label: "Шипы",       baseHue: 8,   wind: false },
   shell:    { label: "Панцирь",    baseHue: 210, wind: false },
@@ -21,7 +22,7 @@ export const PARTS = {
 };
 
 export const ORGAN_TYPES = [
-  "antenna","tentacle","tail","limb","spike","shell","eye",
+  "antenna","tentacle","tail","worm","limb","spike","shell","eye",
   "teeth","claw","mouth","fin",
 ];
 

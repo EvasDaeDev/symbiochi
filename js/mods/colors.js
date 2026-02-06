@@ -5,6 +5,7 @@ export const ORGAN_COLORS = {
   antenna:  "#cbd5e1", // светло-серая
   tentacle: "#fb7185", // розовая
   tail:     "#22d3ee", // бирюзовая
+  worm:     "#8b3a2b", // коричнево-красный
   limb:     "#a16207", // коричневая
   spike:    "#fb4b4b", // кораллово-красные
   shell:    "#64748b", // панцирь

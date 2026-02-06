@@ -1,4 +1,18 @@
-import { DIR8, GRID_W, GRID_H, key, parseKey, mulberry32, hash32, pick, PALETTES } from "./util.js";
+import { key, parseKey, mulberry32, hash32, pick } from "./util.js";
+import { assignGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
+import { ANTENNA } from "./organs/antenna.js";
+import { CLAW } from "./organs/claw.js";
+import { EYE } from "./organs/eye.js";
+import { FIN } from "./organs/fin.js";
+import { LIMB } from "./organs/limb.js";
+import { MOUTH } from "./organs/mouth.js";
+import { SHELL } from "./organs/shell.js";
+import { SPIKE } from "./organs/spike.js";
+import { TAIL } from "./organs/tail.js";
+import { TEETH } from "./organs/teeth.js";
+import { TENTACLE } from "./organs/tentacle.js";
+import { WORM } from "./organs/worm.js";
+import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
 
 function markAnim(org, x, y, dur=0.7){
   if (!org) return;
@@ -22,6 +36,37 @@ function angleDiff(a, b){
 
 function dirFromAngle(angle){
   return [Math.cos(angle), Math.sin(angle)];
+}
+
+function rotateDir(dir, steps){
+  const angle = Math.atan2(dir[1], dir[0]) + steps * ANGLE_STEP_RAD;
+  return dirFromAngle(angle);
+}
+
+function quantizeDirTo8(dir){
+  if (!dir) return dir;
+  const len = Math.hypot(dir[0], dir[1]) || 1;
+  let best = DIR8[0];
+  let bestDot = -Infinity;
+  for (const d of DIR8){
+    const dot = (dir[0] * d[0] + dir[1] * d[1]) / len;
+    if (dot > bestDot){
+      bestDot = dot;
+      best = d;
+    }
+  }
+  return [best[0], best[1]];
+}
+
+function rotateDir8(dir, steps){
+  if (!dir) return dir;
+  const q = quantizeDirTo8(dir);
+  let idx = 0;
+  for (let i = 0; i < DIR8.length; i++){
+    if (DIR8[i][0] === q[0] && DIR8[i][1] === q[1]){ idx = i; break; }
+  }
+  const next = (idx + steps + DIR8.length) % DIR8.length;
+  return [DIR8[next][0], DIR8[next][1]];
 }
 
 function stepFromDir(pos, dir){
@@ -107,6 +152,7 @@ export function newGame(){
 
   const body = makeSmallConnectedBody(seed, 12);
   const face = findFaceAnchor(body, seed);
+  const eyeShape = rng() < 0.5 ? "diamond" : "sphere";
 
  const plan = {
     // предпочитаемое направление роста (силуэт)
@@ -132,7 +178,7 @@ export function newGame(){
     care: { feed: 0, wash: 0, heal: 0, neglect: 0 },
     bars: { food: 1.00, clean: 1.00, hp: 1.00, mood: 1.00 },
     body,
-    face: { anchor: face, eyeSize: 1 },
+    face: { anchor: face, eyeSize: 1, eyeShape, eyeRadius: 0 },
     modules: [],
     buds: [],
     // Feeding items placed by the player
@@ -142,12 +188,14 @@ export function newGame(){
     growthTarget: null,
     growthTargetMode: null, // "body" | "appendage"
     growthTargetPower: 0,
+    growthQueueIndex: 0,
     active: null,
     log: [],
     cam: { ox: body.core[0], oy: body.core[1] },
   };
 
   pushLog(state, `Вылупился питомец "${state.name}".`, "system");
+  assignGrowthPattern(state, rng);
   return state;
 }
 
@@ -160,9 +208,53 @@ export function occupiedByModules(state, x, y){
   return false;
 }
 
-export function growBodyConnected(state, addN, rng, target=null){
+export function growBodyConnected(state, addN, rng, target=null, biases=null){
   const set = bodyCellSet(state.body);
   const core = state.body.core;
+  const biasList = [];
+  if (Array.isArray(target)) biasList.push({ point: target, weight: 3 });
+  if (Array.isArray(biases)) biasList.push(...biases);
+  const plan = state?.plan || {};
+  const axisDir = Array.isArray(plan.axisDir) ? plan.axisDir : null;
+  const axisLen = axisDir ? (Math.hypot(axisDir[0], axisDir[1]) || 1) : 1;
+  const axisUnit = axisDir ? [axisDir[0] / axisLen, axisDir[1] / axisLen] : null;
+  let axisScale = 1;
+  switch (plan.ecotype){
+    case "swimmer":
+      axisScale = 1.6;
+      break;
+    case "crawler":
+      axisScale = 1.35;
+      break;
+    case "sentinel":
+      axisScale = 1.1;
+      break;
+    case "tank":
+      axisScale = 0.9;
+      break;
+    default:
+      axisScale = 1.15;
+  }
+  if (Number.isFinite(plan.symmetry)){
+    axisScale += (plan.symmetry - 0.5) * 0.2;
+    axisScale = Math.max(0.75, Math.min(1.9, axisScale));
+  }
+  const wiggle = Number.isFinite(plan.wiggle) ? plan.wiggle : 0;
+  const noiseWeight = 0.08 + 0.22 * wiggle;
+
+  function anisotropicDistance(x, y, origin){
+    const dx = x - origin[0];
+    const dy = y - origin[1];
+    if (!axisUnit) return Math.hypot(dx, dy);
+    const proj = dx * axisUnit[0] + dy * axisUnit[1];
+    const perp = -dx * axisUnit[1] + dy * axisUnit[0];
+    return Math.hypot(proj / axisScale, perp * axisScale);
+  }
+  function jitterScore(x, y){
+    const seed = (state?.seed ?? 1) | 0;
+    const h = hash32(seed, (x * 73856093) ^ (y * 19349663));
+    return ((h & 1023) / 1023) * noiseWeight;
+  }
 
   for (let i=0;i<addN;i++){
     const candidates = [];
@@ -182,16 +274,21 @@ export function growBodyConnected(state, addN, rng, target=null){
 
     // If a growth target is provided (e.g. "carrot"), bias growth towards it,
     // otherwise bias towards the core for compact connected bodies.
-    const tx = Array.isArray(target) ? target[0] : null;
-    const ty = Array.isArray(target) ? target[1] : null;
     pool.sort((a,b)=>{
-      const daCore = Math.abs(a[0]-core[0]) + Math.abs(a[1]-core[1]);
-      const dbCore = Math.abs(b[0]-core[0]) + Math.abs(b[1]-core[1]);
-      if (tx === null || ty === null) return daCore - dbCore;
-      const daT = Math.abs(a[0]-tx) + Math.abs(a[1]-ty);
-      const dbT = Math.abs(b[0]-tx) + Math.abs(b[1]-ty);
-      // target dominates, core keeps silhouette cohesive
-      return (daT*3 + daCore) - (dbT*3 + dbCore);
+      const daCore = anisotropicDistance(a[0], a[1], core) + jitterScore(a[0], a[1]);
+      const dbCore = anisotropicDistance(b[0], b[1], core) + jitterScore(b[0], b[1]);
+      if (!biasList.length) return daCore - dbCore;
+      let scoreA = daCore;
+      let scoreB = dbCore;
+      for (const bias of biasList){
+        if (!bias || !Array.isArray(bias.point)) continue;
+        const w = Number.isFinite(bias.weight) ? bias.weight : 1;
+        const daT = Math.hypot(a[0] - bias.point[0], a[1] - bias.point[1]);
+        const dbT = Math.hypot(b[0] - bias.point[0], b[1] - bias.point[1]);
+        scoreA += daT * w;
+        scoreB += dbT * w;
+      }
+      return scoreA - scoreB;
     });
 
     const pickIdx = Math.floor(rng()*Math.min(12, pool.length));
@@ -200,6 +297,7 @@ export function growBodyConnected(state, addN, rng, target=null){
   }
 
   state.body.cells = Array.from(set).map(parseKey);
+  syncGrowthPatternProgress(state);
   return true;
 }
 
@@ -220,10 +318,49 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
   return out;
 }
 
+function buildLimbPlan(rng, baseDir){
+  const count = LIMB.phalanxCountMin + Math.floor(rng() * (LIMB.phalanxCountMax - LIMB.phalanxCountMin + 1));
+  const lengths = Array.from({ length: count }, () => (
+    LIMB.phalanxLenMin + Math.floor(rng() * (LIMB.phalanxLenMax - LIMB.phalanxLenMin + 1))
+  ));
+  const turnSteps = Array.from({ length: count - 1 }, () => 0);
+  const base = quantizeDirTo8(baseDir);
+  const dirs = Array.from({ length: count }, () => [base[0], base[1]]);
+  const angles = Array.from({ length: count }, () => (
+    LIMB.animAngleMin + Math.floor(rng() * (LIMB.animAngleMax - LIMB.animAngleMin + 1))
+  ));
+  const animDirection = rng() < 0.5 ? -1 : 1;
+  return {
+    lengths,
+    dirs,
+    turnSteps,
+    totalLength: lengths.reduce((sum, len) => sum + len, 0),
+    anim: { direction: animDirection, angles }
+  };
+}
+
+function buildEyeOffsets(radius, shape){
+  const out = [];
+  const r = Math.max(0, radius | 0);
+  for (let dy = -r; dy <= r; dy++){
+    for (let dx = -r; dx <= r; dx++){
+      if (shape === "sphere"){
+        if ((dx * dx + dy * dy) <= r * r) out.push([dx, dy]);
+      } else {
+        if (Math.abs(dx) + Math.abs(dy) <= r) out.push([dx, dy]);
+      }
+    }
+  }
+  if (out.length === 0) out.push([0, 0]);
+  return out;
+}
+
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
   const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const existingTypes = new Set((state.modules || []).map((m) => m?.type).filter(Boolean));
+  if (!existingTypes.has(type) && existingTypes.size >= 4) return false;
 
   function isTooCloseToSameType(candidateCells){
     if (!candidateCells.length || !Array.isArray(state.modules)) return false;
@@ -298,33 +435,46 @@ export function addModule(state, type, rng, target=null){
   let movable = false;
   let targetLen = 0;
   let dirForGrowth = null;
+  let limbPlan = null;
+  let eyeShape = null;
+  let eyeRadius = null;
 
   if (type === "tail" || type === "tentacle"){
     movable = true;
-    targetLen = 2 + Math.floor(rng()*6);
+    const cfg = (type === "tail") ? TAIL : TENTACLE;
+    targetLen = cfg.minLen + Math.floor(rng() * cfg.maxExtra);
+    dirForGrowth = baseDir;
+    const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
+    cells = full.slice(0, Math.min(1, full.length));
+  } else if (type === "worm"){
+    movable = true;
+    const maxWormLen = Math.max(1, Math.floor((state.body?.cells?.length || 0) * WORM.maxBodyMult));
+    targetLen = WORM.minLen + Math.floor(rng() * WORM.maxExtra);
+    targetLen = Math.min(targetLen, maxWormLen);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "limb"){
     movable = true;
-    targetLen = 2 + Math.floor(rng()*5);
-    const dir = rng()<0.65 ? [0,1] : baseDir;
+    const dir = rng() < LIMB.downBias ? [0,1] : quantizeDirTo8(baseDir);
+    limbPlan = buildLimbPlan(rng, dir);
+    targetLen = limbPlan.totalLength;
     dirForGrowth = dir;
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "antenna"){
     movable = true;
-    targetLen = 2 + Math.floor(rng()*5);
-    const dir = rng()<0.7 ? [0,-1] : baseDir;
+    targetLen = ANTENNA.minLen + Math.floor(rng() * ANTENNA.maxExtra);
+    const dir = rng() < ANTENNA.upBias ? [0,-1] : quantizeDirTo8(baseDir);
     dirForGrowth = dir;
-    targetLen = Math.min(targetLen, 27);
+    targetLen = Math.min(targetLen, ANTENNA.maxLen);
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "spike"){
     movable = false;
-    targetLen = 1 + Math.floor(rng()*4);
+    targetLen = SPIKE.minLen + Math.floor(rng() * SPIKE.maxExtra);
     dirForGrowth = baseDir;
-    targetLen = Math.min(targetLen, 10);
+    targetLen = Math.min(targetLen, SPIKE.maxLen);
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "shell"){
@@ -333,16 +483,59 @@ export function addModule(state, type, rng, target=null){
     const dx = baseStep[0] - ax;
     const dy = baseStep[1] - ay;
     const ox = ax + dx, oy = ay + dy;
-    const patch = [[ox,oy],[ox+1,oy],[ox,oy+1],[ox+1,oy+1]];
+    const patch = [
+      [ox, oy],
+      [ox + 1, oy],
+      [ox, oy + 1],
+      [ox + 1, oy + 1]
+    ].slice(0, SHELL.size * SHELL.size);
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
   } else if (type === "eye"){
-    state.face.extraEye = true;
-    state.face.eyeSize = Math.min(3, Math.max(1, (state.face.eyeSize || 1) + 1));
-    return true;
+    eyeShape = rng() < EYE.shapeChance ? "diamond" : "sphere";
+    eyeRadius = (state.body?.cells?.length || 0) < EYE.smallBodyThreshold
+      ? 1
+      : (rng() < EYE.largeRadiusChance ? 1 : 2);
+    const faceAnchor = state.face?.anchor;
+    const faceEyeRadius = Math.max(0, (state.face?.eyeRadius ?? ((state.face?.eyeSize ?? 1) - 1)) | 0);
+    const faceEyeShape = state.face?.eyeShape || (rng() < EYE.shapeChance ? "diamond" : "sphere");
+    const faceEyeSet = new Set();
+    if (faceAnchor && faceEyeRadius >= 0){
+      for (const [dx, dy] of buildEyeOffsets(faceEyeRadius, faceEyeShape)){
+        faceEyeSet.add(key(faceAnchor[0] + dx, faceAnchor[1] + dy));
+      }
+    }
+    const options = DIR8.slice();
+    for (let i = options.length - 1; i > 0; i--){
+      const j = Math.floor(rng() * (i + 1));
+      [options[i], options[j]] = [options[j], options[i]];
+    }
+    let placed = null;
+    for (const d of options){
+      const center = stepFromDir([ax, ay], d).cell;
+    const offsets = buildEyeOffsets(eyeRadius, eyeShape);
+      const candidate = offsets.map(([dx, dy]) => [center[0] + dx, center[1] + dy]);
+      if (candidate.some(([x, y]) => x === state.body.core[0] && y === state.body.core[1])) continue;
+      if (candidate.some(([x, y]) => bodySet.has(key(x, y)))) continue;
+      if (candidate.some(([x, y]) => occupiedByModules(state, x, y))) continue;
+      if (candidate.some(([x, y]) => faceEyeSet.has(key(x, y)))) continue;
+      if (isTooCloseToSameType(candidate)) continue;
+      placed = candidate;
+      break;
+    }
+    if (!placed) return false;
+    cells = placed;
+    movable = false;
+    targetLen = cells.length;
+    dirForGrowth = null;
   } else if (type === "mouth"){
     // mouth: small 2x2 patch near face anchor (front)
     const fa = state.face?.anchor || anchor;
-    const patch = [[fa[0]+1,fa[1]],[fa[0]+2,fa[1]],[fa[0]+1,fa[1]+1],[fa[0]+2,fa[1]+1]];
+    const patch = [
+      [fa[0] + MOUTH.offset, fa[1]],
+      [fa[0] + MOUTH.offset + 1, fa[1]],
+      [fa[0] + MOUTH.offset, fa[1] + 1],
+      [fa[0] + MOUTH.offset + 1, fa[1] + 1]
+    ].slice(0, MOUTH.size * MOUTH.size);
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
     movable = false;
     targetLen = cells.length;
@@ -350,17 +543,17 @@ export function addModule(state, type, rng, target=null){
   } else if (type === "teeth"){
     // teeth: 1-wide line in front of face anchor, grows up to 6
     movable = false;
-    targetLen = 2 + Math.floor(rng()*5);
+    targetLen = TEETH.minLen + Math.floor(rng() * TEETH.maxExtra);
     const fa = state.face?.anchor || anchor;
-    const dir = [1,0];
+    const dir = [TEETH.dir[0], TEETH.dir[1]];
     dirForGrowth = dir;
     const full = buildLineFrom(fa, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "claw"){
     // claw: like a limb but more "hook"-like (grows longer)
     movable = true;
-    targetLen = 3 + Math.floor(rng()*7);
-    targetLen = Math.min(targetLen, 9);
+    targetLen = CLAW.minLen + Math.floor(rng() * CLAW.maxExtra);
+    targetLen = Math.min(targetLen, CLAW.maxLen);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
@@ -371,7 +564,10 @@ export function addModule(state, type, rng, target=null){
     const dx = baseStep[0] - ax;
     const dy = baseStep[1] - ay;
     const ox = ax + dx, oy = ay + dy;
-    const patch = [[ox,oy],[ox+dx,oy+dy],[ox+dx,oy+dy+1],[ox+dx,oy+dy-1]];
+    const patch = [
+      [ox, oy],
+      ...FIN.offsets.map(([step, yOffset]) => [ox + dx * step, oy + dy + yOffset])
+    ];
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
     targetLen = cells.length;
     dirForGrowth = baseDir;
@@ -398,6 +594,10 @@ export function addModule(state, type, rng, target=null){
     if (wiggle > 0.66) growStyle = "curve";
     else if (wiggle > 0.33) growStyle = "zigzag";
   }
+  if (type === "limb"){
+    growStyle = "jointed";
+  }
+  if (type === "antenna" || type === "spike") growStyle = "straight";
 
   const styleParams = {
     baseDir: dirForGrowth ? [dirForGrowth[0], dirForGrowth[1]] : null,
@@ -416,12 +616,17 @@ export function addModule(state, type, rng, target=null){
     growDir: dirForGrowth,
     growPos: cells.length ? [cells[cells.length - 1][0], cells[cells.length - 1][1]] : null,
     pigment,
+    phalanxLengths: limbPlan?.lengths,
+    phalanxDirs: limbPlan?.dirs,
+    limbAnim: limbPlan?.anim,
+    eyeShape: type === "eye" ? eyeShape : undefined,
+    eyeRadius: type === "eye" ? eyeRadius : undefined,
     ...styleParams
   });
     // ----- symmetry: sometimes spawn a mirrored twin organ -----
   const sym = state?.plan?.symmetry ?? 0;
   const canMirror = sym > 0.75 && rng() < 0.45;
-  const linear = (type==="tail" || type==="tentacle" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth" || type==="claw");
+  const linear = (type==="tail" || type==="tentacle" || type==="worm" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth" || type==="claw");
 
   if (canMirror && linear && dirForGrowth){
     const [cx,cy] = state.body.core;
@@ -470,6 +675,7 @@ export function growPlannedModules(state, rng, options = {}){
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
   const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const maxWormLen = (state.body?.cells?.length || 0) * WORM.maxBodyMult;
   const carrotCenters = useTarget
     ? [target]
     : Array.isArray(state.carrots)
@@ -486,12 +692,29 @@ export function growPlannedModules(state, rng, options = {}){
     const angle = Math.atan2(dir[1], dir[0]) + steps * ANGLE_STEP_RAD;
     return dirFromAngle(angle);
   }
+  function rotateDirForModule(m, dir, steps){
+    if (m?.type === "limb" || m?.type === "antenna"){
+      return rotateDir8(dir, steps);
+    }
+    return rotateDir(dir, steps);
+  }
+
+  function phalanxIndex(lengths, idx){
+    if (!Array.isArray(lengths) || !lengths.length) return 0;
+    let acc = 0;
+    for (let i = 0; i < lengths.length; i++){
+      acc += lengths[i];
+      if (idx < acc) return i;
+    }
+    return lengths.length - 1;
+  }
   function seesCarrot(m){
     if (!hasCarrots) return true;
     const appendage =
       m.movable ||
       m.type === "tail" ||
       m.type === "tentacle" ||
+      m.type === "worm" ||
       m.type === "limb" ||
       m.type === "antenna" ||
       m.type === "claw";
@@ -540,6 +763,13 @@ export function growPlannedModules(state, rng, options = {}){
       const scoreB = b.i * (1 - ib) + db * ib;
       return scoreA - scoreB;
     });
+    if (modules.length > 1){
+      const rawIndex = Number.isFinite(state.growthQueueIndex) ? state.growthQueueIndex : 0;
+      const start = ((rawIndex % modules.length) + modules.length) % modules.length;
+      if (start){
+        modules.push(...modules.splice(0, start));
+      }
+    }
   } else if (shuffle){
     for (let i = modules.length - 1; i > 0; i--){
       const j = Math.floor(rng() * (i + 1));
@@ -547,28 +777,48 @@ export function growPlannedModules(state, rng, options = {}){
     }
   }
 
-  for (const entry of modules){
+  let lastGrownPos = null;
+  for (let pos = 0; pos < modules.length; pos++){
+    const entry = modules[pos];
     const m = entry.m;
-    const minLen = m.growTo ?? 0;
+    const minLen = Number.isFinite(m.growTo) ? m.growTo : 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
     if (!Array.isArray(m.growPos) && m.cells.length){
       const lastCell = m.cells[m.cells.length - 1];
       m.growPos = [lastCell[0], lastCell[1]];
     }
+    if (minLen > 0 && m.cells.length >= minLen) continue;
     if (maxAppendageLen > 0 && m.cells.length >= maxAppendageLen) continue;
-    if (m.type === "spike" && m.cells.length >= 10) continue;
-    if (m.type === "antenna" && m.cells.length >= 27) continue;
-    if (m.type === "claw" && m.cells.length >= 9) continue;
+    if (m.type === "worm" && maxWormLen > 0 && m.cells.length >= maxWormLen) continue;
+    if (m.type === "spike" && m.cells.length >= SPIKE.maxLen) continue;
+    if (m.type === "antenna" && m.cells.length >= ANTENNA.maxLen) continue;
+    if (m.type === "claw" && m.cells.length >= CLAW.maxLen) continue;
     if (requireSight && !seesCarrot(m)) continue;
 
     const last = m.cells[m.cells.length - 1];
     const growPos = Array.isArray(m.growPos) ? m.growPos : [last[0], last[1]];
     let baseDir = m.growDir;
     const moduleInfluence = useTarget ? targetInfluence(moduleDistance(m, target[0], target[1])) : 0;
+    if (m.type === "limb" || m.type === "antenna"){
+      baseDir = quantizeDirTo8(baseDir);
+      m.growDir = baseDir;
+    }
+
+    if (m.type === "antenna" || m.type === "spike"){
+      m.growStyle = "straight";
+    }
 
     // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
     let dir = baseDir;
-    if (m.cells.length >= 3){
+    let segIndex = null;
+    let jointedDir = null;
+    if (m.growStyle === "jointed" && Array.isArray(m.phalanxLengths) && Array.isArray(m.phalanxDirs)){
+      segIndex = phalanxIndex(m.phalanxLengths, m.cells.length);
+      jointedDir = m.phalanxDirs[segIndex] || baseDir;
+      dir = jointedDir;
+      baseDir = jointedDir;
+    } else if (m.cells.length >= 3){
+      // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
       if (m.growStyle === "zigzag"){
         dir = (m.growStep % 2 === 0)
           ? baseDir
@@ -577,7 +827,7 @@ export function growPlannedModules(state, rng, options = {}){
       }
       else if (m.growStyle === "curve"){
         if (rng() < (m.turnChance || 0.2)){
-          baseDir = rotateDir(baseDir, m.curveSign || 1);
+          baseDir = rotateDirForModule(m, baseDir, m.curveSign || 1);
           m.growDir = baseDir;
         }
         dir = baseDir;
@@ -598,18 +848,27 @@ export function growPlannedModules(state, rng, options = {}){
       m.movable ||
       m.type === "tail" ||
       m.type === "tentacle" ||
+      m.type === "worm" ||
       m.type === "limb" ||
       m.type === "antenna" ||
       m.type === "claw";
 
-    if (appendage) pushDir(baseDir);
-    pushDir(dir);
-    pushDir(rotateDir(dir, 1));
-    pushDir(rotateDir(dir, -1));
-    pushDir(rotateDir(dir, 2));
-    pushDir(rotateDir(dir, -2));
-    pushDir(rotateDir(dir, 3));
-    pushDir(rotateDir(dir, -3));
+    if (m.growStyle === "jointed"){
+      pushDir(dir);
+      pushDir(rotateDir8(dir, 1));
+      pushDir(rotateDir8(dir, -1));
+      pushDir(rotateDir8(dir, 2));
+      pushDir(rotateDir8(dir, -2));
+    } else {
+      if (appendage) pushDir(baseDir);
+      pushDir(dir);
+      pushDir(rotateDirForModule(m, dir, 1));
+      pushDir(rotateDirForModule(m, dir, -1));
+      pushDir(rotateDirForModule(m, dir, 2));
+      pushDir(rotateDirForModule(m, dir, -2));
+      pushDir(rotateDirForModule(m, dir, 3));
+      pushDir(rotateDirForModule(m, dir, -3));
+    }
 
     if (useTarget && moduleInfluence > 0){
       const [tx, ty] = target;
@@ -642,6 +901,15 @@ export function growPlannedModules(state, rng, options = {}){
       if (bodySet.has(k)) continue;
       if (occupiedByModules(state, nx, ny)) continue;
 
+      if (m.growStyle === "jointed" && segIndex !== null && jointedDir){
+        if (dir[0] !== jointedDir[0] || dir[1] !== jointedDir[1]){
+          for (let i = segIndex; i < m.phalanxDirs.length; i++){
+            m.phalanxDirs[i] = [dir[0], dir[1]];
+          }
+          jointedDir = dir;
+        }
+      }
+
       m.cells.push([nx, ny]);
       m.growPos = step.pos;
       markAnim(state, nx, ny);
@@ -650,7 +918,13 @@ export function growPlannedModules(state, rng, options = {}){
       }
       grew++;
       placed = true;
-      if (grew >= maxGrows) return grew;
+      lastGrownPos = pos;
+      if (grew >= maxGrows){
+        if (lastGrownPos !== null && modules.length > 0){
+          state.growthQueueIndex = (lastGrownPos + 1) % modules.length;
+        }
+        return grew;
+      }
       break;
     }
 
@@ -658,6 +932,9 @@ export function growPlannedModules(state, rng, options = {}){
     if (!placed){
       continue;
     }
+  }
+  if (lastGrownPos !== null && modules.length > 0){
+    state.growthQueueIndex = (lastGrownPos + 1) % modules.length;
   }
 
   return grew;

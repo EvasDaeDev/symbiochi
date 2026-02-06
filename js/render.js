@@ -360,6 +360,45 @@ function clawRotationRad(offsetSec=0){
   return 0;
 }
 
+function limbPhalanxAngleRad(maxDeg, direction, offsetSec=0){
+  const bendDur = 2 * 1.5;
+  const returnDur = 2 * 1.5;
+  const pauseDur = 3 * 2;
+  const cycle = bendDur + returnDur + pauseDur;
+  const phase = ((Date.now()/1000) + offsetSec) % cycle;
+  const amp = (Math.PI/180) * maxDeg * 1.15 * direction;
+  if (phase < bendDur){
+    return (phase / bendDur) * amp;
+  }
+  if (phase < bendDur + returnDur){
+    const t = (phase - bendDur) / returnDur;
+    return (1 - t) * amp;
+  }
+  return 0;
+}
+
+function jointedLimbPositions(cells, phalanxLengths, anglesRad){
+  const out = cells.map(([x, y]) => ({ x, y }));
+  if (!Array.isArray(phalanxLengths) || !phalanxLengths.length) return out;
+  let start = 0;
+  for (let p = 0; p < phalanxLengths.length && start < out.length; p++){
+    const origin = out[start];
+    const angle = anglesRad?.[p] || 0;
+    if (angle !== 0){
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      for (let i = start; i < out.length; i++){
+        const dx = out[i].x - origin.x;
+        const dy = out[i].y - origin.y;
+        out[i].x = origin.x + dx * cos - dy * sin;
+        out[i].y = origin.y + dx * sin + dy * cos;
+      }
+    }
+    start += phalanxLengths[p];
+  }
+  return out;
+}
+
 function moduleDir(cells){
   if (!cells || cells.length < 2) return [1,0];
   const dx = cells[1][0] - cells[0][0];
@@ -370,26 +409,79 @@ function moduleDir(cells){
 function perpOf([dx,dy]){ return [-dy, dx]; }
 
 function lengthAmpScale(len){
-  return Math.min(2.6, 1 + Math.max(0, len - 4) * 0.05);
+  return Math.min(4.0, 1 + Math.max(0, len - 4) * 0.08);
 }
 
-function windOffsetPx(i, len, blockPx, offsetSec=0){
-  if (i < 2) return 0;
-  const t = (Date.now()/1000) + offsetSec;
-  const omega = 2*Math.PI/5;
-  const phase = omega*t + i*0.55;
-  const denom = Math.max(1, len-2);
-  const amp01 = Math.min(1, (i-1)/denom);
-  const ampPx = blockPx * 0.65 * amp01 * lengthAmpScale(len);
-  return Math.sin(phase) * ampPx;
+function tailAmpProfile(u){
+  const smooth = u * u * (3 - 2 * u);
+  return Math.pow(smooth, 1.35);
 }
 
-function windOffset(i, len, offsetSec=0){
+function windOffsetPx(i, len, blockPx, offsetSec=0, type="tail"){
   if (i < 2) return 0;
   const t = (Date.now()/1000) + offsetSec;
-  const phase = t*2 + i*0.55;
-  const amp01 = Math.min(1, (i-1)/Math.max(1,len-2));
-  return Math.sin(phase) * 0.35 * amp01 * lengthAmpScale(len);
+  const denom = Math.max(1, len - 2);
+  const u = Math.min(1, (i - 1) / denom);
+  const amp01 = tailAmpProfile(u);
+  const omega1 = 2 * Math.PI / 6;
+  const omega2 = 2 * Math.PI / 4.5;
+  const omega3 = 2 * Math.PI / 9;
+  const phase1 = omega1 * t - u * 3.4;
+  const phase2 = omega2 * t - u * 5.1 + 1.3;
+  const phase3 = omega3 * t - u * 2.2 + 2.1;
+  const mix = 0.6 * Math.sin(phase1) + 0.3 * Math.sin(phase2) + 0.1 * Math.sin(phase3);
+  const ampScale = (type === "tentacle") ? 1.5 : 1;
+  const ampPx = blockPx * 1.05 * amp01 * lengthAmpScale(len) * ampScale;
+  return mix * ampPx;
+}
+
+function windOffset(i, len, offsetSec=0, type="tail"){
+  if (i < 2) return 0;
+  const t = (Date.now()/1000) + offsetSec;
+  const denom = Math.max(1, len - 2);
+  const u = Math.min(1, (i - 1) / denom);
+  const amp01 = tailAmpProfile(u);
+  const omega1 = 2 * Math.PI / 6;
+  const omega2 = 2 * Math.PI / 4.5;
+  const omega3 = 2 * Math.PI / 9;
+  const phase1 = omega1 * t - u * 3.4;
+  const phase2 = omega2 * t - u * 5.1 + 1.3;
+  const phase3 = omega3 * t - u * 2.2 + 2.1;
+  const mix = 0.6 * Math.sin(phase1) + 0.3 * Math.sin(phase2) + 0.1 * Math.sin(phase3);
+  const ampScale = (type === "tentacle") ? 1.5 : 1;
+  return mix * 0.57 * amp01 * lengthAmpScale(len) * ampScale;
+}
+
+function wormOffset(i, len, offsetSec, dir, perp){
+  if (!dir || !perp) return { x: 0, y: 0 };
+  const t = (Date.now()/1000) + offsetSec;
+  const denom = Math.max(1, len - 1);
+  const u = i / denom;
+  const peristalsis = Math.sin((t * (2 * Math.PI / 5.5)) - u * 4.2);
+  const twist = Math.sin((t * (2 * Math.PI / 8)) + u * 6.0) * 0.35;
+  const amp = 0.35 * tailAmpProfile(u) * lengthAmpScale(len);
+  const axial = Math.sin((t * (2 * Math.PI / 7)) - u * 3.3) * 0.18 * amp;
+  const cos = Math.cos(twist);
+  const sin = Math.sin(twist);
+  const rx = perp[0] * cos - perp[1] * sin;
+  const ry = perp[0] * sin + perp[1] * cos;
+  return {
+    x: rx * (peristalsis * amp) + dir[0] * axial,
+    y: ry * (peristalsis * amp) + dir[1] * axial
+  };
+}
+
+function eyeBlinkScale(orgId, baseSeed){
+  const t = Date.now() / 1000;
+  const seed = hash01(`${baseSeed}|eye-blink|${orgId}`);
+  const pause = 10 + 7 * seed;
+  const blinkDur = 0.3;
+  const cycle = pause + blinkDur * 2;
+  const phase = (t + seed * 11.7) % cycle;
+  if (phase >= blinkDur * 2) return 1;
+  const local = phase < blinkDur ? phase : (phase - blinkDur);
+  const pulse = Math.sin(Math.PI * (local / blinkDur));
+  return 1 - 0.5 * pulse;
 }
 
 // growth animation: org.anim["x,y"] = {t0, dur}
@@ -560,13 +652,29 @@ function computeCorePx(view, bodyBlocks){
   return Math.max(8, Math.min(base, maxSide));
 }
 
-function computeEyeSideBlocks(org, bodyBlocks){
-  // Eyes are rendered as block-shapes (not px), up to 3x3 = 9 blocks.
-  // Outer corners are rounded by the block corner-cut.
-  const wanted = clamp(org?.face?.eyeSize ?? 1, 1, 3);
-  // early stage: keep tiny
-  if (bodyBlocks < 16) return 1;
+function computeEyeRadius(org, bodyBlocks){
+  const raw = Number.isFinite(org?.face?.eyeRadius)
+    ? org.face.eyeRadius
+    : Math.max(0, (org?.face?.eyeSize ?? 1) - 1);
+  const wanted = clamp(raw, 0, 2);
+  if (bodyBlocks < 16) return 0;
   return wanted;
+}
+
+function buildEyeOffsets(radius, shape){
+  const out = [];
+  const r = Math.max(0, radius | 0);
+  for (let dy = -r; dy <= r; dy++){
+    for (let dx = -r; dx <= r; dx++){
+      if (shape === "sphere"){
+        if ((dx * dx + dy * dy) <= r * r) out.push([dx, dy]);
+      } else {
+        if (Math.abs(dx) + Math.abs(dy) <= r) out.push([dx, dy]);
+      }
+    }
+  }
+  if (out.length === 0) out.push([0, 0]);
+  return out;
 }
 
 // =====================
@@ -725,6 +833,35 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
       continue;
     }
 
+    if (type === "eye"){
+      const blinkScale = eyeBlinkScale(orgId, baseSeed);
+      for (let i=0;i<cells.length;i++){
+        const [wx, wy] = cells[i];
+        const p = worldToScreenPx(cam, wx, wy, view);
+        const x = p.x;
+        const y = p.y + breathY;
+        const nm = neighMaskAt(occ, wx, wy);
+        const kGrow = animProgress(org, wx, wy);
+        if (blinkScale !== 1){
+          const cx = x + s / 2;
+          const cy = y + s / 2;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.scale(1, blinkScale);
+          ctx.translate(-cx, -cy);
+          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+          ctx.restore();
+        } else {
+          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+        }
+
+        if (isSelected && isBoundary(occ, wx, wy)){
+          boundaryCells.push([wx, wy]);
+        }
+      }
+      continue;
+    }
+
     // tails / limbs / antenna / tentacle: wind deformation on segments
     const len = cells.length;
     const dir = moduleDir(cells);
@@ -733,6 +870,34 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
     const offsetSec = ((orgId || 0) * 0.37 + mi) * 0.1;
     const baseCell = cells[0];
     const coreCell = org?.body?.core || baseCell;
+    const isJointedLimb = type === "limb" && Array.isArray(m.phalanxLengths) && m.phalanxLengths.length;
+    const limbAnim = isJointedLimb ? (m.limbAnim || {}) : null;
+    const limbDirection = isJointedLimb
+      ? (Number.isFinite(limbAnim?.direction)
+        ? limbAnim.direction
+        : (hash01(`${baseSeed}|limb-dir|${orgId}|${mi}`) < 0.5 ? -1 : 1))
+      : 1;
+    const limbAnglesDeg = isJointedLimb
+      ? m.phalanxLengths.map((_, idx) => {
+        const stored = limbAnim?.angles?.[idx];
+        if (Number.isFinite(stored)) return stored;
+        return 10 + Math.floor(hash01(`${baseSeed}|limb-angle|${orgId}|${mi}|${idx}`) * 18);
+      })
+      : null;
+    const limbAnglesRad = isJointedLimb
+      ? limbAnglesDeg.map((deg) => limbPhalanxAngleRad(deg, limbDirection, offsetSec))
+      : null;
+    const limbCells = isJointedLimb ? jointedLimbPositions(cells, m.phalanxLengths, limbAnglesRad) : null;
+    const jointStarts = isJointedLimb ? (() => {
+      const set = new Set();
+      let acc = 0;
+      for (let i = 0; i < m.phalanxLengths.length; i++){
+        if (i > 0 && acc < cells.length) set.add(acc);
+        acc += m.phalanxLengths[i];
+        if (acc >= cells.length) break;
+      }
+      return set;
+    })() : null;
 
 // Variable thickness profile (visual-only)
 // Goal:
@@ -743,11 +908,14 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
 // - antenna is always thin
 function thicknessLevel(type, i, len){
   if (type === "antenna") return 1;
+  if (type === "limb") return 1;
+  if (type === "tail") return len >= 4 ? 2 : 1;
+  if (type === "worm") return 1;
   if (len < 6) return 1;
   if (type === "claw"){
     const mid = (len - 1) / 2;
     const dist = Math.abs(i - mid);
-    const maxThickness = len >= 10 ? 3 : 2;
+    const maxThickness = 2;
     if (dist <= len * 0.2) return maxThickness;
     if (dist <= len * 0.35) return Math.min(2, maxThickness);
     return 1;
@@ -756,7 +924,7 @@ function thicknessLevel(type, i, len){
   const maxZone = Math.max(1, Math.floor(len * 0.25));
   const midZone = Math.max(maxZone, Math.floor(len * (2/3)));
 
-  if (i < maxZone) return 3;   // max thickness
+  if (i < maxZone) return 2;   // max thickness
   if (i < midZone) return 2;   // thick
   return 1;                    // thin
 }
@@ -786,8 +954,24 @@ function outwardPerpDir(wx0, wy0){
   return da >= db ? candA : candB;
 }
 
+function limbPhalanxIndex(lengths, idx){
+  let acc = 0;
+  for (let i = 0; i < lengths.length; i++){
+    acc += lengths[i];
+    if (idx < acc) return i;
+  }
+  return lengths.length - 1;
+}
+
     for (let i=0;i<len;i++){
-      let [wx,wy] = cells[i];
+      let wx;
+      let wy;
+      if (isJointedLimb){
+        wx = limbCells[i].x;
+        wy = limbCells[i].y;
+      } else {
+        [wx,wy] = cells[i];
+      }
 
       if (type === "claw" && baseCell){
         const baseX = baseCell[0];
@@ -805,10 +989,22 @@ function outwardPerpDir(wx0, wy0){
         }
       }
 
-      // Antennas and claws should NOT sway with wind (requested).
-      const off = (type === "antenna" || type === "claw") ? 0 : windOffset(i, len, offsetSec);
-      wx += perp[0] * off;
-      wy += perp[1] * off;
+      let off = 0;
+      let wormShift = null;
+      if (type === "worm"){
+        wormShift = wormOffset(i, len, offsetSec, dir, perp);
+      } else if (type !== "antenna" && type !== "claw" && !isJointedLimb){
+        off = windOffset(i, len, offsetSec, type);
+      }
+      if (!isJointedLimb){
+        if (wormShift){
+          wx += wormShift.x;
+          wy += wormShift.y;
+        } else {
+          wx += perp[0] * off;
+          wy += perp[1] * off;
+        }
+      }
 
       const p = worldToScreenPx(cam, wx, wy, view);
       const x = p.x;
@@ -824,34 +1020,42 @@ function outwardPerpDir(wx0, wy0){
 
       drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
 
-// variable thickness: tries to be thick, but can stay thin if blocked
-const lvl = thicknessLevel(type, i, len);
-const shade = brighten(c, -0.04);
+      if (isJointedLimb && jointStarts?.has(i)){
+        const shade = brighten(c, -0.04);
+        const wx0 = cells[i][0];
+        const wy0 = cells[i][1];
+        const segIndex = limbPhalanxIndex(m.phalanxLengths, i);
+        const baseDir = Array.isArray(m.phalanxDirs) ? (m.phalanxDirs[segIndex] || dir) : dir;
+        const basePerp = perpOf(baseDir);
+        tryDrawSupport(wx0, wy0, x, y, basePerp[0], basePerp[1], shade, kGrow);
+        tryDrawSupport(wx0, wy0, x, y, -basePerp[0], -basePerp[1], shade, kGrow);
+      } else if (type === "worm"){
+        if (i === len - 1){
+          const shade = brighten(c, -0.04);
+          const wx0 = cells[i][0];
+          const wy0 = cells[i][1];
+          tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
+          tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
+        }
+      } else {
+        // variable thickness: tries to be thick, but can stay thin if blocked
+        const lvl = thicknessLevel(type, i, len);
+        const shade = brighten(c, -0.04);
 
-// IMPORTANT: use real cell coords for occupancy test
-const wx0 = cells[i][0];
-const wy0 = cells[i][1];
+        // IMPORTANT: use real cell coords for occupancy test
+        const wx0 = cells[i][0];
+        const wy0 = cells[i][1];
 
-if (lvl === 2){
-  if (type === "claw"){
-    const [ox, oy] = outwardPerpDir(wx0, wy0);
-    tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
-  } else {
-    // thick: one-sided support if possible
-    tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
-  }
-}
-else if (lvl === 3){
-  if (type === "claw"){
-    const [ox, oy] = outwardPerpDir(wx0, wy0);
-    tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
-    tryDrawSupport(wx0, wy0, x, y, ox * 2, oy * 2, shade, kGrow);
-  } else {
-    // max thickness: try both sides; if blocked, it will draw only what fits
-    tryDrawSupport(wx0, wy0, x, y,  perp[0],  perp[1], shade, kGrow);
-    tryDrawSupport(wx0, wy0, x, y, -perp[0], -perp[1], shade, kGrow);
-  }
-}
+        if (lvl === 2){
+          if (type === "claw"){
+            const [ox, oy] = outwardPerpDir(wx0, wy0);
+            tryDrawSupport(wx0, wy0, x, y, ox, oy, shade, kGrow);
+          } else {
+            // thick: one-sided support if possible
+            tryDrawSupport(wx0, wy0, x, y, perp[0], perp[1], shade, kGrow);
+          }
+        }
+      }
 
       if (isSelected && isBoundary(occ, cells[i][0], cells[i][1])){
         if (Number.isInteger(wx) && Number.isInteger(wy)){
@@ -897,30 +1101,38 @@ else if (lvl === 3){
     boundaryRects.push({x:coreX, y:coreY, w:corePx, h:corePx});
   }
 
-  // EYES (always on top of body). Size can grow up to 9 blocks (3x3).
+  // EYES (always on top of body).
   const face = org?.face?.anchor;
   if (face){
-    const eyeSide = computeEyeSideBlocks(org, bodyBlocks);
+    const eyeRadius = computeEyeRadius(org, bodyBlocks);
     const eyeColor = getPartColor(org, "eye", 0) || "#e2e8f0";
-
-    const sx = face[0] - Math.floor(eyeSide/2);
-    const sy = face[1] - Math.floor(eyeSide/2);
-
-    // local occ for neighbor shading within the eye blob
+    const shape = org?.face?.eyeShape || (hash01(`${baseSeed}|eye-shape|${orgId}`) < 0.5 ? "diamond" : "sphere");
+    const offsets = buildEyeOffsets(eyeRadius, shape);
+    const blinkScale = eyeBlinkScale(orgId, baseSeed);
     const eyeOcc = new Set();
-    for (let yy=0; yy<eyeSide; yy++){
-      for (let xx=0; xx<eyeSide; xx++){
-        eyeOcc.add(`${sx+xx},${sy+yy}`);
-      }
+    for (const [dx, dy] of offsets){
+      const wx = face[0] + dx;
+      const wy = face[1] + dy;
+      if (wx === core[0] && wy === core[1]) continue;
+      eyeOcc.add(`${wx},${wy}`);
     }
 
-    for (let yy=0; yy<eyeSide; yy++){
-      for (let xx=0; xx<eyeSide; xx++){
-        const wx = sx+xx, wy = sy+yy;
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
-        const nm = neighMaskAt(eyeOcc, wx, wy);
+    for (const key of eyeOcc){
+      const [wx, wy] = key.split(",").map((v) => parseInt(v, 10));
+      const p = worldToScreenPx(cam, wx, wy, view);
+      const x = p.x;
+      const y = p.y + breathY;
+      const nm = neighMaskAt(eyeOcc, wx, wy);
+      if (blinkScale !== 1){
+        const cx = x + s / 2;
+        const cy = y + s / 2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(1, blinkScale);
+        ctx.translate(-cx, -cy);
+        drawBlock(ctx, x, y, s, eyeColor, breathK, nm);
+        ctx.restore();
+      } else {
         drawBlock(ctx, x, y, s, eyeColor, breathK, nm);
       }
     }
@@ -953,14 +1165,18 @@ function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
       for (const [x,y] of m.cells) set.add(`${x},${y}`);
     }
   } else {
-    // 3) иначе по part: "body" — тело; иначе — все модули нужного типа
+    // 3) иначе по part: "body" — тело; иначе — модуль по типу (если однозначно)
     if (flash.part === "body"){
       for (const [x,y] of (org.body?.cells || [])) set.add(`${x},${y}`);
     } else if (flash.part){
+      const matches = [];
       for (let mi=0; mi<(org.modules||[]).length; mi++){
         const m = org.modules[mi];
         if (!m || m.type !== flash.part) continue;
-        for (const [x,y] of (m.cells || [])) set.add(`${x},${y}`);
+        matches.push(m);
+      }
+      if (matches.length === 1){
+        for (const [x,y] of (matches[0].cells || [])) set.add(`${x},${y}`);
       }
     }
   }
@@ -1179,6 +1395,7 @@ export function renderLegend(org, legendEl){
     { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный отросток.	Формируется при попытках «лечить» и вмешиваться." },
     { part:"tentacle", title:organLabel("tentacle"), desc:"Мягкая, подвижная структура." },
     { part:"tail",     title:organLabel("tail"),     desc:"Чем лучше уход, тем дальше он тянется от тела." },
+    { part:"worm",     title:organLabel("worm"),     desc:"Мягкое волнообразное движение и перистальтика." },
     { part:"limb",     title:organLabel("limb"),     desc:"Опора/движение (коричневый)." },
     { part:"spike",    title:organLabel("spike"),    desc:"Защитная реакция.Возникают, когда организм испытывает давление или стресс." },
     { part:"shell",    title:organLabel("shell"),    desc:"Закрытая форма. Тело пытается изолироваться." },
@@ -1266,7 +1483,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
 
   // footer text is still set in main.js usually; keep compatible if present:
   if (els.footerInfo){
-    const intervalSec = Math.max(60, Math.floor(state.evoIntervalMin * 60));
+    const intervalSec = Math.max(1, Math.floor(state.evoIntervalMin * 60));
     const until = Math.max(0, (state.lastMutationAt + intervalSec) - state.lastSeen);
     els.footerInfo.textContent =
       `Мутация через ~${fmtAgeSeconds(until)} (интервал ${state.evoIntervalMin} мин) • max 140% • drag • zoom:${zoom ?? ""}`;
