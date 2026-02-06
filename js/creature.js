@@ -11,10 +11,48 @@ import { TAIL } from "./organs/tail.js";
 import { TEETH } from "./organs/teeth.js";
 import { TENTACLE } from "./organs/tentacle.js";
 import { WORM } from "./organs/worm.js";
+import { BODY } from "./organs/body.js";
 import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
 import { EVO } from "./mods/evo.js";
 
 const BASE_GROW_DUR_SEC = 0.7;
+
+const ORGAN_CONFIGS = {
+  antenna: ANTENNA,
+  claw: CLAW,
+  eye: EYE,
+  fin: FIN,
+  limb: LIMB,
+  mouth: MOUTH,
+  shell: SHELL,
+  spike: SPIKE,
+  tail: TAIL,
+  teeth: TEETH,
+  tentacle: TENTACLE,
+  worm: WORM,
+  body: BODY
+};
+
+function getOrganConfig(type){
+  if (!type) return null;
+  return ORGAN_CONFIGS[type] || null;
+}
+
+function pickWeighted(rng, options, weights){
+  if (!Array.isArray(options) || options.length === 0) return null;
+  if (!Array.isArray(weights) || weights.length !== options.length){
+    return pick(rng, options);
+  }
+  let sum = 0;
+  for (const w of weights) sum += Math.max(0, w || 0);
+  if (sum <= 0) return pick(rng, options);
+  let r = rng() * sum;
+  for (let i = 0; i < options.length; i++){
+    r -= Math.max(0, weights[i] || 0);
+    if (r <= 0) return options[i];
+  }
+  return options[options.length - 1];
+}
 
 function getOrganGrowthRate(type){
   const rate = EVO?.organGrowthRate?.[type];
@@ -25,7 +63,11 @@ function markAnim(org, x, y, type = null, dur = BASE_GROW_DUR_SEC){
   if (!org) return;
   if (!org.anim) org.anim = {};
   const rate = getOrganGrowthRate(type);
-  const baseDur = Number.isFinite(dur) ? dur : BASE_GROW_DUR_SEC;
+  const cfg = getOrganConfig(type);
+  const cfgDur = cfg?.anim?.growthSec;
+  const baseDur = Number.isFinite(dur)
+    ? dur
+    : (Number.isFinite(cfgDur) ? cfgDur : BASE_GROW_DUR_SEC);
   const scaledDur = baseDur / rate;
   org.anim[`${x},${y}`] = { t0: Date.now()/1000, dur: scaledDur };
 }
@@ -164,7 +206,7 @@ export function newGame(){
   const targetBodySize = baseBodySize * (2 + Math.floor(rng() * 3));
   const body = makeSmallConnectedBody(seed, targetBodySize);
   const face = findFaceAnchor(body, seed);
-  const eyeShape = rng() < 0.5 ? "diamond" : "sphere";
+  const eyeShape = pickWeighted(rng, EYE.shapeOptions, EYE.shapeWeights) || "diamond";
 
  const plan = {
     // предпочитаемое направление роста (силуэт)
@@ -369,6 +411,10 @@ export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
   const maxAppendageLen = getMaxAppendageLen(state.body?.cells?.length || 0);
+  const cfg = getOrganConfig(type);
+  const moduleWidth = Number.isFinite(cfg?.width) ? cfg.width : 1;
+  const moduleShape = pickWeighted(rng, cfg?.shapeOptions, cfg?.shapeWeights);
+  const moduleGrowthChance = Number.isFinite(cfg?.growthChance) ? cfg.growthChance : 1;
   const existingTypes = new Set((state.modules || []).map((m) => m?.type).filter(Boolean));
   if (state?.face?.anchor) existingTypes.add("eye");
 
@@ -526,13 +572,13 @@ export function addModule(state, type, rng, target=null){
     ].slice(0, SHELL.size * SHELL.size);
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
   } else if (type === "eye"){
-    eyeShape = rng() < EYE.shapeChance ? "diamond" : "sphere";
+    eyeShape = pickWeighted(rng, EYE.shapeOptions, EYE.shapeWeights) || "diamond";
     eyeRadius = (state.body?.cells?.length || 0) < EYE.smallBodyThreshold
       ? 1
       : (rng() < EYE.largeRadiusChance ? 1 : 2);
     const faceAnchor = state.face?.anchor;
     const faceEyeRadius = Math.max(0, (state.face?.eyeRadius ?? ((state.face?.eyeSize ?? 1) - 1)) | 0);
-    const faceEyeShape = state.face?.eyeShape || (rng() < EYE.shapeChance ? "diamond" : "sphere");
+    const faceEyeShape = state.face?.eyeShape || (pickWeighted(rng, EYE.shapeOptions, EYE.shapeWeights) || "diamond");
     const faceEyeSet = new Set();
     if (faceAnchor && faceEyeRadius >= 0){
       for (const [dx, dy] of buildEyeOffsets(faceEyeRadius, faceEyeShape)){
@@ -635,6 +681,9 @@ export function addModule(state, type, rng, target=null){
     growStyle = "jointed";
   }
   if (type === "antenna" || type === "spike") growStyle = "straight";
+  if (moduleShape && ["straight", "zigzag", "curve", "jointed"].includes(moduleShape)){
+    growStyle = moduleShape;
+  }
 
   const styleParams = {
     baseDir: dirForGrowth ? [dirForGrowth[0], dirForGrowth[1]] : null,
@@ -653,6 +702,9 @@ export function addModule(state, type, rng, target=null){
     growDir: dirForGrowth,
     growPos: cells.length ? [cells[cells.length - 1][0], cells[cells.length - 1][1]] : null,
     pigment,
+    width: moduleWidth,
+    shape: moduleShape,
+    growthChance: moduleGrowthChance,
     phalanxLengths: limbPlan?.lengths,
     phalanxDirs: limbPlan?.dirs,
     limbAnim: limbPlan?.anim,
@@ -686,6 +738,9 @@ export function addModule(state, type, rng, target=null){
           growDir: dir2,
           growPos: cells2.length ? [cells2[cells2.length - 1][0], cells2[cells2.length - 1][1]] : null,
           pigment: { ...pigment, tone: pigment.tone * 0.8 }, // чуть отличим
+          width: moduleWidth,
+          shape: moduleShape,
+          growthChance: moduleGrowthChance,
           baseDir: [dir2[0], dir2[1]],
           growStyle,
           growStep: 0,
@@ -818,6 +873,7 @@ export function growPlannedModules(state, rng, options = {}){
   for (let pos = 0; pos < modules.length; pos++){
     const entry = modules[pos];
     const m = entry.m;
+    const cfg = getOrganConfig(m.type);
     const minLen = Number.isFinite(m.growTo) ? m.growTo : 0;
     if (!m.growDir) { m.growTo = m.cells.length; continue; }
     if (!Array.isArray(m.growPos) && m.cells.length){
@@ -830,6 +886,10 @@ export function growPlannedModules(state, rng, options = {}){
     if (m.type === "spike" && m.cells.length >= SPIKE.maxLen) continue;
     if (m.type === "antenna" && m.cells.length >= ANTENNA.maxLen) continue;
     if (m.type === "claw" && m.cells.length >= CLAW.maxLen) continue;
+    const growthChance = Number.isFinite(m.growthChance)
+      ? m.growthChance
+      : (Number.isFinite(cfg?.growthChance) ? cfg.growthChance : 1);
+    if (rng() > growthChance) continue;
     if (requireSight && !seesCarrot(m)) continue;
 
     const last = m.cells[m.cells.length - 1];

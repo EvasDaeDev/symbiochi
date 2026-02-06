@@ -1,18 +1,30 @@
 // mods/colors.js
 // Базовые цвета частей (легко менять).
 
-export const ORGAN_COLORS = {
-  antenna:  "#cbd5e1", // светло-серая
-  tentacle: "#fb7185", // розовая
-  tail:     "#22d3ee", // бирюзовая
-  worm:     "#8b3a2b", // коричнево-красный
-  limb:     "#a16207", // коричневая
-  spike:    "#fb4b4b", // кораллово-красные
-  shell:    "#64748b", // панцирь
-  eye:      "#f472b6", // глаза
+import { ANTENNA } from "../organs/antenna.js";
+import { CLAW } from "../organs/claw.js";
+import { EYE } from "../organs/eye.js";
+import { FIN } from "../organs/fin.js";
+import { LIMB } from "../organs/limb.js";
+import { MOUTH } from "../organs/mouth.js";
+import { SHELL } from "../organs/shell.js";
+import { SPIKE } from "../organs/spike.js";
+import { TAIL } from "../organs/tail.js";
+import { TEETH } from "../organs/teeth.js";
+import { TENTACLE } from "../organs/tentacle.js";
+import { WORM } from "../organs/worm.js";
 
-  teeth:    "#fbbf24",
-  claw:     "#b45309",
-  mouth:    "#ef4444",
-  fin:      "#60a5fa",
+export const ORGAN_COLORS = {
+  antenna:  ANTENNA.initialColor,
+  tentacle: TENTACLE.initialColor,
+  tail:     TAIL.initialColor,
+  worm:     WORM.initialColor,
+  limb:     LIMB.initialColor,
+  spike:    SPIKE.initialColor,
+  shell:    SHELL.initialColor,
+  eye:      EYE.initialColor,
+  teeth:    TEETH.initialColor,
+  claw:     CLAW.initialColor,
+  mouth:    MOUTH.initialColor,
+  fin:      FIN.initialColor
 };

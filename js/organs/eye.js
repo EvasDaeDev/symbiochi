@@ -1,5 +1,15 @@
 export const EYE = {
-  shapeChance: 0.5,
+  shapeOptions: ["diamond", "sphere"],
+  shapeWeights: [0.5, 0.5],
   smallBodyThreshold: 20,
-  largeRadiusChance: 0.5
+  largeRadiusChance: 0.5,
+  spawnWeight: 0.1,
+  growthChance: 0.85,
+  width: 1,
+  anim: {
+    growthSec: 0.7,
+    blinkPauseSec: [10, 17],
+    blinkDurSec: 0.3
+  },
+  initialColor: "#f472b6"
 };
