@@ -423,18 +423,18 @@ export function applyMutation(state, momentSec){
   let weights = [
     ["grow_body", 0.32 + 0.55*pf + 0.25*pw],
     ["grow_appendage", (state.modules?.length ? 0.12 + 0.03 * state.modules.length : 0)],
-    ["tail",      0.10 + 0.85*pf],
-    ["tentacle",  0.08 + 0.65*pf + 0.15*ph],
-    ["worm",      0.06 + 0.55*pf + 0.10*ph],
+    ["tail",      0.22 + 0.85*pf],
+    ["tentacle",  0.15 + 0.65*pf + 0.15*ph],
+    ["worm",      0.12 + 0.55*pf + 0.10*ph],
     ["limb",      0.10 + 0.75*pf],
-    ["antenna",   0.08 + 0.85*ph],
-    ["eye",       0.08 + 0.55*ph],
+    ["antenna",   0.12 + 0.85*ph],
+    ["eye",       0.10 + 0.55*ph],
     ["spike",     0.08 + 1.00*pn + 0.40*stressCurve],
     ["shell",     0.06 + 0.85*pw + 0.25*stress]
   ];
 
   // Снизить приоритет роста тела на 15%.
-  weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * 0.85] : [k, w]));
+  weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * 0.65] : [k, w]));
    // === PERSONAL PLAN (cheap but strong shape diversity) ===
   const plan = state.plan || {};
   const eco = plan.ecotype || "crawler";
