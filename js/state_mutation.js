@@ -429,24 +429,6 @@ export function applyMutation(state, momentSec){
     weights = weights.map(([k,w]) => (k===key ? [k, w * m] : [k,w]));
   }
 
-  // === Ранние стадии роста ===
-  // До 50 блоков: тело растёт в 2 раза активнее других.
-  if (M.bodyBlocks <= 50){
-    mul("grow_body", 2);
-  } else if (M.bodyBlocks <= 70){
-    // До 70 блоков: тело получает +50% к текущему приоритету.
-    mul("grow_body", 1.5);
-  }
-  if (M.bodyBlocks <= 70){
-    // Ранние стадии: +20% к приоритету роста тела относительно органов.
-    mul("grow_body", 1.2);
-  }
-  // С 50 блоков добавляем приоритет одному случайному отростку до 83 блоков.
-  if (M.bodyBlocks >= 50 && M.bodyBlocks <= 83){
-    const favoredAppendage = pick(rng, ["tail", "tentacle", "worm", "limb", "antenna"]);
-    mul(favoredAppendage, 1.5);
-  }
-
   // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
   if (eco === "crawler"){
     bump("limb", 0.30);
@@ -500,39 +482,6 @@ export function applyMutation(state, momentSec){
       return [k,w];
     });
   }
-
-  // Growth shaping target (carrots):
-  // - close target -> bias body growth
-  // - far target -> bias appendages
-  if (state.growthTargetMode === "body"){
-    weights = weights.map(([k,w]) => {
-      if (k === "grow_body") return [k, w + 0.55];
-      return [k,w];
-    });
-    weights = weights.map(([kind, w]) => {
-      if (kind === "grow_body") return [kind, w * k];
-      return [kind, w];
-    });
-  } else if (state.growthTargetMode === "appendage"){
-    weights = weights.map(([k,w]) => {
-      if (k === "tentacle" || k === "worm" || k === "limb" || k === "tail" || k === "antenna") return [k, w + 0.45];
-      if (k === "grow_appendage") return [k, w + 0.55];
-      if (k === "grow_body") return [k, Math.max(0.01, w * 0.65)];
-      return [k,w];
-    });
-    weights = weights.map(([kind, w]) => {
-      if (kind === "tentacle" || kind === "worm" || kind === "limb" || kind === "tail" || kind === "antenna"){
-        return [kind, w * k];
-      }
-      if (kind === "grow_appendage"){
-        return [kind, w * k];
-      }
-      return [kind, w];
-    });
-  }
-
-  // lower body-growth priority vs organs by ~15%
-  weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * 0.85] : [k, w]));
 
   // Анти-зацикливание: если уже очень много шипов (относительно тела) — режем шанс шипов
   if (M.defenseScore > 0.95 && M.spikeLen > M.shellCells){
