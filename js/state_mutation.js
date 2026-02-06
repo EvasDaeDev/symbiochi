@@ -12,7 +12,10 @@ function getGrowthBiases(state, mode="body"){
 
   let carrotTarget = null;
   if (mode === "appendage"){
-    if (state.growthTargetMode === "appendage" && Array.isArray(state.growthTarget)){
+    if (
+      (state.growthTargetMode === "appendage" || state.growthTargetMode === "mixed")
+      && Array.isArray(state.growthTarget)
+    ){
       carrotTarget = state.growthTarget;
     }
   } else if (Array.isArray(state.growthTarget)){
@@ -528,14 +531,25 @@ export function applyMutation(state, momentSec){
   }
 
   const targetPower = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
+  const preferAppendageTarget = state.growthTargetMode === "appendage" || state.growthTargetMode === "mixed";
+  if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
+    weights = weights.map(([k, w]) => {
+      if (k === "grow_appendage"){
+        return [k, w + 0.25 + 0.4 * targetPower];
+      }
+      if (k === "grow_body"){
+        const factor = preferAppendageTarget ? 0.6 : 0.85;
+        return [k, w * factor];
+      }
+      return [k, w];
+    });
+  }
   const growthCount = 1 + Math.floor(rng() * 4);
   for (let step = 0; step < growthCount; step++){
     let forcedKind = null;
-    if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
-      if (state.growthTargetMode === "appendage" && (state.modules?.length || 0) > 0){
+    if (Array.isArray(state.growthTarget) && targetPower >= 0.85){
+      if (preferAppendageTarget && (state.modules?.length || 0) > 0){
         forcedKind = "grow_appendage";
-      } else {
-        forcedKind = "grow_body";
       }
     }
     const kind = forcedKind ?? weightedPick(rng, weights);
@@ -658,7 +672,8 @@ export function applyMutation(state, momentSec){
 
     // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
     const beforeN = (state.modules ? state.modules.length : 0);
-    const { biases } = getGrowthBiases(state, "body");
+    const organBiasMode = appendageKinds.has(kind) ? "appendage" : "body";
+    const { biases } = getGrowthBiases(state, organBiasMode);
     const target = blendBiasTargets(biases);
     const added = addModule(state, kind, rng, target);
     const afterN = (state.modules ? state.modules.length : 0);
