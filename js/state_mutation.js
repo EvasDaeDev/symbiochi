@@ -75,9 +75,6 @@ export function applyShrinkDecay(state, momentSec){
     target.cells.pop();
     if (target.cells.length === 0){
       state.modules.splice(sortedModules[pickIdx].idx, 1);
-    } else {
-      const lastCell = target.cells[target.cells.length - 1];
-      target.growPos = [lastCell[0], lastCell[1]];
     }
     return true;
   }
@@ -553,28 +550,25 @@ export function applyMutation(state, momentSec){
         continue;
       }
 
-      const budType = state.modules[idx]?.type || "tail";
-      const ok = createBudFromModule(state, idx, rng, isBigForBud ? BUD.bigParentSuccessMult : 1);
-      if (ok){
-        state.bars.food = clamp01(state.bars.food - 0.20);
-        state.bars.clean = clamp01(state.bars.clean - 0.20);
-        state.bars.hp = clamp01(state.bars.hp - 0.20);
-        state.bars.mood = clamp01(state.bars.mood - 0.20);
-        pushLog(state, `Мутация: отделилась почка.`, "bud_ok", { part: budType, mi: idx });
-      } else {
-        const addN = 1 + Math.floor(rng()*2);
-        const { biases } = getGrowthBiases(state, "body");
-        const grown = growBodyConnected(state, addN, rng, null, biases);
-        pushLog(
-          state,
-          grown
-            ? `Мутация: отделение почки не удалось → тело выросло (+${addN}).`
-            : `Мутация: отделение почки не удалось и рост тела не удался.`,
-          "mut_fail",
-          { part: budType }
-        );
-      }
-      continue;
+    const budType = state.modules[idx]?.type || "tail";
+
+    // Large parents get extra placement attempts (boosts "success" chance).
+    const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
+    if (ok){
+      state.bars.food = clamp01(state.bars.food - 0.20);
+      state.bars.hp = clamp01(state.bars.hp - 0.20);
+      pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
+    } else {
+      const addN = 1 + Math.floor(rng()*2);
+      const grown = growBodyConnected(state, addN, rng);
+      pushLog(
+        state,
+        grown
+          ? `Мутация: почкование не поместилось → тело выросло (+${addN}).`
+          : `Мутация: почкование не поместилось и рост тела не удался.`,
+        "mut_fail",
+        { part: budType }
+      );
     }
 
     // 2) Рост тела

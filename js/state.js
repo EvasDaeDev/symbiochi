@@ -4,9 +4,7 @@ import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
-import { ensureGrowthPattern, normalizeGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
-import { BAR_MAX, PALETTES } from "./world.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
 
@@ -339,7 +337,19 @@ export function simulate(state, deltaSec){
   {
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
-      mutations += runMutationTick(state, state.lastMutationAt);
+      const bars = state.bars || {};
+      const minBar = Math.min(
+        bars.food ?? 0,
+        bars.clean ?? 0,
+        bars.hp ?? 0,
+        bars.mood ?? 0
+      );
+      if (minBar <= 0){
+        applyShrinkDecay(state, state.lastMutationAt);
+      } else {
+        applyMutation(state, state.lastMutationAt);
+        mutations++;
+      }
       eatBudAppendage(state);
     });
     dueSteps += normalResult.due;
@@ -348,7 +358,19 @@ export function simulate(state, deltaSec){
     if (now > normalWindowEnd){
       const slowResult = applySteps(state, now, anabiosisIntervalSec, ()=>{
         eaten += processCarrotsTick(state, state);
-        mutations += runMutationTick(state, state.lastMutationAt);
+        const bars = state.bars || {};
+        const minBar = Math.min(
+          bars.food ?? 0,
+          bars.clean ?? 0,
+          bars.hp ?? 0,
+          bars.mood ?? 0
+        );
+        if (minBar <= 0){
+          applyShrinkDecay(state, state.lastMutationAt);
+        } else {
+          applyMutation(state, state.lastMutationAt);
+          mutations++;
+        }
         eatBudAppendage(state);
       });
       dueSteps += slowResult.due;
@@ -368,13 +390,37 @@ export function simulate(state, deltaSec){
 
       applySteps(bud, budNormalEnd, intervalSec, ()=>{
         eaten += processCarrotsTick(state, bud);
-        budMutations += runMutationTick(bud, bud.lastMutationAt);
+        const bars = bud.bars || {};
+        const minBar = Math.min(
+          bars.food ?? 0,
+          bars.clean ?? 0,
+          bars.hp ?? 0,
+          bars.mood ?? 0
+        );
+        if (minBar <= 0){
+          applyShrinkDecay(bud, bud.lastMutationAt);
+        } else {
+          applyMutation(bud, bud.lastMutationAt);
+          budMutations++;
+        }
         eatParentAppendage(state, bud);
       });
       if (budUpTo > budNormalEnd){
         applySteps(bud, budUpTo, anabiosisIntervalSec, ()=>{
           eaten += processCarrotsTick(state, bud);
-          budMutations += runMutationTick(bud, bud.lastMutationAt);
+          const bars = bud.bars || {};
+          const minBar = Math.min(
+            bars.food ?? 0,
+            bars.clean ?? 0,
+            bars.hp ?? 0,
+            bars.mood ?? 0
+          );
+          if (minBar <= 0){
+            applyShrinkDecay(bud, bud.lastMutationAt);
+          } else {
+            applyMutation(bud, bud.lastMutationAt);
+            budMutations++;
+          }
           eatParentAppendage(state, bud);
         });
       }
