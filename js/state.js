@@ -811,10 +811,11 @@ function processCarrotsTick(state, org = state){
     if (closestD > maxRange) continue;
 
     const hasSeeingBetween = seeingModuleD < bodyD;
+    const hasSeeingModule = seeingModuleD < Infinity;
     let mode = null;
     let activeDist = Infinity;
     if (bodyD <= bodyRange && !hasSeeingBetween){
-      mode = "body";
+      mode = hasSeeingModule ? "body" : "mixed";
       activeDist = bodyD;
     } else if (seeingModuleD <= maxRange){
       mode = "appendage";
