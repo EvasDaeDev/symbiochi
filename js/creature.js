@@ -12,12 +12,22 @@ import { TEETH } from "./organs/teeth.js";
 import { TENTACLE } from "./organs/tentacle.js";
 import { WORM } from "./organs/worm.js";
 import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
-import { getMaxAppendageLen } from "./config.js";
+import { EVO } from "./mods/evo.js";
 
-function markAnim(org, x, y, dur=0.7){
+const BASE_GROW_DUR_SEC = 0.7;
+
+function getOrganGrowthRate(type){
+  const rate = EVO?.organGrowthRate?.[type];
+  return Number.isFinite(rate) && rate > 0 ? rate : 1;
+}
+
+function markAnim(org, x, y, type = null, dur = BASE_GROW_DUR_SEC){
   if (!org) return;
   if (!org.anim) org.anim = {};
-  org.anim[`${x},${y}`] = { t0: Date.now()/1000, dur };
+  const rate = getOrganGrowthRate(type);
+  const baseDur = Number.isFinite(dur) ? dur : BASE_GROW_DUR_SEC;
+  const scaledDur = baseDur / rate;
+  org.anim[`${x},${y}`] = { t0: Date.now()/1000, dur: scaledDur };
 }
 
 import { pushLog } from "./log.js";
@@ -607,7 +617,7 @@ export function addModule(state, type, rng, target=null){
   if (dirForGrowth && maxAppendageLen > 0 && targetLen){
     targetLen = Math.min(targetLen, maxAppendageLen);
   }
-  for (const [x,y] of cells) markAnim(state, x, y);
+  for (const [x,y] of cells) markAnim(state, x, y, type);
   // slight per-module tone variation (±10% intended for rendering)
   const pigment = {
     tone: (rng()*0.20) - 0.10,   // -0.10..+0.10
@@ -667,7 +677,7 @@ export function addModule(state, type, rng, target=null){
       const cells2 = full2.slice(0, Math.min(1, full2.length));
 
       if (cells2.length && !isTooCloseToSameType(cells2)){
-        for (const [x,y] of cells2) markAnim(state, x, y);
+        for (const [x,y] of cells2) markAnim(state, x, y, type);
         state.modules.push({
           type,
           movable,
@@ -939,7 +949,7 @@ export function growPlannedModules(state, rng, options = {}){
 
       m.cells.push([nx, ny]);
       m.growPos = step.pos;
-      markAnim(state, nx, ny);
+      markAnim(state, nx, ny, m.type);
       if (Array.isArray(grownModules) && !grownModules.includes(entry.i)){
         grownModules.push(entry.i);
       }

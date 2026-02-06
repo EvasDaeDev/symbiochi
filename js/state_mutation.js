@@ -536,6 +536,17 @@ export function applyMutation(state, momentSec){
     weights.push(["fin",   0.06 + 0.20*pw]);
   }
 
+  const organGrowthRate = EVO?.organGrowthRate || {};
+  const tailRate = Number.isFinite(organGrowthRate.tail) ? organGrowthRate.tail : 1;
+  const tentacleRate = Number.isFinite(organGrowthRate.tentacle) ? organGrowthRate.tentacle : 1;
+  if (tailRate !== 1 || tentacleRate !== 1){
+    weights = weights.map(([k, w]) => {
+      if (k === "tail") return [k, w * tailRate];
+      if (k === "tentacle") return [k, w * tentacleRate];
+      return [k, w];
+    });
+  }
+
   const targetPower = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
   const preferAppendageTarget = state.growthTargetMode === "appendage" || state.growthTargetMode === "mixed";
   if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
