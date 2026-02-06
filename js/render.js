@@ -4,6 +4,8 @@ import { organLabel } from "./mods/labels.js";
 import { PARTS } from "./mods/parts.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
+import { BODY, CORE } from "./organs/body.js";
+import { EYE } from "./organs/eye.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 import { RULES } from "./rules-data.js";
 
@@ -62,7 +64,7 @@ function hslCss(h,s,l){
   return `hsl(${hh.toFixed(1)},${clamp(s,0,100).toFixed(1)}%,${clamp(l,0,100).toFixed(1)}%)`;
 }
 function getPartBaseHex(org, part){
-  if (part === "body") return org?.partColor?.body || org?.palette?.body || "#1f2937";
+  if (part === "body") return org?.partColor?.body || org?.palette?.body || BODY.initialColor || "#1f2937";
   if (part === "eye") return org?.partColor?.eye || org?.palette?.eye || ORGAN_COLORS.eye || "#f472b6";
   return org?.partColor?.[part] || ORGAN_COLORS[part] || "#cbd5e1";
 }
@@ -474,8 +476,11 @@ function wormOffset(i, len, offsetSec, dir, perp){
 function eyeBlinkScale(orgId, baseSeed){
   const t = Date.now() / 1000;
   const seed = hash01(`${baseSeed}|eye-blink|${orgId}`);
-  const pause = 10 + 7 * seed;
-  const blinkDur = 0.3;
+  const pauseRange = Array.isArray(EYE?.anim?.blinkPauseSec) ? EYE.anim.blinkPauseSec : [10, 17];
+  const pauseMin = pauseRange[0] ?? 10;
+  const pauseMax = pauseRange[1] ?? 17;
+  const pause = pauseMin + (pauseMax - pauseMin) * seed;
+  const blinkDur = Number.isFinite(EYE?.anim?.blinkDurSec) ? EYE.anim.blinkDurSec : 0.3;
   const cycle = pause + blinkDur * 2;
   const phase = (t + seed * 11.7) % cycle;
   if (phase >= blinkDur * 2) return 1;
@@ -1086,7 +1091,9 @@ function limbPhalanxIndex(lengths, idx){
 
   // core color by condition
   const st = barStatus(org);
-  const coreCol = (st.cls === "bad") ? "#fb7185" : (st.txt === "норм" ? "#fbbf24" : "#34d399");
+  const coreCol = (st.cls === "bad")
+    ? (CORE.colors?.bad || "#fb7185")
+    : (st.txt === "норм" ? (CORE.colors?.ok || "#fbbf24") : (CORE.colors?.good || "#34d399"));
 
   ctx.save();
   ctx.fillStyle = coreCol;
@@ -1410,7 +1417,7 @@ export function renderLegend(org, legendEl){
   const filtered = items.filter((it) => present.has(it.part));
 
   legendEl.innerHTML = filtered.map(it => {
-    const sw = (it.part === "core") ? "#34d399" : getPartColor(org, it.part, 0);
+    const sw = (it.part === "core") ? (CORE.colors?.good || "#34d399") : getPartColor(org, it.part, 0);
     const cls = (it.part === "core") ? "legendSwatch" : "legendSwatch swatch";
     const data = (it.part === "core")
       ? ""

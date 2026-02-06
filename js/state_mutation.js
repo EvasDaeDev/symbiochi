@@ -6,6 +6,19 @@ import { EVO } from "./mods/evo.js";
 import { pushLog } from "./log.js";
 import { growBodyConnected, addModule, makeSmallConnectedBody, growPlannedModules } from "./creature.js";
 import { extractGenome, decodeGenome, mergeGenomes, instantiateParentFromGenome } from "./mods/merge.js";
+import { BODY } from "./organs/body.js";
+import { ANTENNA } from "./organs/antenna.js";
+import { CLAW } from "./organs/claw.js";
+import { EYE } from "./organs/eye.js";
+import { FIN } from "./organs/fin.js";
+import { LIMB } from "./organs/limb.js";
+import { MOUTH } from "./organs/mouth.js";
+import { SHELL } from "./organs/shell.js";
+import { SPIKE } from "./organs/spike.js";
+import { TAIL } from "./organs/tail.js";
+import { TEETH } from "./organs/teeth.js";
+import { TENTACLE } from "./organs/tentacle.js";
+import { WORM } from "./organs/worm.js";
 
 function getGrowthBiases(state, mode="body"){
   const biases = [];
@@ -419,22 +432,27 @@ export function applyMutation(state, momentSec){
   const isGiant = M.bodyBlocks >= 350;
   const isBigForBud = M.bodyBlocks >= 230;
 
+  const bodyGrowWeight = Number.isFinite(BODY.growWeight) ? BODY.growWeight : 0.32;
+  const appendageGrowBase = Number.isFinite(BODY.appendageGrowWeight) ? BODY.appendageGrowWeight : 0.12;
+  const appendageGrowPerModule = Number.isFinite(BODY.appendageGrowPerModule) ? BODY.appendageGrowPerModule : 0.03;
+  const growBodyPenalty = Number.isFinite(BODY.growBodyPenaltyMult) ? BODY.growBodyPenaltyMult : 0.65;
+
   // Базовые веса (как раньше)
   let weights = [
-    ["grow_body", 0.32 + 0.55*pf + 0.25*pw],
-    ["grow_appendage", (state.modules?.length ? 0.12 + 0.03 * state.modules.length : 0)],
-    ["tail",      0.22 + 0.85*pf],
-    ["tentacle",  0.15 + 0.65*pf + 0.15*ph],
-    ["worm",      0.12 + 0.55*pf + 0.10*ph],
-    ["limb",      0.10 + 0.75*pf],
-    ["antenna",   0.12 + 0.85*ph],
-    ["eye",       0.10 + 0.55*ph],
-    ["spike",     0.08 + 1.00*pn + 0.40*stressCurve],
-    ["shell",     0.06 + 0.85*pw + 0.25*stress]
+    ["grow_body", bodyGrowWeight + 0.55*pf + 0.25*pw],
+    ["grow_appendage", (state.modules?.length ? appendageGrowBase + appendageGrowPerModule * state.modules.length : 0)],
+    ["tail",      (Number.isFinite(TAIL.spawnWeight) ? TAIL.spawnWeight : 0.22) + 0.85*pf],
+    ["tentacle",  (Number.isFinite(TENTACLE.spawnWeight) ? TENTACLE.spawnWeight : 0.15) + 0.65*pf + 0.15*ph],
+    ["worm",      (Number.isFinite(WORM.spawnWeight) ? WORM.spawnWeight : 0.12) + 0.55*pf + 0.10*ph],
+    ["limb",      (Number.isFinite(LIMB.spawnWeight) ? LIMB.spawnWeight : 0.10) + 0.75*pf],
+    ["antenna",   (Number.isFinite(ANTENNA.spawnWeight) ? ANTENNA.spawnWeight : 0.12) + 0.85*ph],
+    ["eye",       (Number.isFinite(EYE.spawnWeight) ? EYE.spawnWeight : 0.10) + 0.55*ph],
+    ["spike",     (Number.isFinite(SPIKE.spawnWeight) ? SPIKE.spawnWeight : 0.08) + 1.00*pn + 0.40*stressCurve],
+    ["shell",     (Number.isFinite(SHELL.spawnWeight) ? SHELL.spawnWeight : 0.06) + 0.85*pw + 0.25*stress]
   ];
 
   // Снизить приоритет роста тела на 15%.
-  weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * 0.65] : [k, w]));
+  weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * growBodyPenalty] : [k, w]));
    // === PERSONAL PLAN (cheap but strong shape diversity) ===
   const plan = state.plan || {};
   const eco = plan.ecotype || "crawler";
@@ -530,10 +548,10 @@ export function applyMutation(state, momentSec){
       if (k === "tentacle") return [k, w * 0.45];
       return [k, w];
     });
-    weights.push(["teeth", 0.10 + 0.20*pf]);
-    weights.push(["claw",  0.08 + 0.20*pf + 0.10*M.mobilityScore]);
-    weights.push(["mouth", 0.06 + 0.15*pf + 0.10*ph]);
-    weights.push(["fin",   0.06 + 0.20*pw]);
+    weights.push(["teeth", (Number.isFinite(TEETH.spawnWeight) ? TEETH.spawnWeight : 0.10) + 0.20*pf]);
+    weights.push(["claw",  (Number.isFinite(CLAW.spawnWeight) ? CLAW.spawnWeight : 0.08) + 0.20*pf + 0.10*M.mobilityScore]);
+    weights.push(["mouth", (Number.isFinite(MOUTH.spawnWeight) ? MOUTH.spawnWeight : 0.06) + 0.15*pf + 0.10*ph]);
+    weights.push(["fin",   (Number.isFinite(FIN.spawnWeight) ? FIN.spawnWeight : 0.06) + 0.20*pw]);
   }
 
   const organGrowthRate = EVO?.organGrowthRate || {};
