@@ -232,7 +232,8 @@ export function simulate(state, deltaSec){
     org.bars.hp = clamp(org.bars.hp - hpLoss, 0, BAR_MAX);
 
     const stress = clamp01((hungerFactor + dirtFactor + sadness + clamp01(1-org.bars.hp)) / 4);
-    org.care.neglect += deltaSec * (0.00012 * (0.5 + stress));
+    const neglectStress = stress > 0.25 ? stress : 0;
+    org.care.neglect += deltaSec * (0.00012 * neglectStress);
   }
 
   const intervalSec = Math.max(1, Math.floor(Number(state.evoIntervalMin || 12) * 60));
