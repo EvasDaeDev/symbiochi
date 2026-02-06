@@ -1,4 +1,5 @@
 import { clamp, clamp01, key, nowSec, mulberry32, hash32, pick } from "./util.js";
+import { getMaxAppendageLen } from "./config.js";
 import { BAR_MAX } from "./world.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
@@ -75,7 +76,7 @@ export function migrateOrNew(){
 
     function enforceAppendageRules(){
       const bodyCells = org.body?.cells || [];
-      const maxAppendageLen = bodyCells.length * 3;
+      const maxAppendageLen = getMaxAppendageLen(bodyCells.length);
       const typeLimits = {
         spike: 10,
         antenna: 27,
