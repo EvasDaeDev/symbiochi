@@ -149,7 +149,9 @@ export function newGame(){
   const rng = mulberry32(seed);
   const pal = pick(rng, PALETTES);
 
-  const body = makeSmallConnectedBody(seed, 12);
+  const baseBodySize = 12;
+  const targetBodySize = baseBodySize * (2 + Math.floor(rng() * 3));
+  const body = makeSmallConnectedBody(seed, targetBodySize);
   const face = findFaceAnchor(body, seed);
   const eyeShape = rng() < 0.5 ? "diamond" : "sphere";
 
