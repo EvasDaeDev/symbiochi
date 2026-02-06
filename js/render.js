@@ -1258,14 +1258,15 @@ function drawGridOverlay(ctx, view, cam){
 export function renderGrid(state, canvas, gridEl, view){
   syncCanvas(canvas, gridEl, view);
 
-  if (!state.cam){
+  // Camera is view-only (not saved). If missing, init from parent core.
+  if (!view.cam){
     const c = state.body?.core || [0,0];
-    state.cam = { ox: c[0], oy: c[1] };
+    view.cam = { ox: c[0], oy: c[1] };
   }
 
   // Clamp camera so colony never fully disappears
   const bounds = getColonyBounds(state);
-  clampCamera(state.cam, bounds, view.gridW, view.gridH, 2);
+  clampCamera(view.cam, bounds, view.gridW, view.gridH, 2);
 
   const ctx = canvas.getContext("2d");
 
@@ -1280,7 +1281,7 @@ export function renderGrid(state, canvas, gridEl, view){
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
 
-  drawGridOverlay(ctx, view, state.cam);
+  drawGridOverlay(ctx, view, view.cam);
 
   // Carrots (rect blocks, orange)
 if (Array.isArray(state.carrots)){
@@ -1294,7 +1295,7 @@ if (Array.isArray(state.carrots)){
     for (const [dx, dy] of offsets){
       const wx = (car.x|0) + dx;
       const wy = (car.y|0) + dy;
-      const p = worldToScreenPx(state.cam, wx, wy, view);
+      const p = worldToScreenPx(view.cam, wx, wy, view);
 
       let m = 0;
       if (offsetSet.has(`${dx},${dy - 1}`)) m |= 1; // N
@@ -1322,7 +1323,7 @@ if (Array.isArray(state.carrots)){
   const boundaryRects = [];
 
   // parent
-  boundaryRects.push(...renderOrg(ctx, state.cam, state, view, 0, baseSeed, selectedParent));
+  boundaryRects.push(...renderOrg(ctx, view.cam, state, view, 0, baseSeed, selectedParent));
 
   // buds
   if (Array.isArray(state.buds)){
@@ -1330,7 +1331,7 @@ if (Array.isArray(state.carrots)){
       const bud = state.buds[i];
       if (!bud) continue;
       const isSel = (selectedBudIndex === i);
-      boundaryRects.push(...renderOrg(ctx, state.cam, bud, view, i+1, baseSeed, isSel));
+      boundaryRects.push(...renderOrg(ctx, view.cam, bud, view, i+1, baseSeed, isSel));
     }
   }
 
@@ -1359,7 +1360,7 @@ if (Array.isArray(state.carrots)){
       orgId = 0;
     }
 
-    const rects = collectFlashRects(state.cam, org, view, orgId, baseSeed, fl);
+    const rects = collectFlashRects(view.cam, org, view, orgId, baseSeed, fl);
 
     // чуть фильтруем дубликаты
     const uniq2 = new Map();
@@ -1486,6 +1487,31 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   if (els.carrotHudInput && document.activeElement !== els.carrotHudInput){
     const v = state.inv?.carrots ?? 0;
     els.carrotHudInput.value = String(Math.max(0, v|0));
+  }
+
+  // Third row: carrot feedback (target + mode + strength) and field count.
+  if (els.hudMeta2){
+    const fieldCount = Array.isArray(state.carrots) ? state.carrots.length : 0;
+    const inv = state.inv?.carrots ?? 0;
+
+    const t = Array.isArray(target.growthTarget) ? target.growthTarget : null;
+    const mode = target.growthTargetMode;
+    const power = Number.isFinite(target.growthTargetPower) ? target.growthTargetPower : 0;
+
+    const modeTxt =
+      mode === "appendage" ? "отростки" :
+      mode === "body" ? "тело" :
+      mode === "mixed" ? "смеш" :
+      (fieldCount > 0 ? "ожид" : "—");
+
+    const tgtTxt = t ? `(${t[0]},${t[1]})` : (fieldCount > 0 ? "(выбор на тике)" : "—");
+    const pTxt = t ? `${Math.round(power*100)}%` : "";
+
+    els.hudMeta2.innerHTML = `
+      <span class="pill">морковки: поле ${fieldCount}, инв ${Math.max(0, inv|0)}</span>
+      <span class="pill">цель: ${tgtTxt}</span>
+      <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
+    `;
   }
 
   // footer text is still set in main.js usually; keep compatible if present:

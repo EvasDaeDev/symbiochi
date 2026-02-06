@@ -1,4 +1,5 @@
 import { key, parseKey, mulberry32, hash32, pick } from "./util.js";
+import { getMaxAppendageLen } from "./config.js";
 import { ANTENNA } from "./organs/antenna.js";
 import { CLAW } from "./organs/claw.js";
 import { EYE } from "./organs/eye.js";
@@ -191,9 +192,9 @@ export function getTotalBlocks(state){
 export function getStageName(state){
   const blocks = getTotalBlocks(state);
   if (blocks <= 12) return "Клетка";
-  if (blocks <= 25) return "Существо";
-  if (blocks <= 45) return "Организм";
-  if (blocks <= 70) return "Вид";
+  if (blocks <= 400) return "Существо";
+  if (blocks <= 800) return "Организм";
+  if (blocks <= 1200) return "Вид";
   return "Форма жизни";
 }
 
@@ -245,7 +246,7 @@ export function newGame(){
     growthQueueIndex: 0,
     active: null,
     log: [],
-    cam: { ox: body.core[0], oy: body.core[1] },
+    // NOTE: camera lives in view/UI and is not part of the saved state.
   };
 
   pushLog(state, `Вылупился питомец "${state.name}".`, "system");

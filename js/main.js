@@ -2,6 +2,7 @@
 import { fmtAgeSeconds, nowSec } from "./util.js";
 import { CARROT } from "./mods/carrots.js";
 import { migrateOrNew, saveGame, simulate } from "./state.js";
+import { pushLog } from "./log.js";
 
 import {
   syncCanvas,
@@ -73,6 +74,7 @@ const els = {
   heal: document.getElementById("heal"),
   // settings modal extra fields
   seedInput: document.getElementById("seedInput"),
+  planInfo: document.getElementById("planInfo"),
   lenPrio: document.getElementById("lenPrio"),
   carrotsInput: document.getElementById("carrotsInput"),
   newCreature: document.getElementById("newCreature"),
@@ -94,6 +96,9 @@ const toast = makeToast();
 
 const view = {
   state: null,
+
+  // Camera (world coords in blocks). View-only: not stored in save.
+  cam: { ox: 0, oy: 0 },
 
   // dynamic camera size in blocks
   gridW: 60,
@@ -291,8 +296,8 @@ function screenToWorld(e){
   const Vx = (view.gridW - 1) / 2;
   const Vy = (view.gridH - 1) / 2;
 
-  const wx = Math.floor((vx - Vx) + (view.state.cam?.ox || 0));
-  const wy = Math.floor((vy - Vy) + (view.state.cam?.oy || 0));
+  const wx = Math.floor((vx - Vx) + (view.cam?.ox || 0));
+  const wy = Math.floor((vy - Vy) + (view.cam?.oy || 0));
   return [wx, wy];
 }
 
@@ -328,6 +333,12 @@ function attachPickOrganism(){
       s.carrots.push({ x: wx, y: wy, w: CARROT.w, h: CARROT.h, t: nowSec() });
       s.carrotTick.used++;
       inv.carrots--;
+
+      pushLog(s, `Морковка: брошена в (${wx},${wy}). Осталось: ${Math.max(0, inv.carrots|0)}.`, "carrot");
+
+      // Log + immediate user feedback
+      pushLog(s, `Морковка: брошена в (${wx},${wy}).`, "carrot", { part: "carrot" });
+      toast(`Морковка: (${wx},${wy}).`);
 
       saveGame(s);
       rerenderAll(0);
@@ -381,6 +392,12 @@ function attachPickOrganism(){
 async function startGame(){
   view.state = migrateOrNew();
   view.lastActive = view.state?.active ?? null;
+
+  // Init camera to parent core on first start (view-only, not persisted).
+  const c = view.state?.body?.core || [0, 0];
+  if (!view.cam) view.cam = { ox: c[0], oy: c[1] };
+  if (!Number.isFinite(view.cam.ox)) view.cam.ox = c[0];
+  if (!Number.isFinite(view.cam.oy)) view.cam.oy = c[1];
 
   els.startOverlay.style.display = "none";
 

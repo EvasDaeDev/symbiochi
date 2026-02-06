@@ -696,3 +696,33 @@ html, body { overscroll-behavior: none; }
 .modalBtns #symbiosisBtn{
   color: var(--muted);
 }
+.seedRow{
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.seedCol{
+  flex: 0 0 140px; /* ширина колонки с seed */
+}
+
+.planCol{
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+.planTitle{
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 4px;
+}
+
+.planInfo{
+  font-size: 12px;
+  line-height: 1.25;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  white-space: pre-line; /* чтобы \n работали */
+}

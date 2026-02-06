@@ -12,7 +12,7 @@ export const STORAGE_KEY = "symbiochi_v6_save";
 const APPENDAGE_TYPE_LIMITS = {
   spike: 10,
   antenna: 27,
-  claw: 12
+  claw: 9
 };
 
 export function loadSave(){
@@ -40,12 +40,8 @@ export function migrateOrNew(){
 
   function normalizeOrg(org, fallbackSeed){
     if (!org) return;
-    const base = (fallbackSeed ?? 1) | 0;
-
-// если org.seed отсутствует — генерируем устойчивый, но отличающийся от других
-const seed = (org.seed ?? hash32(base, org.id ?? 0)) | 0;
-
-org.seed = seed;
+    const seed = (org.seed ?? fallbackSeed ?? 1) | 0;
+    org.seed = seed;
 
     // per-organism "development plan" (for shape diversity)
     if (!org.plan || typeof org.plan !== "object"){
@@ -54,7 +50,7 @@ org.seed = seed;
         axisDir: pick(prng, [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]),
         symmetry: prng(),
         wiggle: prng(),
-        ecotype: pick(rng, ["crawler","swimmer","sentinel","tank","sprinter","lurker","seer","fortress","bloomer"])
+        ecotype: pick(prng, ["crawler","swimmer","sentinel","tank"])
       };
     }
 
@@ -140,9 +136,7 @@ org.seed = seed;
       const size = Math.max(1, (org.face.eyeSize ?? 1) | 0);
       org.face.eyeRadius = Math.max(0, size - 1);
     }
-    // Camera is a pure view concern and should NOT be persisted in save.
-    // (Old saves may still contain org.cam; we remove it during migration.)
-    if (org.cam !== undefined) delete org.cam;
+    org.cam = org.cam || { ox: org.body.core[0], oy: org.body.core[1] };
 
     if (org.active === undefined) org.active = null;
     if (!Number.isFinite(org.hueShiftDeg)) org.hueShiftDeg = 0;
@@ -159,10 +153,7 @@ org.seed = seed;
   normalizeOrg(state, state.seed || 1);
   clampAppendageLengths(state);
   if (Array.isArray(state.buds)){
-    for (const bud of state.buds){
-      if (bud && bud.cam !== undefined) delete bud.cam;
-      clampAppendageLengths(bud);
-    }
+    for (const bud of state.buds) clampAppendageLengths(bud);
   }
 
   state.log = state.log || [];
@@ -596,6 +587,7 @@ function promoteBudToParent(state, bud){
     "body",
     "modules",
     "face",
+    "cam",
     "active",
     "hueShiftDeg",
     "partHue",

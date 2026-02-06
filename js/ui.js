@@ -12,6 +12,7 @@ function getActiveOrg(state){
   if (Number.isFinite(a) && a >= 0 && Array.isArray(state.buds) && a < state.buds.length){
     return state.buds[a];
   }
+  // parent organism lives on state itself in your project
   return state;
 }
 
@@ -64,17 +65,40 @@ export function renderLog(state, els){
 }
 
 export function attachSettings(view, els, toast){
-  function openSettings(){
-    if (!view.state) return;
-    els.evoInput.value = String(view.state.evoIntervalMin || 12);
-    if (els.seedInput) els.seedInput.value = String(view.state.seed ?? 0);
-    if (els.lenPrio){
-      const lp = Math.round(100 * (view.state.settings?.lengthPriority ?? 0.65));
-      els.lenPrio.value = String(lp);
+ function getActiveOrg(state){
+    // Selection model:
+    // - state.active === -1 OR null/undefined -> parent
+    // - 0..N-1 -> bud index
+    const a = state?.active;
+    if (Number.isFinite(a) && a >= 0 && Array.isArray(state.buds) && a < state.buds.length){
+      return state.buds[a];
     }
-    if (els.carrotsInput) els.carrotsInput.value = String(view.state.inv?.carrots ?? 0);
+    return state;
+  }
+
+  function fmtPlan(plan){
+    if (!plan || typeof plan !== "object") return "—";
+    const eco = plan.ecotype ?? "—";
+    const ax  = Array.isArray(plan.axisDir) ? plan.axisDir.join(",") : "—";
+    const sym = Number.isFinite(plan.symmetry) ? Math.round(plan.symmetry * 100) + "%" : "—";
+    const wig = Number.isFinite(plan.wiggle) ? Math.round(plan.wiggle * 100) + "%" : "—";
+    return `eco: ${eco}\naxis: ${ax}\nsym: ${sym}\nwig: ${wig}`;
+  }
+
+  function openSettings(state){
+    if (!state) return;
+
+    els.evoInput.value = String(state.evoIntervalMin || 12);
+    if (els.seedInput) els.seedInput.value = String(state.seed ?? 0);
+
+    if (els.planInfo){
+      const org = getActiveOrg(state);
+      els.planInfo.textContent = fmtPlan(org?.plan);
+    }
+
     els.settingsOverlay.style.display = "grid";
   }
+
   function closeSettings(){
     els.settingsOverlay.style.display = "none";
   }
@@ -121,7 +145,7 @@ export function attachSettings(view, els, toast){
     location.reload();
   }
 
-  els.settingsBtn.addEventListener("click", openSettings);
+ if (els.settingsBtn) els.settingsBtn.addEventListener("click", () => openSettings(view.state));
   els.closeSettings.addEventListener("click", closeSettings);
   els.saveSettings.addEventListener("click", saveSettings);
   if (els.newCreature) els.newCreature.addEventListener("click", newCreature);
@@ -403,8 +427,10 @@ export function attachDragPan(view, els){
     drag.pid = e.pointerId;
     drag.sx = e.clientX;
     drag.sy = e.clientY;
-    drag.ox = view.state.cam.ox;
-    drag.oy = view.state.cam.oy;
+    // Camera lives in view, not in saved state.
+    if (!view.cam) view.cam = { ox: 0, oy: 0 };
+    drag.ox = view.cam.ox;
+    drag.oy = view.cam.oy;
   };
 
   const onMove = (e)=>{
@@ -424,8 +450,8 @@ export function attachDragPan(view, els){
     }
 
     const [dcx, dcy] = getCellDelta(dx, dy);
-    view.state.cam.ox = drag.ox - dcx * PAN_SENS;
-    view.state.cam.oy = drag.oy - dcy * PAN_SENS;
+    view.cam.ox = drag.ox - dcx * PAN_SENS;
+    view.cam.oy = drag.oy - dcy * PAN_SENS;
   };
 
   const onUp = (e)=>{

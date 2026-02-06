@@ -68,10 +68,17 @@
       <div id="settingsOverlay">
         <div class="modal">
           <h2>Настройки</h2>
-          <div class="field">
-            <div>Seed</div>
-            <input id="seedInput" type="number" step="1" />
-          </div>
+          <div class="seedRow">
+  <div class="seedCol">
+    <label for="seedInput">Seed</label>
+    <input id="seedInput" type="number">
+  </div>
+
+  <div class="planCol">
+    <div class="planTitle">Plan</div>
+    <div id="planInfo" class="planInfo">—</div>
+  </div>
+</div>
           <div class="field">
             <div>Интервал мутации (минуты мирового времени)</div>
             <input id="evoInput" type="number" min="0.1" step="0.1" />

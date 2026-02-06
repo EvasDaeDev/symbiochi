@@ -217,7 +217,7 @@ export function instantiateParentFromGenome(state, genomeOut){
   };
   state.modules = [];
   state.anim = {};
-  state.cam = { ox: body.core[0], oy: body.core[1] };
+  // Camera belongs to view/UI, never to the saved state.
 
   const moduleSpecs = (genomeOut.modules || []).map(cleanModuleSpec).filter(Boolean);
   const targetLens = [];

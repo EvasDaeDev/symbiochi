@@ -314,11 +314,10 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
       eyeShape: rng() < 0.5 ? "diamond" : "sphere",
       eyeRadius: 0
     },
-    cam: { ox: budCore[0], oy: budCore[1] },
+    // Camera is view-only and should not be stored in organisms.
   };
 
-  assignGrowthPattern(bud, rng);
-  state.buds.push(bud);
+    state.buds.push(bud);
   state.modules.splice(modIdx, 1);
   return true;
 }
@@ -429,8 +428,8 @@ export function applyMutation(state, momentSec){
   const k = 0.35 + 0.65 * power;
 
   // Late game thresholds
-  const isGiant = M.bodyBlocks >= 350;
-  const isBigForBud = M.bodyBlocks >= 230;
+  const isGiant = M.bodyBlocks >= 800;
+  const isBigForBud = M.bodyBlocks >= 500;
 
   const bodyGrowWeight = Number.isFinite(BODY.growWeight) ? BODY.growWeight : 0.32;
   const appendageGrowBase = Number.isFinite(BODY.appendageGrowWeight) ? BODY.appendageGrowWeight : 0.12;
@@ -441,7 +440,7 @@ export function applyMutation(state, momentSec){
   let weights = [
     ["grow_body", bodyGrowWeight + 0.55*pf + 0.25*pw],
     ["grow_appendage", (state.modules?.length ? appendageGrowBase + appendageGrowPerModule * state.modules.length : 0)],
-    ["tail",      (Number.isFinite(TAIL.spawnWeight) ? TAIL.spawnWeight : 0.22) + 0.85*pf],
+    ["tail",      (Number.isFinite(TAIL.spawnWeight) ? TAIL.spawnWeight : 0.18) + 0.65*pf],
     ["tentacle",  (Number.isFinite(TENTACLE.spawnWeight) ? TENTACLE.spawnWeight : 0.15) + 0.65*pf + 0.15*ph],
     ["worm",      (Number.isFinite(WORM.spawnWeight) ? WORM.spawnWeight : 0.12) + 0.55*pf + 0.10*ph],
     ["limb",      (Number.isFinite(LIMB.spawnWeight) ? LIMB.spawnWeight : 0.10) + 0.75*pf],
@@ -467,7 +466,7 @@ export function applyMutation(state, momentSec){
   // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
   if (eco === "crawler"){
     bump("limb", 0.30);
-    mul("tail", 0.90);
+    mul("tail", 1.00);
     mul("antenna", 0.95);
   } else if (eco === "swimmer"){
     bump("tail", 0.30);
@@ -484,15 +483,37 @@ export function applyMutation(state, momentSec){
     bump("grow_body", 0.12);
     mul("limb", 0.85);
     mul("tail", 0.85);
+	} else if (eco === "lurker"){
+  bump("tentacle", 0.22);
+  bump("worm", 0.18);
+  bump("eye", 0.10);
+  mul("limb", 0.88);
+  bump("grow_appendage", 0.14);
+  } else if (eco === "seer"){
+  bump("antenna", 0.30);
+  bump("eye", 0.20);
+  mul("spike", 0.80);
+  mul("grow_body", 0.94);
+  } else if (eco === "fortress"){
+  bump("shell", 0.28);
+  bump("spike", 0.20);
+  mul("tail", 0.85);
+  mul("limb", 0.85);
+  bump("grow_body", 0.16);
+  } else if (eco === "bloomer"){
+  bump("grow_body", 0.22);
+  bump("grow_appendage", 0.22);
+  bump("tail", 0.10);
+  mul("shell", 0.90);
   }
 
   // === ЭКОЛОГИЯ (морфо-обратная связь) ===
   // Если тело крупнее, а "мобильность" слабая -> подталкиваем к лапам/хвостам
-  const bigBody = M.bodyBlocks >= 10;
+  const bigBody = M.bodyBlocks >= 400;
   if (bigBody && M.mobilityScore < 0.35){
     weights = weights.map(([k,w]) => {
-      if (k==="limb") return [k, w + 0.55];
-      if (k==="tail") return [k, w + 0.35];
+      if (k==="limb") return [k, w + 0.35];
+      if (k==="tail") return [k, w + 0.45];
       if (k==="tentacle") return [k, w + 0.25];
       if (k==="worm") return [k, w + 0.20];
       if (k==="spike") return [k, Math.max(0.02, w - 0.20)];
@@ -501,7 +522,7 @@ export function applyMutation(state, momentSec){
   }
 
   // Если стресс высокий и защита слабая -> шипы/панцирь
-  if (stress > 0.45 && M.defenseScore < 0.25){
+  if (stress > 0.75 && M.defenseScore < 0.25){
     weights = weights.map(([k,w]) => {
       if (k==="spike") return [k, w + 0.75];
       if (k==="shell") return [k, w + 0.45];
@@ -510,7 +531,7 @@ export function applyMutation(state, momentSec){
   }
 
   // Если "сенсоры" слабые и игрок часто лечит -> антенны/глаза
-  if (ph > 0.35 && M.sensoryScore < 0.25){
+  if (ph > 0.95 && M.sensoryScore < 0.25){
     weights = weights.map(([k,w]) => {
       if (k==="antenna") return [k, w + 0.55];
       if (k==="eye") return [k, w + 0.25];
@@ -635,7 +656,7 @@ export function applyMutation(state, momentSec){
 
     // 2) Рост тела
     if (kind === "grow_body" || shouldThrottleAppendage){
-      // Growth per mutation increased by ~1/3.
+      // Body growth per mutation (scaled by EVO.bodyGrowMult).
       const base = 1 + Math.floor(rng() * 3); // 1..3
       const addN = Math.max(1, Math.round(base * (EVO.bodyGrowMult || 1)));
       const { biases } = getGrowthBiases(state, "body");
