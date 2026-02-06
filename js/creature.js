@@ -367,7 +367,7 @@ export function addModule(state, type, rng, target=null){
         for (const [nx, ny] of candidateCells){
           const dx = Math.abs(cx - nx);
           const dy = Math.abs(cy - ny);
-          if (Math.max(dx, dy) <= 2) return true;
+          if (Math.max(dx, dy) <= 1) return true;
         }
       }
     }
