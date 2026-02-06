@@ -400,10 +400,12 @@ export function applyMutation(state, momentSec){
   const ph = h / total;
   const pn = n / total;
 
-  // Стресс (на основе текущих баров)
-  const stress = clamp01(
-    (state.bars.food + state.bars.clean + state.bars.hp) / 3
-  );
+  // Стресс (на основе текущих баров, как в state.js)
+  const hungerFactor = clamp01(1 - state.bars.food);
+  const dirtFactor = clamp01(1 - state.bars.clean);
+  const sadness = clamp01(1 - state.bars.mood);
+  const hpLoss = clamp01(1 - state.bars.hp);
+  const stress = clamp01((hungerFactor + dirtFactor + sadness + hpLoss) / 4);
 
   const M = computeMorphology(state);
   const power = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
