@@ -1,4 +1,5 @@
 import { clamp, clamp01, key, nowSec, mulberry32, hash32, pick } from "./util.js";
+import { BAR_MAX } from "./world.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
