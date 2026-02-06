@@ -550,25 +550,27 @@ export function applyMutation(state, momentSec){
         continue;
       }
 
-    const budType = state.modules[idx]?.type || "tail";
+      const budType = state.modules[idx]?.type || "tail";
 
-    // Large parents get extra placement attempts (boosts "success" chance).
-    const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
-    if (ok){
-      state.bars.food = clamp01(state.bars.food - 0.20);
-      state.bars.hp = clamp01(state.bars.hp - 0.20);
-      pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
-    } else {
-      const addN = 1 + Math.floor(rng()*2);
-      const grown = growBodyConnected(state, addN, rng);
-      pushLog(
-        state,
-        grown
-          ? `Мутация: почкование не поместилось → тело выросло (+${addN}).`
-          : `Мутация: почкование не поместилось и рост тела не удался.`,
-        "mut_fail",
-        { part: budType }
-      );
+      // Large parents get extra placement attempts (boosts "success" chance).
+      const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
+      if (ok){
+        state.bars.food = clamp01(state.bars.food - 0.20);
+        state.bars.hp = clamp01(state.bars.hp - 0.20);
+        pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
+      } else {
+        const addN = 1 + Math.floor(rng()*2);
+        const grown = growBodyConnected(state, addN, rng);
+        pushLog(
+          state,
+          grown
+            ? `Мутация: почкование не поместилось → тело выросло (+${addN}).`
+            : `Мутация: почкование не поместилось и рост тела не удался.`,
+          "mut_fail",
+          { part: budType }
+        );
+      }
+      continue;
     }
 
     // 2) Рост тела
