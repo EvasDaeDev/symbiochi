@@ -418,6 +418,9 @@ export function applyMutation(state, momentSec){
     ["spike",     0.08 + 1.00*pn + 0.40*stress],
     ["shell",     0.06 + 0.85*pw + 0.25*stress]
   ];
+
+  // Снизить приоритет роста тела на 15%.
+  weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * 0.85] : [k, w]));
    // === PERSONAL PLAN (cheap but strong shape diversity) ===
   const plan = state.plan || {};
   const eco = plan.ecotype || "crawler";
