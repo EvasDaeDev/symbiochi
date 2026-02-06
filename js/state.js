@@ -8,6 +8,11 @@ import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
+const APPENDAGE_TYPE_LIMITS = {
+  spike: 10,
+  antenna: 27,
+  claw: 9
+};
 
 export function loadSave(){
   try{
@@ -27,6 +32,7 @@ export function migrateOrNew(){
   let state = loadSave();
   if (!state){
     state = newGame();
+    clampAppendageLengths(state);
     saveGame(state);
     return state;
   }
@@ -76,11 +82,7 @@ export function migrateOrNew(){
     function enforceAppendageRules(){
       const bodyCells = org.body?.cells || [];
       const maxAppendageLen = bodyCells.length * 3;
-      const typeLimits = {
-        spike: 10,
-        antenna: 27,
-        claw: 9
-      };
+      const typeLimits = APPENDAGE_TYPE_LIMITS;
       const kept = [];
       const typeBuckets = new Map();
 
@@ -148,6 +150,10 @@ export function migrateOrNew(){
   }
 
   normalizeOrg(state, state.seed || 1);
+  clampAppendageLengths(state);
+  if (Array.isArray(state.buds)){
+    for (const bud of state.buds) clampAppendageLengths(bud);
+  }
 
   state.log = state.log || [];
   state.lastMutationAt = state.lastMutationAt || (state.createdAt || nowSec());
@@ -183,6 +189,25 @@ export function migrateOrNew(){
 
   saveGame(state);
   return state;
+}
+
+function clampAppendageLengths(org){
+  if (!org || !Array.isArray(org.modules)) return;
+  const bodyCells = org.body?.cells || [];
+  const maxAppendageLen = bodyCells.length * 3;
+
+  for (const m of org.modules){
+    if (!m || !Array.isArray(m.cells) || m.cells.length === 0) continue;
+    const type = m.type || "organ";
+    const typeLimit = APPENDAGE_TYPE_LIMITS[type] ?? Infinity;
+    const limit = maxAppendageLen > 0 ? Math.min(typeLimit, maxAppendageLen) : typeLimit;
+    if (Number.isFinite(limit) && limit > 0 && m.cells.length > limit){
+      m.cells = m.cells.slice(0, limit);
+    }
+    if (Number.isFinite(m.growTo)){
+      m.growTo = Math.min(m.growTo, m.cells.length);
+    }
+  }
 }
 
 function applyNonLinearDecay(value, ratePerSec, deltaSec){
