@@ -409,6 +409,7 @@ export function applyMutation(state, momentSec){
   const sadness = clamp01(1 - state.bars.mood);
   const hpLoss = clamp01(1 - state.bars.hp);
   const stress = clamp01((hungerFactor + dirtFactor + sadness + hpLoss) / 4);
+  const stressCurve = stress * stress;
 
   const M = computeMorphology(state);
   const power = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
@@ -428,7 +429,7 @@ export function applyMutation(state, momentSec){
     ["limb",      0.10 + 0.75*pf],
     ["antenna",   0.08 + 0.85*ph],
     ["eye",       0.08 + 0.55*ph],
-    ["spike",     0.08 + 1.00*pn + 0.40*stress],
+    ["spike",     0.08 + 1.00*pn + 0.40*stressCurve],
     ["shell",     0.06 + 0.85*pw + 0.25*stress]
   ];
    // === PERSONAL PLAN (cheap but strong shape diversity) ===
