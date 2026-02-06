@@ -143,10 +143,7 @@ export function migrateOrNew(){
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
     if (!Number.isFinite(org.growthQueueIndex)) org.growthQueueIndex = 0;
-    if (org.growthPattern === undefined) org.growthPattern = null;
-    if (org.growthPattern) normalizeGrowthPattern(org);
-    if (!org.growthPattern) ensureGrowthPattern(org);
-    syncGrowthPatternProgress(org);
+    if (org.growthPattern !== undefined) delete org.growthPattern;
   }
 
   normalizeOrg(state, state.seed || 1);
