@@ -1,12 +1,11 @@
 import { clamp, clamp01, key, nowSec, mulberry32, hash32, pick } from "./util.js";
+import { BAR_MAX } from "./world.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
-import { ensureGrowthPattern, normalizeGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
-import { BAR_MAX, CARROT_BODY_RANGE, PALETTES } from "./world.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
 
@@ -145,10 +144,7 @@ export function migrateOrNew(){
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
     if (!Number.isFinite(org.growthQueueIndex)) org.growthQueueIndex = 0;
-    if (org.growthPattern === undefined) org.growthPattern = null;
-    if (org.growthPattern) normalizeGrowthPattern(org);
-    if (!org.growthPattern) ensureGrowthPattern(org);
-    syncGrowthPatternProgress(org);
+    if (org.growthPattern !== undefined) delete org.growthPattern;
   }
 
   normalizeOrg(state, state.seed || 1);
@@ -236,7 +232,8 @@ export function simulate(state, deltaSec){
     org.bars.hp = clamp(org.bars.hp - hpLoss, 0, BAR_MAX);
 
     const stress = clamp01((hungerFactor + dirtFactor + sadness + clamp01(1-org.bars.hp)) / 4);
-    org.care.neglect += deltaSec * (0.00012 * (0.5 + stress));
+    const neglectStress = stress > 0.25 ? stress : 0;
+    org.care.neglect += deltaSec * (0.00012 * neglectStress);
   }
 
   const intervalSec = Math.max(1, Math.floor(Number(state.evoIntervalMin || 12) * 60));
@@ -293,7 +290,7 @@ export function simulate(state, deltaSec){
   const getMutationContext = (momentSec)=>{
     const tickIndex = Math.floor(momentSec / intervalSec);
     if (!state._mutationContext || state._mutationContext.tickIndex !== tickIndex){
-      state._mutationContext = { tickIndex, appendageBudget: 8 };
+      state._mutationContext = { tickIndex, appendageBudget: 200 };
     }
     return state._mutationContext;
   };
@@ -339,7 +336,19 @@ export function simulate(state, deltaSec){
   {
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
-      mutations += runMutationTick(state, state.lastMutationAt);
+      const bars = state.bars || {};
+      const minBar = Math.min(
+        bars.food ?? 0,
+        bars.clean ?? 0,
+        bars.hp ?? 0,
+        bars.mood ?? 0
+      );
+      if (minBar <= 0){
+        applyShrinkDecay(state, state.lastMutationAt);
+      } else {
+        applyMutation(state, state.lastMutationAt);
+        mutations++;
+      }
       eatBudAppendage(state);
     });
     dueSteps += normalResult.due;
@@ -348,7 +357,19 @@ export function simulate(state, deltaSec){
     if (now > normalWindowEnd){
       const slowResult = applySteps(state, now, anabiosisIntervalSec, ()=>{
         eaten += processCarrotsTick(state, state);
-        mutations += runMutationTick(state, state.lastMutationAt);
+        const bars = state.bars || {};
+        const minBar = Math.min(
+          bars.food ?? 0,
+          bars.clean ?? 0,
+          bars.hp ?? 0,
+          bars.mood ?? 0
+        );
+        if (minBar <= 0){
+          applyShrinkDecay(state, state.lastMutationAt);
+        } else {
+          applyMutation(state, state.lastMutationAt);
+          mutations++;
+        }
         eatBudAppendage(state);
       });
       dueSteps += slowResult.due;
@@ -368,13 +389,37 @@ export function simulate(state, deltaSec){
 
       applySteps(bud, budNormalEnd, intervalSec, ()=>{
         eaten += processCarrotsTick(state, bud);
-        budMutations += runMutationTick(bud, bud.lastMutationAt);
+        const bars = bud.bars || {};
+        const minBar = Math.min(
+          bars.food ?? 0,
+          bars.clean ?? 0,
+          bars.hp ?? 0,
+          bars.mood ?? 0
+        );
+        if (minBar <= 0){
+          applyShrinkDecay(bud, bud.lastMutationAt);
+        } else {
+          applyMutation(bud, bud.lastMutationAt);
+          budMutations++;
+        }
         eatParentAppendage(state, bud);
       });
       if (budUpTo > budNormalEnd){
         applySteps(bud, budUpTo, anabiosisIntervalSec, ()=>{
           eaten += processCarrotsTick(state, bud);
-          budMutations += runMutationTick(bud, bud.lastMutationAt);
+          const bars = bud.bars || {};
+          const minBar = Math.min(
+            bars.food ?? 0,
+            bars.clean ?? 0,
+            bars.hp ?? 0,
+            bars.mood ?? 0
+          );
+          if (minBar <= 0){
+            applyShrinkDecay(bud, bud.lastMutationAt);
+          } else {
+            applyMutation(bud, bud.lastMutationAt);
+            budMutations++;
+          }
           eatParentAppendage(state, bud);
         });
       }
@@ -684,6 +729,32 @@ function processCarrotsTick(state, org = state){
     return best;
   }
 
+  const appendageTypes = new Set([
+    "tail",
+    "tentacle",
+    "worm",
+    "limb",
+    "antenna",
+    "claw"
+  ]);
+  const cos45 = Math.SQRT1_2;
+  function moduleSeesTarget(m, tx, ty){
+    if (!m) return false;
+    const appendage = m.movable || appendageTypes.has(m.type);
+    if (!appendage) return false;
+    const dir = m.growDir || m.baseDir;
+    if (!dir) return false;
+    const base = m.cells?.[0] || m.cells?.[m.cells.length - 1];
+    if (!base) return false;
+    const vx = tx - base[0];
+    const vy = ty - base[1];
+    const vLen = Math.hypot(vx, vy);
+    if (vLen === 0) return true;
+    const dirLen = Math.hypot(dir[0], dir[1]) || 1;
+    const dot = (vx * dir[0] + vy * dir[1]) / (vLen * dirLen);
+    return dot >= cos45;
+  }
+
   // Eat only if touches >= 2 cells. If target is appendage, count only modules.
   const remaining = [];
   for (const car of state.carrots){
@@ -721,33 +792,59 @@ function processCarrotsTick(state, org = state){
     return eaten;
   }
 
-  // Choose nearest carrot as a growth target
+  // Choose nearest carrot as a growth target with carrot visibility rules.
   let best = null;
-  let bestD = Infinity;
-  let bestBodyD = Infinity;
-  let bestModuleD = Infinity;
+  let bestMode = null;
+  let bestDist = Infinity;
+  const bodyRange = Number.isFinite(CARROT.nearDist) ? CARROT.nearDist : 7;
+  const maxRange = Number.isFinite(CARROT.farDist) ? CARROT.farDist : 15;
   for (const car of state.carrots){
     const tx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
     const ty = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, tx, ty);
-    const moduleD = minDistToCells(moduleCells, tx, ty);
-    const d = Math.min(bodyD, moduleD);
-    if (d < bestD){
-      bestD = d;
-      bestBodyD = bodyD;
-      bestModuleD = moduleD;
-      best = [tx,ty];
+    let seeingModuleD = Infinity;
+    let nearestModuleD = Infinity;
+    for (const m of (org.modules || [])){
+      const moduleCells = m?.cells || [];
+      const moduleD = minDistToCells(moduleCells, tx, ty);
+      if (moduleD < nearestModuleD) nearestModuleD = moduleD;
+      if (!moduleSeesTarget(m, tx, ty)) continue;
+      const d = moduleD;
+      if (d < seeingModuleD) seeingModuleD = d;
+    }
+    const closestD = Math.min(bodyD, seeingModuleD);
+    if (closestD > maxRange) continue;
+
+    const hasSeeingBetween = seeingModuleD < bodyD;
+    const hasSeeingModule = seeingModuleD < Infinity;
+    let mode = null;
+    let activeDist = Infinity;
+    if (nearestModuleD < bodyD && nearestModuleD <= maxRange){
+      mode = "appendage";
+      activeDist = nearestModuleD;
+    } else if (bodyD <= bodyRange && !hasSeeingBetween){
+      mode = hasSeeingModule ? "body" : "mixed";
+      activeDist = bodyD;
+    } else if (seeingModuleD <= maxRange){
+      mode = "appendage";
+      activeDist = seeingModuleD;
+    } else if (bodyD <= maxRange){
+      mode = "body";
+      activeDist = bodyD;
+    }
+    if (!mode) continue;
+    if (activeDist < bestDist){
+      bestDist = activeDist;
+      bestMode = mode;
+      best = [tx, ty];
     }
   }
 
   org.growthTarget = best;
-  const moduleFaster = bestModuleD < bestBodyD;
-  const nearDist = Number.isFinite(CARROT.nearDist) ? CARROT.nearDist : CARROT_BODY_RANGE;
-  const farDist = Number.isFinite(CARROT.farDist) ? CARROT.farDist : nearDist;
-  const bodyInRange = bestBodyD <= nearDist;
-  org.growthTargetMode = (moduleFaster || bestBodyD > farDist || !bodyInRange) ? "appendage" : "body";
-  const activeDist = (org.growthTargetMode === "appendage") ? bestModuleD : bestBodyD;
-  org.growthTargetPower = Math.max(0, Math.min(1, 1 - activeDist / 45));
+  org.growthTargetMode = bestMode;
+  org.growthTargetPower = (bestDist !== Infinity)
+    ? Math.max(0, Math.min(1, 1 - bestDist / 45))
+    : 0;
   return eaten;
 }
 

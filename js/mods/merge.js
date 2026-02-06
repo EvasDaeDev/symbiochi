@@ -223,7 +223,7 @@ export function instantiateParentFromGenome(state, genomeOut){
   const targetLens = [];
   for (const spec of moduleSpecs){
     const added = addModule(state, spec.type, rng);
-    if (added){
+    if (added?.ok){
       const idx = state.modules.length - 1;
       targetLens[idx] = spec.len;
       if (state.modules[idx]) state.modules[idx].growTo = spec.len;

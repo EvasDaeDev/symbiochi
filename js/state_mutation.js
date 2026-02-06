@@ -5,18 +5,17 @@ import { BUD } from "./mods/budding.js";
 import { EVO } from "./mods/evo.js";
 import { pushLog } from "./log.js";
 import { growBodyConnected, addModule, makeSmallConnectedBody, growPlannedModules } from "./creature.js";
-import { assignGrowthPattern, blendBiasTargets, getGrowthPatternBias, isGrowthPatternActive } from "./patterns.js";
 import { extractGenome, decodeGenome, mergeGenomes, instantiateParentFromGenome } from "./mods/merge.js";
 
 function getGrowthBiases(state, mode="body"){
   const biases = [];
-  const patternBias = getGrowthPatternBias(state, mode);
-  const patternActive = isGrowthPatternActive(state);
-  if (patternBias) biases.push(patternBias);
 
   let carrotTarget = null;
   if (mode === "appendage"){
-    if (state.growthTargetMode === "appendage" && Array.isArray(state.growthTarget)){
+    if (
+      (state.growthTargetMode === "appendage" || state.growthTargetMode === "mixed")
+      && Array.isArray(state.growthTarget)
+    ){
       carrotTarget = state.growthTarget;
     }
   } else if (Array.isArray(state.growthTarget)){
@@ -24,11 +23,26 @@ function getGrowthBiases(state, mode="body"){
   }
 
   if (carrotTarget){
-    const carrotWeight = patternActive ? 1.5 : 3;
-    biases.push({ point: carrotTarget, weight: carrotWeight });
+    biases.push({ point: carrotTarget, weight: 3 });
   }
 
-  return { biases, patternBias, carrotTarget, patternActive };
+  return { biases, carrotTarget };
+}
+
+function blendBiasTargets(biases){
+  if (!Array.isArray(biases) || !biases.length) return null;
+  let sumW = 0;
+  let sx = 0;
+  let sy = 0;
+  for (const bias of biases){
+    if (!bias || !Array.isArray(bias.point)) continue;
+    const w = Number.isFinite(bias.weight) ? bias.weight : 1;
+    sumW += w;
+    sx += bias.point[0] * w;
+    sy += bias.point[1] * w;
+  }
+  if (!sumW) return null;
+  return [Math.round(sx / sumW), Math.round(sy / sumW)];
 }
 
 /**
@@ -75,9 +89,6 @@ export function applyShrinkDecay(state, momentSec){
     target.cells.pop();
     if (target.cells.length === 0){
       state.modules.splice(sortedModules[pickIdx].idx, 1);
-    } else {
-      const lastCell = target.cells[target.cells.length - 1];
-      target.growPos = [lastCell[0], lastCell[1]];
     }
     return true;
   }
@@ -392,10 +403,13 @@ export function applyMutation(state, momentSec){
   const ph = h / total;
   const pn = n / total;
 
-  // Стресс (на основе текущих баров)
-  const stress = clamp01(
-    ((1 - state.bars.food) + (1 - state.bars.clean) + (1 - state.bars.hp)) / 3
-  );
+  // Стресс (на основе текущих баров, как в state.js)
+  const hungerFactor = clamp01(1 - state.bars.food);
+  const dirtFactor = clamp01(1 - state.bars.clean);
+  const sadness = clamp01(1 - state.bars.mood);
+  const hpLoss = clamp01(1 - state.bars.hp);
+  const stress = clamp01((hungerFactor + dirtFactor + sadness + hpLoss) / 4);
+  const stressCurve = stress * stress;
 
   const M = computeMorphology(state);
   const power = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
@@ -415,7 +429,7 @@ export function applyMutation(state, momentSec){
     ["limb",      0.10 + 0.75*pf],
     ["antenna",   0.08 + 0.85*ph],
     ["eye",       0.08 + 0.55*ph],
-    ["spike",     0.08 + 1.00*pn + 0.40*stress],
+    ["spike",     0.08 + 1.00*pn + 0.40*stressCurve],
     ["shell",     0.06 + 0.85*pw + 0.25*stress]
   ];
 
@@ -523,14 +537,25 @@ export function applyMutation(state, momentSec){
   }
 
   const targetPower = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : 0;
+  const preferAppendageTarget = state.growthTargetMode === "appendage" || state.growthTargetMode === "mixed";
+  if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
+    weights = weights.map(([k, w]) => {
+      if (k === "grow_appendage"){
+        return [k, w + 0.25 + 0.4 * targetPower];
+      }
+      if (k === "grow_body"){
+        const factor = preferAppendageTarget ? 0.6 : 0.85;
+        return [k, w * factor];
+      }
+      return [k, w];
+    });
+  }
   const growthCount = 1 + Math.floor(rng() * 4);
   for (let step = 0; step < growthCount; step++){
     let forcedKind = null;
-    if (Array.isArray(state.growthTarget) && targetPower >= 0.7){
-      if (state.growthTargetMode === "appendage" && (state.modules?.length || 0) > 0){
+    if (Array.isArray(state.growthTarget) && targetPower >= 0.85){
+      if (preferAppendageTarget && (state.modules?.length || 0) > 0){
         forcedKind = "grow_appendage";
-      } else {
-        forcedKind = "grow_body";
       }
     }
     const kind = forcedKind ?? weightedPick(rng, weights);
@@ -557,22 +582,21 @@ export function applyMutation(state, momentSec){
       }
 
       const budType = state.modules[idx]?.type || "tail";
-      const ok = createBudFromModule(state, idx, rng, isBigForBud ? BUD.bigParentSuccessMult : 1);
+
+      // Large parents get extra placement attempts (boosts "success" chance).
+      const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
       if (ok){
         state.bars.food = clamp01(state.bars.food - 0.20);
-        state.bars.clean = clamp01(state.bars.clean - 0.20);
         state.bars.hp = clamp01(state.bars.hp - 0.20);
-        state.bars.mood = clamp01(state.bars.mood - 0.20);
-        pushLog(state, `Мутация: отделилась почка.`, "bud_ok", { part: budType, mi: idx });
+        pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
       } else {
         const addN = 1 + Math.floor(rng()*2);
-        const { biases } = getGrowthBiases(state, "body");
-        const grown = growBodyConnected(state, addN, rng, null, biases);
+        const grown = growBodyConnected(state, addN, rng);
         pushLog(
           state,
           grown
-            ? `Мутация: отделение почки не удалось → тело выросло (+${addN}).`
-            : `Мутация: отделение почки не удалось и рост тела не удался.`,
+            ? `Мутация: почкование не поместилось → тело выросло (+${addN}).`
+            : `Мутация: почкование не поместилось и рост тела не удался.`,
           "mut_fail",
           { part: budType }
         );
@@ -595,16 +619,11 @@ export function applyMutation(state, momentSec){
 
     // 3) Рост отростков (один сегмент)
     if (kind === "grow_appendage"){
-      const { biases, patternBias } = getGrowthBiases(state, "appendage");
+      const { biases } = getGrowthBiases(state, "appendage");
       const target = blendBiasTargets(biases);
       const carrotStrength = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : null;
-      const patternStrength = patternBias ? Math.min(1, patternBias.weight / 3) : null;
       let strength = null;
-      if (patternStrength !== null && carrotStrength !== null){
-        strength = Math.min(1, (patternStrength + carrotStrength * 0.5) / 2);
-      } else if (patternStrength !== null){
-        strength = patternStrength;
-      } else if (carrotStrength !== null){
+      if (carrotStrength !== null){
         strength = carrotStrength;
       }
       const baseGrows = 1 + Math.floor(rng() * 2); // 1..2
@@ -659,19 +678,28 @@ export function applyMutation(state, momentSec){
 
     // 4) Органы (tail/limb/antenna/spike/shell/eye/...)
     const beforeN = (state.modules ? state.modules.length : 0);
-    const { biases } = getGrowthBiases(state, "body");
+    const organBiasMode = appendageKinds.has(kind) ? "appendage" : "body";
+    const { biases } = getGrowthBiases(state, organBiasMode);
     const target = blendBiasTargets(biases);
     const added = addModule(state, kind, rng, target);
     const afterN = (state.modules ? state.modules.length : 0);
-    const newMi = (added && afterN > beforeN) ? beforeN : null;
+    const newMi = (added?.ok && afterN > beforeN) ? beforeN : null;
 
-    if (added){
+    if (added?.ok){
       if (appendageBudget !== null && appendageKinds.has(kind)){
         mutationContext.appendageBudget = Math.max(0, appendageBudget - 1);
       }
       pushLog(state, `Мутация: появился орган (${organLabel(kind)}).`, "mut_ok", { part: kind, mi: newMi });
       continue;
     }
+
+    const reason = added?.reason || "blocked";
+    const reasonLabel = {
+      type_cap: "достигнут лимит типов",
+      too_close: "слишком близко к органу того же типа",
+      no_anchor: "не найден якорь",
+      blocked: "не поместился"
+    }[reason] || "не поместился";
 
     // Если орган не поместился -> вместо него растим тело (+1..2)
     const addN = 1 + Math.floor(rng() * 2); // +1..2
@@ -680,14 +708,14 @@ export function applyMutation(state, momentSec){
     if (grown){
       pushLog(
         state,
-        `Мутация: орган (${organLabel(kind)}) не поместился → тело выросло (+${addN}) для следующей попытки.`,
+        `Мутация: орган (${organLabel(kind)}) ${reasonLabel} → тело выросло (+${addN}) для следующей попытки.`,
         "mut_fail",
         { part: kind }
       );
     } else {
       pushLog(
         state,
-        `Мутация: орган (${organLabel(kind)}) не поместился и рост тела не удался.`,
+        `Мутация: орган (${organLabel(kind)}) ${reasonLabel} и рост тела не удался.`,
         "mut_fail",
         { part: kind }
       );
