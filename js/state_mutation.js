@@ -685,4 +685,3 @@ export function applyMutation(state, momentSec){
     }
   }
 }
-}
