@@ -1,5 +1,4 @@
 import { key, parseKey, mulberry32, hash32, pick } from "./util.js";
-import { assignGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
 import { ANTENNA } from "./organs/antenna.js";
 import { CLAW } from "./organs/claw.js";
 import { EYE } from "./organs/eye.js";
@@ -195,7 +194,6 @@ export function newGame(){
   };
 
   pushLog(state, `Вылупился питомец "${state.name}".`, "system");
-  assignGrowthPattern(state, rng);
   return state;
 }
 
@@ -297,7 +295,6 @@ export function growBodyConnected(state, addN, rng, target=null, biases=null){
   }
 
   state.body.cells = Array.from(set).map(parseKey);
-  syncGrowthPatternProgress(state);
   return true;
 }
 

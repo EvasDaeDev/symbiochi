@@ -5,14 +5,10 @@ import { BUD } from "./mods/budding.js";
 import { EVO } from "./mods/evo.js";
 import { pushLog } from "./log.js";
 import { growBodyConnected, addModule, makeSmallConnectedBody, growPlannedModules } from "./creature.js";
-import { assignGrowthPattern, blendBiasTargets, getGrowthPatternBias, isGrowthPatternActive } from "./patterns.js";
 import { extractGenome, decodeGenome, mergeGenomes, instantiateParentFromGenome } from "./mods/merge.js";
 
 function getGrowthBiases(state, mode="body"){
   const biases = [];
-  const patternBias = getGrowthPatternBias(state, mode);
-  const patternActive = isGrowthPatternActive(state);
-  if (patternBias) biases.push(patternBias);
 
   let carrotTarget = null;
   if (mode === "appendage"){
@@ -24,11 +20,26 @@ function getGrowthBiases(state, mode="body"){
   }
 
   if (carrotTarget){
-    const carrotWeight = patternActive ? 1.5 : 3;
-    biases.push({ point: carrotTarget, weight: carrotWeight });
+    biases.push({ point: carrotTarget, weight: 3 });
   }
 
-  return { biases, patternBias, carrotTarget, patternActive };
+  return { biases, carrotTarget };
+}
+
+function blendBiasTargets(biases){
+  if (!Array.isArray(biases) || !biases.length) return null;
+  let sumW = 0;
+  let sx = 0;
+  let sy = 0;
+  for (const bias of biases){
+    if (!bias || !Array.isArray(bias.point)) continue;
+    const w = Number.isFinite(bias.weight) ? bias.weight : 1;
+    sumW += w;
+    sx += bias.point[0] * w;
+    sy += bias.point[1] * w;
+  }
+  if (!sumW) return null;
+  return [Math.round(sx / sumW), Math.round(sy / sumW)];
 }
 
 /**
@@ -588,16 +599,11 @@ export function applyMutation(state, momentSec){
 
     // 3) Рост отростков (один сегмент)
     if (kind === "grow_appendage"){
-      const { biases, patternBias } = getGrowthBiases(state, "appendage");
+      const { biases } = getGrowthBiases(state, "appendage");
       const target = blendBiasTargets(biases);
       const carrotStrength = Number.isFinite(state.growthTargetPower) ? state.growthTargetPower : null;
-      const patternStrength = patternBias ? Math.min(1, patternBias.weight / 3) : null;
       let strength = null;
-      if (patternStrength !== null && carrotStrength !== null){
-        strength = Math.min(1, (patternStrength + carrotStrength * 0.5) / 2);
-      } else if (patternStrength !== null){
-        strength = patternStrength;
-      } else if (carrotStrength !== null){
+      if (carrotStrength !== null){
         strength = carrotStrength;
       }
       const baseGrows = 1 + Math.floor(rng() * 2); // 1..2
