@@ -6,7 +6,7 @@ import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
 import { ensureGrowthPattern, normalizeGrowthPattern, syncGrowthPatternProgress } from "./patterns.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
-import { BAR_MAX, CARROT_BODY_RANGE, PALETTES } from "./world.js";
+import { BAR_MAX, PALETTES } from "./world.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
 
@@ -684,6 +684,32 @@ function processCarrotsTick(state, org = state){
     return best;
   }
 
+  const appendageTypes = new Set([
+    "tail",
+    "tentacle",
+    "worm",
+    "limb",
+    "antenna",
+    "claw"
+  ]);
+  const cos45 = Math.SQRT1_2;
+  function moduleSeesTarget(m, tx, ty){
+    if (!m) return false;
+    const appendage = m.movable || appendageTypes.has(m.type);
+    if (!appendage) return false;
+    const dir = m.growDir || m.baseDir;
+    if (!dir) return false;
+    const base = m.cells?.[0] || m.cells?.[m.cells.length - 1];
+    if (!base) return false;
+    const vx = tx - base[0];
+    const vy = ty - base[1];
+    const vLen = Math.hypot(vx, vy);
+    if (vLen === 0) return true;
+    const dirLen = Math.hypot(dir[0], dir[1]) || 1;
+    const dot = (vx * dir[0] + vy * dir[1]) / (vLen * dirLen);
+    return dot >= cos45;
+  }
+
   // Eat only if touches >= 2 cells. If target is appendage, count only modules.
   const remaining = [];
   for (const car of state.carrots){
@@ -721,33 +747,51 @@ function processCarrotsTick(state, org = state){
     return eaten;
   }
 
-  // Choose nearest carrot as a growth target
+  // Choose nearest carrot as a growth target with carrot visibility rules.
   let best = null;
-  let bestD = Infinity;
-  let bestBodyD = Infinity;
-  let bestModuleD = Infinity;
+  let bestMode = null;
+  let bestDist = Infinity;
+  const bodyRange = Number.isFinite(CARROT.nearDist) ? CARROT.nearDist : 7;
+  const maxRange = Number.isFinite(CARROT.farDist) ? CARROT.farDist : 15;
   for (const car of state.carrots){
     const tx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
     const ty = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, tx, ty);
-    const moduleD = minDistToCells(moduleCells, tx, ty);
-    const d = Math.min(bodyD, moduleD);
-    if (d < bestD){
-      bestD = d;
-      bestBodyD = bodyD;
-      bestModuleD = moduleD;
-      best = [tx,ty];
+    let seeingModuleD = Infinity;
+    for (const m of (org.modules || [])){
+      if (!moduleSeesTarget(m, tx, ty)) continue;
+      const d = minDistToCells(m?.cells || [], tx, ty);
+      if (d < seeingModuleD) seeingModuleD = d;
+    }
+    const closestD = Math.min(bodyD, seeingModuleD);
+    if (closestD > maxRange) continue;
+
+    const hasSeeingBetween = seeingModuleD < bodyD;
+    let mode = null;
+    let activeDist = Infinity;
+    if (bodyD <= bodyRange && !hasSeeingBetween){
+      mode = "body";
+      activeDist = bodyD;
+    } else if (seeingModuleD <= maxRange){
+      mode = "appendage";
+      activeDist = seeingModuleD;
+    } else if (bodyD <= maxRange){
+      mode = "body";
+      activeDist = bodyD;
+    }
+    if (!mode) continue;
+    if (activeDist < bestDist){
+      bestDist = activeDist;
+      bestMode = mode;
+      best = [tx, ty];
     }
   }
 
   org.growthTarget = best;
-  const moduleFaster = bestModuleD < bestBodyD;
-  const nearDist = Number.isFinite(CARROT.nearDist) ? CARROT.nearDist : CARROT_BODY_RANGE;
-  const farDist = Number.isFinite(CARROT.farDist) ? CARROT.farDist : nearDist;
-  const bodyInRange = bestBodyD <= nearDist;
-  org.growthTargetMode = (moduleFaster || bestBodyD > farDist || !bodyInRange) ? "appendage" : "body";
-  const activeDist = (org.growthTargetMode === "appendage") ? bestModuleD : bestBodyD;
-  org.growthTargetPower = Math.max(0, Math.min(1, 1 - activeDist / 45));
+  org.growthTargetMode = bestMode;
+  org.growthTargetPower = (bestDist !== Infinity)
+    ? Math.max(0, Math.min(1, 1 - bestDist / 45))
+    : 0;
   return eaten;
 }
 
