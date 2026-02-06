@@ -802,9 +802,13 @@ function processCarrotsTick(state, org = state){
     const ty = car.y + Math.floor((car.h ?? CARROT.h ?? 7) / 2);
     const bodyD = minDistToCells(bodyCells, tx, ty);
     let seeingModuleD = Infinity;
+    let nearestModuleD = Infinity;
     for (const m of (org.modules || [])){
+      const moduleCells = m?.cells || [];
+      const moduleD = minDistToCells(moduleCells, tx, ty);
+      if (moduleD < nearestModuleD) nearestModuleD = moduleD;
       if (!moduleSeesTarget(m, tx, ty)) continue;
-      const d = minDistToCells(m?.cells || [], tx, ty);
+      const d = moduleD;
       if (d < seeingModuleD) seeingModuleD = d;
     }
     const closestD = Math.min(bodyD, seeingModuleD);
@@ -814,7 +818,10 @@ function processCarrotsTick(state, org = state){
     const hasSeeingModule = seeingModuleD < Infinity;
     let mode = null;
     let activeDist = Infinity;
-    if (bodyD <= bodyRange && !hasSeeingBetween){
+    if (nearestModuleD < bodyD && nearestModuleD <= maxRange){
+      mode = "appendage";
+      activeDist = nearestModuleD;
+    } else if (bodyD <= bodyRange && !hasSeeingBetween){
       mode = hasSeeingModule ? "body" : "mixed";
       activeDist = bodyD;
     } else if (seeingModuleD <= maxRange){
