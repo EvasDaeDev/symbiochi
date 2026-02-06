@@ -368,10 +368,9 @@ function buildEyeOffsets(radius, shape){
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const maxAppendageLen = getMaxAppendageLen(state.body?.cells?.length || 0);
   const existingTypes = new Set((state.modules || []).map((m) => m?.type).filter(Boolean));
   if (state?.face?.anchor) existingTypes.add("eye");
-  if (!existingTypes.has(type) && existingTypes.size >= 7) return { ok: false, reason: "type_cap" };
 
   function isTooCloseToSameType(candidateCells){
     if (!candidateCells.length || !Array.isArray(state.modules)) return false;
@@ -712,7 +711,7 @@ export function growPlannedModules(state, rng, options = {}){
   } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
-  const maxAppendageLen = (state.body?.cells?.length || 0) * 3;
+  const maxAppendageLen = getMaxAppendageLen(state.body?.cells?.length || 0);
   const maxWormLen = (state.body?.cells?.length || 0) * WORM.maxBodyMult;
   const carrotCenters = useTarget
     ? [target]
