@@ -1,7 +1,7 @@
 // mods/evo.js
 
 export const EVO = {
-  maxMutationsPerTick: 2,
-  bodyGrowMult: 4/3, // +33%
+  maxMutationsPerTick: 8,
+  bodyGrowMult: 1/2, 
   appendageGrowMult: 1,
 };
