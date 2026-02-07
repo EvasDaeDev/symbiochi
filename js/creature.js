@@ -1037,3 +1037,103 @@ export function growPlannedModules(state, rng, options = {}){
 
   return grew;
 }
+
+export function repairDetachedModules(state){
+  if (!state || !state.body || !Array.isArray(state.body.cells) || !Array.isArray(state.modules)) return 0;
+
+  const bodySet = bodyCellSet(state.body);
+  const occ = new Set();
+  for (const k of bodySet) occ.add(k);
+  for (const m of state.modules){
+    for (const [x,y] of (m?.cells || [])){
+      occ.add(key(x,y));
+    }
+  }
+
+  function isAdjacentToBody(cells){
+    for (const [x,y] of cells){
+      for (const [dx,dy] of DIR8){
+        if (bodySet.has(key(x+dx, y+dy))) return true;
+      }
+    }
+    return false;
+  }
+
+  function overlapsOthers(cells, selfKeys){
+    for (const [x,y] of cells){
+      const k = key(x,y);
+      if (bodySet.has(k)) return true;
+      if (selfKeys && selfKeys.has(k)) continue;
+      if (occ.has(k)) return true;
+    }
+    return false;
+  }
+
+  let fixed = 0;
+
+  // Precompute body cells for nearest search
+  const bodyCells = state.body.cells;
+
+  for (let mi = state.modules.length - 1; mi >= 0; mi--){
+    const m = state.modules[mi];
+    if (!m || !Array.isArray(m.cells) || m.cells.length === 0) continue;
+
+    if (isAdjacentToBody(m.cells)) continue;
+
+    // Remove self from occ temporarily
+    const selfKeys = new Set(m.cells.map(([x,y])=>key(x,y)));
+    for (const k of selfKeys) occ.delete(k);
+
+    // Find nearest pair (module cell -> body cell) by Manhattan
+    let best = null;
+    for (const [mx,my] of m.cells){
+      for (const [bx,by] of bodyCells){
+        const d = Math.abs(bx-mx) + Math.abs(by-my);
+        if (best === null || d < best.d){
+          best = { d, mx, my, bx, by };
+          if (d <= 2) break;
+        }
+      }
+      if (best && best.d <= 2) break;
+    }
+
+    let placed = false;
+    if (best){
+      const dx = best.bx - best.mx;
+      const dy = best.by - best.my;
+      const stepX = Math.sign(dx);
+      const stepY = Math.sign(dy);
+      const maxSteps = Math.max(1, Math.min(20, Math.max(Math.abs(dx), Math.abs(dy)) + 2));
+
+      // Try progressive shifts towards the body (and some small jitter)
+      const trials = [];
+      for (let s=1; s<=maxSteps; s++){
+        trials.push([stepX*s, stepY*s]);
+      }
+      // A few nudges in case diagonal blocking
+      trials.push([stepX*1, 0], [0, stepY*1], [stepX*2, 0], [0, stepY*2]);
+
+      for (const [sx,sy] of trials){
+        const shifted = m.cells.map(([x,y])=>[x+sx, y+sy]);
+        if (!isAdjacentToBody(shifted)) continue;
+        if (overlapsOthers(shifted, null)) continue;
+        m.cells = shifted;
+        if (Array.isArray(m.growPos)) m.growPos = [m.growPos[0]+sx, m.growPos[1]+sy];
+        placed = true;
+        fixed++;
+        break;
+      }
+    }
+
+    if (!placed){
+      // If we cannot reattach safely, drop the module to keep invariant: no floating organs.
+      state.modules.splice(mi, 1);
+      fixed++;
+    } else {
+      // Re-add shifted cells to occ
+      for (const [x,y] of m.cells) occ.add(key(x,y));
+    }
+  }
+
+  return fixed;
+}

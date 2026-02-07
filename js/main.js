@@ -174,6 +174,28 @@ function rerenderAll(deltaSec){
   renderGrid(view.state, els.canvas, els.grid, view);
 }
 
+function escapeHtml(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+function shorten(s, max=76){
+  s = String(s ?? "");
+  if (s.length <= max) return s;
+  return s.slice(0, Math.max(0, max-1)) + "…";
+}
+function getLogLine(entry){
+  if (!entry) return "";
+  if (typeof entry === "string") return entry;
+  if (typeof entry === "object"){
+    return entry.msg ?? entry.text ?? entry.message ?? entry.title ?? entry.s ?? entry.m ?? "";
+  }
+  return String(entry);
+}
+
 function autoTick(){
   if (!view.state) return;
   const state = view.state;
@@ -186,6 +208,7 @@ function autoTick(){
     return;
   }
 
+  const logBefore = (state.log || []).length;
   const sim = simulate(state, delta);
   state.lastSeen = now;
   saveGame(state);
@@ -195,9 +218,21 @@ function autoTick(){
     showOfflineSummary(delta, sim);
   }
 
-  if (sim.mutations > 0){
-    toast(`Мутаций: <b>${sim.mutations}</b>.`);
+  // Informative top toast: short duplicate of the newest log line this tick.
+  const logAfter = (state.log || []).length;
+  const addedLogs = Math.max(0, logAfter - logBefore);
+  if (addedLogs > 0){
+    const last = state.log?.[logAfter - 1];
+    const line = shorten(getLogLine(last), 76);
+    const extras = [];
+    if ((sim.mutations|0) > 1) extras.push(`×${sim.mutations|0}`);
+    if (addedLogs > 1) extras.push(`+${addedLogs-1}`);
+    const suffix = extras.length ? ` <span style="opacity:.7">${extras.join(" ")}</span>` : "";
+    toast(`${escapeHtml(line)}${suffix}`);
+  } else if ((sim.mutations|0) > 0){
+    toast(`Мутаций: <b>${sim.mutations|0}</b>.`);
   }
+
 }
 
 function startLoops(){

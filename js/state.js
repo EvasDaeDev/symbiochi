@@ -5,7 +5,7 @@ import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
-import { newGame, makeSmallConnectedBody, findFaceAnchor } from "./creature.js";
+import { newGame, makeSmallConnectedBody, findFaceAnchor, repairDetachedModules } from "./creature.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
@@ -23,7 +23,22 @@ export function loadSave(){
   } catch { return null; }
 }
 export function saveGame(state){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  // State can contain non-serializable backrefs used by the log system
+  // (e.g. bud.__logRoot -> state, creating a circular structure).
+  // Save must be robust: drop transient/private fields and break cycles.
+  const seen = new WeakSet();
+  const json = JSON.stringify(state, (k, v)=>{
+    // drop private / runtime-only fields
+    if (k === "__logRoot" || k === "__parent" || k === "__state") return undefined;
+    if (typeof k === "string" && k.startsWith("__")) return undefined;
+    if (typeof v === "function") return undefined;
+    if (v && typeof v === "object"){
+      if (seen.has(v)) return undefined;
+      seen.add(v);
+    }
+    return v;
+  });
+  localStorage.setItem(STORAGE_KEY, json);
 }
 export function deleteSave(){
   localStorage.removeItem(STORAGE_KEY);
@@ -238,11 +253,36 @@ function applyNonLinearDecay(value, ratePerSec, deltaSec){
   return Math.max(0, value - slowedRate * deltaSec);
 }
 
+const HUNGER_STOP = 0.10;   // 10% (normalized 0..1)
+const HUNGER_RESUME = 0.30; // 30%
+
+function minBarValue(org){
+  const b = org?.bars || {};
+  return Math.min(b.food ?? 0, b.clean ?? 0, b.hp ?? 0, b.mood ?? 0);
+}
+function updateHungerGate(org){
+  const minBar = minBarValue(org);
+  if (!org) return { minBar, paused: false };
+  if (!org.evoPausedByHunger){
+    if (minBar <= HUNGER_STOP) org.evoPausedByHunger = true;
+  } else {
+    if (minBar >= HUNGER_RESUME) org.evoPausedByHunger = false;
+  }
+  return { minBar, paused: !!org.evoPausedByHunger };
+}
+
+function allBarsZero(org){
+  const b = org?.bars || {};
+  return (b.food ?? 0) <= 0 && (b.clean ?? 0) <= 0 && (b.hp ?? 0) <= 0 && (b.mood ?? 0) <= 0;
+}
+
 export function simulate(state, deltaSec){
   if (deltaSec <= 0) return { deltaSec: 0, mutations: 0, budMutations: 0, eaten: 0, skipped: 0, dueSteps: 0 };
 
   const now = (state.lastSeen || nowSec()) + deltaSec;
   pruneExpiredCarrots(state, now);
+  const isOffline = deltaSec >= 15; // same threshold as UI offline summary
+
   if (Array.isArray(state.buds)){
     for (let i = 0; i < state.buds.length; i++){
       const bud = state.buds[i];
@@ -269,6 +309,24 @@ export function simulate(state, deltaSec){
     const stress = clamp01((hungerFactor + dirtFactor + sadness + clamp01(1-org.bars.hp)) / 4);
     const neglectStress = stress > 0.25 ? stress : 0;
     org.care.neglect += deltaSec * (0.00012 * neglectStress);
+
+    // Hunger gate (mutations pause/resume with hysteresis)
+    updateHungerGate(org);
+
+    // Offline shrink: if ALL bars are at 0 for long enough offline, shrink every 20 minutes.
+    if (isOffline){
+      if (allBarsZero(org)){
+        org._offlineZeroAccSec = (org._offlineZeroAccSec || 0) + deltaSec;
+        const stepSec = 20 * 60;
+        const steps = Math.floor(org._offlineZeroAccSec / stepSec);
+        if (steps > 0){
+          org._offlineZeroAccSec -= steps * stepSec;
+          org._offlineShrinks = (org._offlineShrinks || 0) + steps;
+        }
+      } else {
+        org._offlineZeroAccSec = 0;
+      }
+    }
   }
 
   const intervalSec = Math.max(1, Math.floor(Number(state.evoIntervalMin || 12) * 60));
@@ -291,6 +349,7 @@ export function simulate(state, deltaSec){
   let eaten = 0;
   let skipped = 0;
   let dueSteps = 0;
+  let simShrinks = 0;
 
   // OFFLINE: apply instantly (no debt)
   const MAX_OFFLINE_STEPS = 666;
@@ -330,20 +389,12 @@ export function simulate(state, deltaSec){
     return state._mutationContext;
   };
   const runMutationTick = (org, momentSec)=>{
-    const bars = org.bars || {};
-    const minBar = Math.min(
-      bars.food ?? 0,
-      bars.clean ?? 0,
-      bars.hp ?? 0,
-      bars.mood ?? 0
-    );
-    if (minBar <= 0){
-      reportCriticalState(org, momentSec);
-      return 0;
+    const gate = updateHungerGate(org);
+    if (gate.minBar <= 0){
+      // Zero is allowed; mutations are simply paused by the hunger gate.
+      // (Shrink is handled separately and only for offline all-zero.)
     }
-    if (minBar <= 0.1){
-      return 0;
-    }
+    if (gate.paused) return 0;
 
     let applied = 0;
     const applyOnce = ()=>{
@@ -371,16 +422,8 @@ export function simulate(state, deltaSec){
   {
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
-      const bars = state.bars || {};
-      const minBar = Math.min(
-        bars.food ?? 0,
-        bars.clean ?? 0,
-        bars.hp ?? 0,
-        bars.mood ?? 0
-      );
-      if (minBar <= 0){
-        applyShrinkDecay(state, state.lastMutationAt);
-      } else {
+      const gate = updateHungerGate(state);
+      if (!gate.paused){
         applyMutation(state, state.lastMutationAt);
         mutations++;
       }
@@ -424,16 +467,8 @@ export function simulate(state, deltaSec){
 
       applySteps(bud, budNormalEnd, intervalSec, ()=>{
         eaten += processCarrotsTick(state, bud);
-        const bars = bud.bars || {};
-        const minBar = Math.min(
-          bars.food ?? 0,
-          bars.clean ?? 0,
-          bars.hp ?? 0,
-          bars.mood ?? 0
-        );
-        if (minBar <= 0){
-          applyShrinkDecay(bud, bud.lastMutationAt);
-        } else {
+        const gate = updateHungerGate(bud);
+        if (!gate.paused){
           applyMutation(bud, bud.lastMutationAt);
           budMutations++;
         }
@@ -465,9 +500,30 @@ export function simulate(state, deltaSec){
     }
   }
 
+  // Apply accumulated offline shrink steps (every 20 min at all-zero bars).
+  // Done AFTER time fast-forward, so shrink does not interfere with per-tick mutation placement.
+  for (const org of orgs){
+    const steps = (org && org._offlineShrinks) ? (org._offlineShrinks|0) : 0;
+    if (steps > 0){
+      for (let i=0;i<steps;i++){
+        if (applyShrinkDecay(org, org.lastMutationAt || now)) simShrinks++;
+      }
+      org._offlineShrinks = 0;
+    }
+  }
+
+  // Repair invariant after offline catch-up: no floating modules disconnected from body.
+  // Offline fast-forward can produce detached appendages due to skipped intermediate growth/placement.
+  repairDetachedModules(state);
+  if (Array.isArray(state.buds)){
+    for (const bud of state.buds){
+      repairDetachedModules(bud);
+    }
+  }
+
   mergeTouchingOrganisms(state);
   state.lastSeen = now;
-  return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps };
+  return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps, shrinks: simShrinks };
 }
 
 function reportCriticalState(org, momentSec){

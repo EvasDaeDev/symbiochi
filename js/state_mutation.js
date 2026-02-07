@@ -443,7 +443,7 @@ export function applyMutation(state, momentSec){
     ["tail",      (Number.isFinite(TAIL.spawnWeight) ? TAIL.spawnWeight : 0.18) + 0.65*pf],
     ["tentacle",  (Number.isFinite(TENTACLE.spawnWeight) ? TENTACLE.spawnWeight : 0.15) + 0.65*pf + 0.15*ph],
     ["worm",      (Number.isFinite(WORM.spawnWeight) ? WORM.spawnWeight : 0.12) + 0.55*pf + 0.10*ph],
-    ["limb",      (Number.isFinite(LIMB.spawnWeight) ? LIMB.spawnWeight : 0.10) + 0.75*pf],
+    ["limb",      (Number.isFinite(LIMB.spawnWeight) ? LIMB.spawnWeight : 0.10) + 0.35*pf],
     ["antenna",   (Number.isFinite(ANTENNA.spawnWeight) ? ANTENNA.spawnWeight : 0.12) + 0.85*ph],
     ["eye",       (Number.isFinite(EYE.spawnWeight) ? EYE.spawnWeight : 0.10) + 0.55*ph],
     ["spike",     (Number.isFinite(SPIKE.spawnWeight) ? SPIKE.spawnWeight : 0.08) + 1.00*pn + 0.40*stressCurve],
@@ -466,10 +466,11 @@ export function applyMutation(state, momentSec){
   // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
   if (eco === "crawler"){
     bump("limb", 0.30);
+	bump("tentacle", 0.30);
     mul("tail", 1.00);
     mul("antenna", 0.95);
   } else if (eco === "swimmer"){
-    bump("tail", 0.30);
+    bump("tail", 0.20);
     bump("fin", 0.18);     // появится только в late-game, но пусть вес уже будет
     mul("limb", 0.85);
   } else if (eco === "sentinel"){
@@ -484,7 +485,7 @@ export function applyMutation(state, momentSec){
     mul("limb", 0.85);
     mul("tail", 0.85);
 	} else if (eco === "lurker"){
-  bump("tentacle", 0.22);
+  bump("tentacle", 0.30);
   bump("worm", 0.18);
   bump("eye", 0.10);
   mul("limb", 0.88);
