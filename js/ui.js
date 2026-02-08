@@ -89,7 +89,27 @@ export function attachSettings(view, els, toast){
     if (!state) return;
 
     els.evoInput.value = String(state.evoIntervalMin || 12);
-    if (els.seedInput) els.seedInput.value = String(state.seed ?? 0);
+    if (els.seedInput){
+      els.seedInput.value = String(state.seed ?? 0);
+      // informational only
+      els.seedInput.readOnly = true;
+      els.seedInput.disabled = true;
+    }
+
+    if (els.carrotsInput){
+      const invC = state?.inv?.carrots;
+      els.carrotsInput.value = String(isFinite(invC) ? (invC|0) : 0);
+    }
+
+    if (els.lenPrio){
+      const lp = state.settings?.lengthPriority ?? 0.65;
+      els.lenPrio.value = String(Math.round(clamp(lp, 0, 1) * 100));
+    }
+
+    if (els.fxEnabled){
+      const en = state.settings?.fxEnabled;
+      els.fxEnabled.checked = (en !== false);
+    }
 
     if (els.planInfo){
       const org = getActiveOrg(state);
@@ -117,14 +137,14 @@ export function attachSettings(view, els, toast){
       view.state.settings.lengthPriority = lp;
     }
 
-    if (els.seedInput){
-      const s = parseInt(els.seedInput.value, 10);
-      if (isFinite(s) && (s|0) !== (view.state.seed|0)){
-        view.state.seed = (s|0);
-        pushLog(view.state, `Настройки: seed = ${(view.state.seed>>>0)}.`, "system");
-      }
+    if (els.fxEnabled){
+      const en = !!els.fxEnabled.checked;
+      view.state.settings.fxEnabled = en;
+      // Apply immediately (view-only)
+      view.fx = view.fx || {};
+      view.fx.enabled = en;
     }
-
+    // seed is informational (readonly) — do not apply changes
     if (els.carrotsInput){
       const c = parseInt(els.carrotsInput.value, 10);
       if (!view.state.inv) view.state.inv = { carrots: 0 };

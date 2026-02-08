@@ -1,5 +1,5 @@
 export const BODY = {
-  growWeight: 0.42,
+  growWeight: 0.92,
   appendageGrowWeight: 0.12,
   appendageGrowPerModule: 0.03,
   growBodyPenaltyMult: 0.65,

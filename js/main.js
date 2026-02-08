@@ -1,8 +1,10 @@
 // js/main.js
-import { fmtAgeSeconds, nowSec } from "./util.js";
+import { fmtAgeSeconds, nowSec, barPct } from "./util.js";
 import { CARROT } from "./mods/carrots.js";
 import { migrateOrNew, saveGame, simulate } from "./state.js";
 import { pushLog } from "./log.js";
+import { ensureMoving, tickMoving, setMoveTarget, getOrgMotion } from "./moving.js";
+import { BAR_MAX } from "./world.js";
 
 import {
   syncCanvas,
@@ -77,6 +79,7 @@ const els = {
   planInfo: document.getElementById("planInfo"),
   lenPrio: document.getElementById("lenPrio"),
   carrotsInput: document.getElementById("carrotsInput"),
+  fxEnabled: document.getElementById("fxEnabled"),
   newCreature: document.getElementById("newCreature"),
   symbiosisBtn: document.getElementById("symbiosisBtn"),
   symbiosisOverlay: document.getElementById("symbiosisOverlay"),
@@ -99,6 +102,12 @@ const view = {
 
   // Camera (world coords in blocks). View-only: not stored in save.
   cam: { ox: 0, oy: 0 },
+  // Smooth camera centering target (view-only)
+  camTarget: null, // {x,y}
+
+  // Moving module state (view-only)
+  moving: null,
+
 
   // dynamic camera size in blocks
   gridW: 60,
@@ -161,14 +170,63 @@ function rerenderAll(deltaSec){
   renderHud(root, selectedOrg, els, deltaSec, fmtAgeSeconds, view.zoom);
   // organism info tab
   if (els.orgInfo){
-    const org = selectedOrg;
-    const age = Math.max(0, (root.lastSeen||0) - (org.createdAt||root.createdAt||root.lastSeen||0));
-    const blocks = (org.body?.cells?.length||0) + (org.modules||[]).reduce((s,m)=>s+(m.cells?.length||0),0);
+    const root = view.state;
+    const buds = Array.isArray(root.buds) ? root.buds : [];
+
+    const mkBlocks = (o)=> (o?.body?.cells?.length||0) + (o?.modules||[]).reduce((s,m)=>s+(m?.cells?.length||0),0);
+    const mkBarsRow = (o)=>{
+      const b = o?.bars || {};
+      const tone = (v)=>{
+        if (!Number.isFinite(v)) return "";
+        if (v > 0.80) return "ok";
+        if (v > 0.60) return "info";
+        if (v > 0.20) return "warn";
+        if (v > 0.00) return "bad";
+        return "bad";
+      };
+
+      // Show exactly like the top HUD: same labels, same % conversion, same tone classes.
+      const items = [
+        ["еда",  b.food],
+        ["чист", b.clean],
+        ["здор", b.hp],
+        ["настр", b.mood],
+      ];
+      return `
+        <div class="orgCellPills">
+          ${items.map(([k,v])=>{
+            const p = barPct(v);
+            const cls = tone(v);
+            return `<span class="pill ${cls}">${k}: ${p}%</span>`;
+          }).join("")}
+        </div>`;
+    };
+    const mkItem = (which, o)=>{
+      const isSel = (root.active === (which === -1 ? -1 : which));
+      const blocks = mkBlocks(o);
+      const stage = (o===root) ? 'Родитель' : 'Почка';
+      const name = (o?.name || '—');
+      const now = root.lastSeen || 0;
+      const createdAt = (o?.createdAt ?? now);
+      const age = Math.max(0, now - createdAt);
+      const ageTxt = fmtAgeSeconds ? fmtAgeSeconds(age) : `${Math.floor(age)}с`;
+      const cls = isSel ? 'orgCell isActive' : 'orgCell';
+      return `
+        <div class="${cls}" data-which="${which}">
+          <div class="orgCellTop">${escapeHtml(name)}<span class="orgCellStage">${stage}</span></div>
+          <div class="orgCellMeta">блоков: ${blocks} • жизнь: ${ageTxt}</div>
+          ${mkBarsRow(o)}
+        </div>`;
+    };
+
+    const listHtml = [
+      mkItem(-1, root),
+      ...buds.map((b,i)=> mkItem(i, b))
+    ].join('');
+
     els.orgInfo.innerHTML = `
-      <div><b>${org.name || "—"}</b></div>
-      <div style="color:var(--muted); margin-top:6px;">Стадия: ${org===root ? "Родитель" : "Почка"} • блоков: ${blocks}</div>
-      <div style="color:var(--muted);">Возраст: ${fmtAgeSeconds(age)}</div>
-      <div style="color:var(--muted); margin-top:8px;">Режим кормления: ${view.mode === "carrot" ? "БРОСЬ МОРКОВКУ" : "—"}</div>
+      <div class="orgList">${listHtml}</div>
+      <div style="color:var(--muted); font-size:11px;">Тап по ячейке — выбрать и центрировать камеру на ядре. Дабл-клик/тап по полю — отправить выбранного в плавание.</div>
     `;
   }
   renderGrid(view.state, els.canvas, els.grid, view);
@@ -199,6 +257,19 @@ function getLogLine(entry){
 function autoTick(){
   if (!view.state) return;
   const state = view.state;
+
+  // Expose view-driven movement state to the simulation (transient, not saved).
+  // Mutations are allowed only while standing; while moving they become debt.
+  {
+    const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+    for (let i = 0; i < orgs.length; i++){
+      const org = orgs[i];
+      if (!org) continue;
+      const orgId = (i === 0) ? 0 : i; // 0 = parent, 1.. = buds
+      const m = getOrgMotion(view, orgId);
+      org.__moving = !!m?.moving;
+    }
+  }
 
   const now = nowSec();
   const delta = Math.max(0, now - (state.lastSeen || now));
@@ -235,6 +306,30 @@ function autoTick(){
 
 }
 
+function tickCamera(view, dtSec){
+  if (!view || !view.cam || !view.camTarget) return;
+  const dt = Math.max(0, dtSec || 0);
+  if (dt <= 0) return;
+  const tx = view.camTarget.x;
+  const ty = view.camTarget.y;
+  if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
+
+  // Exponential smoothing: ~fast, but never snaps.
+  // k=8 => reaches ~95%% in ~0.4s
+  const k = 8;
+  const a = 1 - Math.exp(-k * dt);
+  view.cam.ox += (tx - view.cam.ox) * a;
+  view.cam.oy += (ty - view.cam.oy) * a;
+
+  // Stop when close enough
+  if (Math.abs(tx - view.cam.ox) < 0.02 && Math.abs(ty - view.cam.oy) < 0.02){
+    view.cam.ox = tx;
+    view.cam.oy = ty;
+    view.camTarget = null;
+  }
+}
+
+
 function startLoops(){
   const targetFrameMs = 1000 / 60;
   const frame = ()=>{
@@ -245,6 +340,10 @@ function startLoops(){
     perf.lastFrameAt = now;
     perf.smoothedFrame = perf.smoothedFrame * 0.9 + delta * 0.1;
     perf.frameCount += 1;
+
+    // View-only animation ticks (60fps)
+    tickMoving(view, view.state, delta/1000);
+    tickCamera(view, delta/1000);
 
     const renderStart = performance.now();
     renderGrid(view.state, els.canvas, els.grid, view);
@@ -339,6 +438,14 @@ function screenToWorld(e){
 
 
 function attachPickOrganism(){
+  let pendingClearTimer = null;
+  const cancelPendingClear = ()=>{
+    if (pendingClearTimer){
+      clearTimeout(pendingClearTimer);
+      pendingClearTimer = null;
+    }
+  };
+
   els.grid.addEventListener("click", (e)=>{
     if (!view.state) return;
 
@@ -369,10 +476,9 @@ function attachPickOrganism(){
       s.carrotTick.used++;
       inv.carrots--;
 
-      pushLog(s, `Морковка: брошена в (${wx},${wy}). Осталось: ${Math.max(0, inv.carrots|0)}.`, "carrot");
+      pushLog(s, `Морковка: брошена. Осталось: ${Math.max(0, inv.carrots|0)}.`, "carrot");
 
-      // Log + immediate user feedback
-      pushLog(s, `Морковка: брошена в (${wx},${wy}).`, "carrot", { part: "carrot" });
+
       toast(`Морковка: (${wx},${wy}).`);
 
       saveGame(s);
@@ -380,59 +486,149 @@ function attachPickOrganism(){
       return; // do not change selection
     }
 
-    // Prefer exact hit on occupied cell
-    const buds = Array.isArray(s.buds) ? s.buds : [];
-    let picked = null; // -1 parent, or bud index
-
-    // IMPORTANT: check buds first, иначе родитель "перехватывает" клики по перекрывающимся клеткам
-    for (let i=0;i<buds.length;i++){
-      if (occHas(buds[i], wx, wy)){ picked = i; break; }
-    }
-    if (picked === null && occHas(s, wx, wy)) picked = -1;
-
-// If no exact hit, pick nearest core within 2 blocks
-    if (picked === null){
-      let best = { d: Infinity, which: null };
-      const core = s.body?.core;
-      if (core){
-        const dx = core[0]-wx, dy = core[1]-wy;
-        const d = dx*dx + dy*dy;
-        if (d < best.d){ best = { d, which: -1 }; }
-      }
-      for (let i=0;i<buds.length;i++){
-        const c = buds[i].body?.core;
-        if (!c) continue;
-        const dx = c[0]-wx, dy = c[1]-wy;
-        const d = dx*dx + dy*dy;
-        if (d < best.d){ best = { d, which: i }; }
-      }
-      if (best.d <= 4) picked = best.which; // radius 2
-    }
-
-    // Click on empty space clears selection
-    if (picked === null){
-      s.active = null;
-      saveGame(s);
+    // Clicking on empty field should allow clearing selection.
+    // But single click is also the first half of a double-click; delay clearing a bit.
+    cancelPendingClear();
+    pendingClearTimer = setTimeout(()=>{
+      pendingClearTimer = null;
+      if (!view.state) return;
+      // clear selection completely
+      view.state.active = null;
+      saveGame(view.state);
       rerenderAll(0);
-      return;
-    }
+    }, 260);
+  });
+  // Double-click / double-tap: move selected organism to clicked point ("swim")
+els.grid.addEventListener("dblclick", (e)=>{
+    if (!view.state) return;
+    if (view.mode === "carrot") return;
 
-    // store selection: -1 = parent, 0.. = bud index
-    s.active = picked;
-    saveGame(s);
+    cancelPendingClear();
+
+    const a = view.state.active;
+
+    // Важно: плавание — только если реально выбран организм (рамка через ячейку)
+    if (a === null || a === undefined) return;
+
+    const [wx, wy] = screenToWorld(e);
+
+    // which: -1 (родитель) или 0..n-1 (почки)
+    const which = Number.isFinite(a) ? (a|0) : null;
+    if (which === null) return;
+
+    // orgId: 0 = родитель, 1.. = почки
+    const orgId = (which === -1) ? 0 : (which + 1);
+
+    setMoveTarget(view, view.state, orgId, wx, wy);
+  });
+
+  // touch double-tap (mobile)
+  const DT_MS = 280;
+  const DT_DIST_PX = 18;
+  let lastTap = null;
+  els.grid.addEventListener("pointerup", (e)=>{
+    if (e.pointerType !== "touch") return;
+    if (!view.state) return;
+    if (view.mode === "carrot") return;
+    if (view._pinchActive) return;
+	const a = view.state.active;
+
+    // Важно: без выбора через ячейку — double-tap ничего не делает
+    if (a === null || a === undefined) return;
+
+    const sel = a;
+    const now = performance.now();
+    const cur = { t: now, x: e.clientX, y: e.clientY, ev: e };
+    if (lastTap && (now - lastTap.t) <= DT_MS){
+      const dx = cur.x - lastTap.x;
+      const dy = cur.y - lastTap.y;
+      if ((dx*dx + dy*dy) <= (DT_DIST_PX*DT_DIST_PX)){
+        cancelPendingClear();
+        const [wx, wy] = screenToWorld(e);
+        const which = Number.isFinite(sel) ? (sel|0) : null;
+        if (which === null) return;
+        const orgId = (which === -1) ? 0 : (which + 1);
+        setMoveTarget(view, view.state, orgId, wx, wy);
+        lastTap = null;
+        return;
+      }
+    }
+    lastTap = cur;
+  });
+
+}
+
+function attachOrgListClicks(){
+  if (!els.orgInfo) return;
+  if (els.orgInfo.__hasOrgListClicks) return;
+  els.orgInfo.__hasOrgListClicks = true;
+
+  // A single click is also the first half of a double-click.
+  // If we rerender immediately on the first click, the list DOM is rebuilt and
+  // the dblclick may never fire. So we defer the single-click action briefly
+  // and cancel it if a dblclick happens.
+  let clickTimer = null;
+  let pendingWhich = null;
+
+  els.orgInfo.addEventListener("click", (ev)=>{
+    const cell = ev.target?.closest?.(".orgCell");
+    if (!cell) return;
+    if (!view.state) return;
+    const which = parseInt(cell.dataset.which, 10);
+    if (!Number.isFinite(which)) return;
+
+    // Defer single-click select a bit so dblclick can win.
+    pendingWhich = which;
+    if (clickTimer) clearTimeout(clickTimer);
+    clickTimer = setTimeout(()=>{
+      clickTimer = null;
+      if (!view.state) return;
+      view.state.active = pendingWhich;
+      saveGame(view.state);
+      rerenderAll(0);
+    }, 220);
+  });
+
+  // Double click: center camera on clicked organism
+  els.orgInfo.addEventListener("dblclick", (ev)=>{
+    if (clickTimer){ clearTimeout(clickTimer); clickTimer = null; }
+    const cell = ev.target?.closest?.(".orgCell");
+    if (!cell) return;
+    if (!view.state) return;
+    const which = parseInt(cell.dataset.which, 10);
+    if (!Number.isFinite(which)) return;
+
+    // Ensure selection matches
+    view.state.active = which;
+    saveGame(view.state);
+
+    const org = (which === -1) ? view.state : (view.state.buds?.[which] || null);
+    const core = org?.body?.core;
+    if (Array.isArray(core) && core.length === 2){
+      const orgId = (which === -1) ? 0 : (which|0) + 1;
+      const m = getOrgMotion(view, orgId);
+      const ox = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
+      const oy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+      view.camTarget = { x: (core[0] || 0) + ox, y: (core[1] || 0) + oy };
+    }
     rerenderAll(0);
   });
 }
 
+
 async function startGame(){
   view.state = migrateOrNew();
   view.lastActive = view.state?.active ?? null;
+  // View-only FX toggle from settings (defaults to ON)
+  view.fx = view.fx || {};
+  view.fx.enabled = (view.state?.settings?.fxEnabled !== false);
+  ensureMoving(view);
 
-  // Init camera to parent core on first start (view-only, not persisted).
+  // Always center camera to the parent organism on game start (view-only, not persisted).
+  // (Selection may be restored to a bud, but the initial framing should show the parent.)
   const c = view.state?.body?.core || [0, 0];
-  if (!view.cam) view.cam = { ox: c[0], oy: c[1] };
-  if (!Number.isFinite(view.cam.ox)) view.cam.ox = c[0];
-  if (!Number.isFinite(view.cam.oy)) view.cam.oy = c[1];
+  view.cam = { ox: (c[0]||0), oy: (c[1]||0) };
+  view.camTarget = null;
 
   els.startOverlay.style.display = "none";
 
@@ -449,6 +645,8 @@ async function startGame(){
   attachZoomWheel(view, els, rerenderAll);
   attachSymbiosisUI(view, els, toast);
   attachPickOrganism();
+  attachOrgListClicks();
+
 
   setupResizeObserver();
 
@@ -480,12 +678,15 @@ function showOfflineSummary(deltaSec, sim){
   }
 
   const mins = Math.round(deltaSec/60);
+  const mutTotal = (sim.mutations|0) + (sim.budMutations|0);
+  const grown = sim.grownBlocks|0;
+  const shrunk = sim.shrunkBlocks|0;
+
   const lines = [];
   lines.push(`Отсутствие: <b>${mins} мин</b>`);
-  if (sim.mutations) lines.push(`Мутаций: <b>${sim.mutations}</b>`);
-  if (sim.budMutations) lines.push(`Мутаций у почек: <b>${sim.budMutations}</b>`);
-  if (sim.eaten) lines.push(`Съедено морковок: <b>${sim.eaten}</b>`);
-  if (sim.skipped) lines.push(`<span style="opacity:.6">Пропущено тиков: ${sim.skipped}</span>`);
+  lines.push(`Мутаций: <b>${mutTotal}</b>`);
+  lines.push(`Рост: <b>+${grown}</b> блок.`);
+  lines.push(`Усыхание: <b>-${shrunk}</b> блок.`);
 
   el.querySelector("#offlineText").innerHTML = lines.join("<br>");
 }

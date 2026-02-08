@@ -1,7 +1,7 @@
 export const TAIL = {
-  minLen: 2,
-  maxExtra: 16,
-  spawnWeight: 0.22,
+  minLen: 7,
+  maxExtra: 36,
+  spawnWeight: 0.1,
   growthChance: 0.95,
   width: 1,
   anim: {

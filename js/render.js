@@ -1,9 +1,12 @@
 // js/render.js
 import { escapeHtml, barPct, clamp, key } from "./util.js";
+import { getOrgMotion } from "./moving.js";
+
 import { organLabel } from "./mods/labels.js";
 import { PARTS } from "./mods/parts.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { ORGAN_COLORS } from "./mods/colors.js";
+import { getFxPipeline } from "./FX/pipeline.js";
 import { BODY, CORE } from "./organs/body.js";
 import { EYE } from "./organs/eye.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
@@ -236,9 +239,13 @@ export function syncCanvas(canvas, gridEl, view){
     canvas.height = needH;
   }
 
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS px
-  ctx.imageSmoothingEnabled = false;
+  // IMPORTANT:
+  // Do NOT grab a 2D context on the visible canvas here.
+  // If we do, the browser will lock the canvas to 2D and WebGL post-FX
+  // (CRT distortion, chromatic aberration) won't be able to attach.
+  //
+  // The 2D transform (DPR) is instead applied to the offscreen scene context
+  // obtained from FX pipeline (`fx.begin(...)`) inside `renderGrid`.
 
   view.dpr = dpr;
   view.rectW = rect.width;
@@ -320,13 +327,13 @@ function worldToScreenPx(cam, wx, wy, view){
 // =====================
 // Animation helpers
 // =====================
-function breathYOffsetPx(org, orgId, baseSeed){
+function breathYOffsetPx(org, orgId, baseSeed, breathMul=1){
   // unique phase per organism (offset > 1/3 cycle is naturally true with random phase)
   const tag = `${baseSeed}|breath|${orgId}|${org?.seed ?? 0}`;
   const phase = hash01(tag) * Math.PI * 2;
   const t = (Date.now() / 1000);
   const s = Math.sin((t * (Math.PI * 2) / BREATH_PERIOD_SEC) + phase);
-  return (s * BREATH_AMPL_PX);
+  return (s * BREATH_AMPL_PX * (Number.isFinite(breathMul) ? breathMul : 1));
 }
 
 function spikeBlinkOn(){
@@ -736,11 +743,11 @@ function drawFlashGlow(ctx, rects){
 // =====================
 // Rendering one organism
 // =====================
-function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected){
+function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1){
   const s = view.blockPx;
   const occ = buildOccupancy(org);
 
-  const breathY = breathYOffsetPx(org, orgId, baseSeed);
+  const breathY = breathYOffsetPx(org, orgId, baseSeed, breathMul);
   const breathK = (breathY !== 0); // slight tint toggle
 
   const boundaryRects = [];
@@ -1147,12 +1154,12 @@ function limbPhalanxIndex(lengths, idx){
 
   return boundaryRects;
 }
-function collectFlashRects(cam, org, view, orgId, baseSeed, flash){
+function collectFlashRects(cam, org, view, orgId, baseSeed, flash, breathMul=1){
   if (!org) return [];
   const s = view.blockPx;
 
   // дыхание должно совпадать с тем, как рисуется организм
-  const breathY = breathYOffsetPx(org, orgId, baseSeed);
+  const breathY = breathYOffsetPx(org, orgId, baseSeed, breathMul);
 
   // какие клетки подсвечиваем
   const set = new Set();
@@ -1268,7 +1275,18 @@ export function renderGrid(state, canvas, gridEl, view){
   const bounds = getColonyBounds(state);
   clampCamera(view.cam, bounds, view.gridW, view.gridH, 2);
 
-  const ctx = canvas.getContext("2d");
+  // Local alias used throughout renderGrid (some helpers expect `cam` in scope)
+  const cam = view.cam;
+
+  // Optional post-processing FX pipeline (view-only).
+  const fx = getFxPipeline(view, canvas);
+  const ctx = fx.begin(canvas);
+
+  // Draw in CSS pixels (not device pixels), matching previous 2D setup.
+  // Offscreen scene buffer has the full DPR size; this transform keeps all
+  // existing drawing code working unchanged.
+  ctx.setTransform(view.dpr || 1, 0, 0, view.dpr || 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
 
   // background
   ctx.clearRect(0, 0, view.rectW, view.rectH);
@@ -1319,60 +1337,112 @@ if (Array.isArray(state.carrots)){
       ? active
       : null;
 
-  // draw organisms first
-  const boundaryRects = [];
+
+  // draw organisms (with view-only movement/rotation)
+  let sel = null; // {rects, pivot:{x,y}, angRad}
+
+  const drawOne = (org, orgId, isSel)=>{
+    const m = getOrgMotion(view, orgId);
+    const dx = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
+    const dy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+    const breathMul = Number.isFinite(m?.breathMul) ? m.breathMul : 1;
+    const angRad = (Number.isFinite(m?.angleDeg) ? m.angleDeg : 0) * Math.PI / 180;
+
+    // Shift camera so organism appears translated by (dx,dy)
+    const cam2 = { ox: (cam.ox || 0) - dx, oy: (cam.oy || 0) - dy };
+
+    // Pivot is core (fallback: first body cell)
+    const core = org?.body?.core || org?.body?.cells?.[0] || [0, 0];
+    const pivot = worldToScreenPx(cam2, core[0] || 0, core[1] || 0, view);
+
+    ctx.save();
+    if (angRad !== 0){
+      ctx.translate(pivot.x, pivot.y);
+      ctx.rotate(angRad);
+      ctx.translate(-pivot.x, -pivot.y);
+    }
+
+    const rects = renderOrg(ctx, cam2, org, view, orgId, baseSeed, !!isSel, breathMul);
+
+    if (isSel){
+      sel = { rects, pivot, angRad, cam2, org, orgId, breathMul };
+    }
+
+    ctx.restore();
+  };
 
   // parent
-  boundaryRects.push(...renderOrg(ctx, view.cam, state, view, 0, baseSeed, selectedParent));
+  drawOne(state, 0, selectedParent);
 
   // buds
   if (Array.isArray(state.buds)){
     for (let i=0;i<state.buds.length;i++){
       const bud = state.buds[i];
       if (!bud) continue;
-      const isSel = (selectedBudIndex === i);
-      boundaryRects.push(...renderOrg(ctx, view.cam, bud, view, i+1, baseSeed, isSel));
+      drawOne(bud, i+1, (selectedBudIndex === i));
     }
   }
 
-  // draw glow AFTER drawing blocks (so it is visible and "outside")
-  if (selectedParent || selectedBudIndex !== null){
-    // Filter boundary rects a bit (avoid huge overdraw): keep only unique rects by key
+  // Selection glow drawn after blocks, using the same transform
+  if (sel && Array.isArray(sel.rects) && sel.rects.length){
     const uniq = new Map();
-    for (const r of boundaryRects){
+    for (const r of sel.rects){
       const k = `${r.x},${r.y},${r.w},${r.h}`;
       if (!uniq.has(k)) uniq.set(k, r);
     }
+
+    ctx.save();
+    if (sel.angRad !== 0){
+      ctx.translate(sel.pivot.x, sel.pivot.y);
+      ctx.rotate(sel.angRad);
+      ctx.translate(-sel.pivot.x, -sel.pivot.y);
+    }
     drawSelectionGlow(ctx, [...uniq.values()], 1);
+    ctx.restore();
   }
+
   // Flash highlight from log click (white glow, 0.2s)
   const fl = view.flash;
   const now = Date.now()/1000;
   if (fl && fl.until && fl.until > now){
     let org = state;
     let orgId = 0;
-
     if (Number.isFinite(fl.org) && fl.org >= 0 && Array.isArray(state.buds) && fl.org < state.buds.length){
       org = state.buds[fl.org];
       orgId = fl.org + 1;
-    } else {
-      org = state;
-      orgId = 0;
     }
 
-    const rects = collectFlashRects(view.cam, org, view, orgId, baseSeed, fl);
+    const m = getOrgMotion(view, orgId);
+    const dx = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
+    const dy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+    const breathMul = Number.isFinite(m?.breathMul) ? m.breathMul : 1;
+    const angRad = (Number.isFinite(m?.angleDeg) ? m.angleDeg : 0) * Math.PI / 180;
+    const cam2 = { ox: (cam.ox || 0) - dx, oy: (cam.oy || 0) - dy };
+    const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
+    const pivot = worldToScreenPx(cam2, core[0] || 0, core[1] || 0, view);
 
-    // чуть фильтруем дубликаты
+    const rects = collectFlashRects(cam2, org, view, orgId, baseSeed, fl, breathMul);
     const uniq2 = new Map();
     for (const r of rects){
       const k = `${r.x},${r.y},${r.w},${r.h}`;
       if (!uniq2.has(k)) uniq2.set(k, r);
     }
     if (uniq2.size){
+      ctx.save();
+      if (angRad !== 0){
+        ctx.translate(pivot.x, pivot.y);
+        ctx.rotate(angRad);
+        ctx.translate(-pivot.x, -pivot.y);
+      }
       drawFlashGlow(ctx, [...uniq2.values()]);
+      ctx.restore();
     }
   }
+
+  // Apply post-processing after the whole field is rendered.
+  fx.end(canvas);
 }
+
 
 // =====================
 // HUD / Legend / Rules (unchanged interface)
@@ -1387,6 +1457,17 @@ export function barStatus(org){
   if (minBar <= 0.65) return { txt:"норма", cls:"" };
   return { txt:"хорошо", cls:"ok" };
 }
+
+function barToneCls(v){
+  // v is 0..1
+  if (!isFinite(v)) return "";
+  if (v > 0.80) return "ok";
+  if (v > 0.60) return "info";
+  if (v > 0.20) return "warn";
+  if (v > 0.00) return "bad";
+  return "bad";
+}
+
 
 export function renderLegend(org, legendEl){
   const present = new Set(["body", "core"]);
@@ -1469,10 +1550,10 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   // seed moved to settings
 
   els.hudMeta.innerHTML = `
-    <span class="pill">еда: ${barPct(target.bars.food)}%</span>
-    <span class="pill">чист: ${barPct(target.bars.clean)}%</span>
-    <span class="pill">hp: ${barPct(target.bars.hp)}%</span>
-    <span class="pill">настр: ${barPct(target.bars.mood)}%</span>
+    <span class="pill ${barToneCls(target.bars.food)}">еда: ${barPct(target.bars.food)}%</span>
+    <span class="pill ${barToneCls(target.bars.clean)}">чист: ${barPct(target.bars.clean)}%</span>
+    <span class="pill ${barToneCls(target.bars.hp)}">здор: ${barPct(target.bars.hp)}%</span>
+    <span class="pill ${barToneCls(target.bars.mood)}">настр: ${barPct(target.bars.mood)}%</span>
     <span class="pill ${status.cls}">сост: ${status.txt}</span>
     <span class="pill">блоков: ${getTotalBlocks(target)}</span>
     <span class="pill">детей: ${(target.buds?.length || 0)}</span>
@@ -1509,7 +1590,6 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
 
     els.hudMeta2.innerHTML = `
       <span class="pill">морковки: поле ${fieldCount}, инв ${Math.max(0, inv|0)}</span>
-      <span class="pill">цель: ${tgtTxt}</span>
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
   }

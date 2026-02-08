@@ -4,7 +4,7 @@ import { DIR8, PALETTES } from "./world.js";
 import { BUD } from "./mods/budding.js";
 import { EVO } from "./mods/evo.js";
 import { pushLog } from "./log.js";
-import { growBodyConnected, addModule, makeSmallConnectedBody, growPlannedModules } from "./creature.js";
+import { growBodyConnected, addModule, makeSmallConnectedBody, growPlannedModules, calcBodyPerimeter } from "./creature.js";
 import { extractGenome, decodeGenome, mergeGenomes, instantiateParentFromGenome } from "./mods/merge.js";
 import { BODY } from "./organs/body.js";
 import { ANTENNA } from "./organs/antenna.js";
@@ -127,6 +127,56 @@ function weightedPick(rng, pairs){
     if ((r -= ww) <= 0) return k;
   }
   return pairs[pairs.length - 1][0];
+}
+
+// === Perimeter cap for *new organs* ===
+// New organs may not "occupy" more than 85% of the body's perimeter.
+// If cap reached: strict ban on spawning new organs -> grow body instead.
+const MAX_PERIMETER_USAGE = 0.85;
+const EARLY_FAST_BODY_BLOCKS = 80; // early stage grows faster
+
+const ORGAN_BASE_COST = {
+  // internal/face: do not consume perimeter
+  eye: 0,
+  core: 0,
+
+  // cheap bases
+  antenna: 1,
+  tentacle: 1,
+  spike: 1,
+  teeth: 1,
+
+  // thicker bases
+  limb: 2,
+  tail: 2,
+  worm: 2,
+  claw: 2,
+  fin: 2,
+  mouth: 2,
+
+  // heavy
+  shell: 3
+};
+
+function calcUsedPerimeter(state){
+  let used = 0;
+  for (const m of (state.modules || [])){
+    const t = m?.type;
+    used += (ORGAN_BASE_COST[t] ?? 1);
+  }
+  // eyes are tracked as modules; face-anchor is not an organ module and should not count.
+  return used;
+}
+
+function perimeterUsage(state){
+  const total = calcBodyPerimeter(state?.body);
+  if (!total) return 0;
+  const used = calcUsedPerimeter(state);
+  return used / total;
+}
+
+function canSpawnNewOrgan(state){
+  return perimeterUsage(state) < MAX_PERIMETER_USAGE;
 }
 
 function bodyBounds(body){
@@ -388,6 +438,10 @@ function computeMorphology(state){
 }
 
 export function applyMutation(state, momentSec){
+  // Mutations can change geometry; when combined with view-driven movement it can cause
+  // desync (e.g. organs spawning detached). Mark organism as busy while applying.
+  state.evoBusy = true;
+  try{
   const rng = mulberry32(hash32(state.seed, momentSec | 0));
   const mutationContext = state?._mutationContext || null;
   const appendageKinds = new Set([
@@ -601,34 +655,82 @@ export function applyMutation(state, momentSec){
       return [k, w];
     });
   }
-  const growthCount = 1 + Math.floor(rng() * 4);
+
+  // === Late-body reweight (soft switch to organs) ===
+  // After ~600 body blocks, резко уменьшаем шанс роста тела и усиливаем органные мутации.
+  // Переход мягкий (600..780), чтобы не было ступеньки.
+  {
+    const s = M.bodyBlocks;
+    const m = clamp01((s - 600) / 180); // 0..1
+    const kBodyLate = 1 - 0.92 * m;     // 1.00 -> ~0.08
+    const kOtherLate = 1 + 1.20 * m;    // 1.00 -> 2.20
+    weights = weights.map(([kk, ww]) => {
+      if (kk === "grow_body") return [kk, ww * kBodyLate];
+      return [kk, ww * kOtherLate];
+    });
+  }
+
+  // We want visible progress on every mutation cycle.
+  // Early game (<300 body blocks) should noticeably expand the core body.
+  const earlyBody = M.bodyBlocks < 300;
+  const growthCount = earlyBody ? (2 + Math.floor(rng() * 3)) : (1 + Math.floor(rng() * 4));
+
+  // Helper: body growth with early-game acceleration + consistent logging.
+  function growBodyWithEarlyBoost(reasonLabel){
+    // Early phase: grow faster so the player quickly reaches ~300 blocks.
+    const base = earlyBody ? (3 + Math.floor(rng() * 4)) : (1 + Math.floor(rng() * 3)); // early 3..6, normal 1..3
+    let addN = Math.max(1, Math.round(base * (EVO.bodyGrowMult || 1)));
+    if (M.bodyBlocks < 120) addN += 2;
+    else if (M.bodyBlocks < 200) addN += 1;
+    const { biases } = getGrowthBiases(state, "body");
+    const grown = growBodyConnected(state, addN, rng, null, biases);
+    if (grown){
+      pushLog(state, `Мутация: тело выросло (+${addN})${reasonLabel ? ` — ${reasonLabel}` : ""}.`, "mut_ok", { part: "body" });
+      return true;
+    }
+    pushLog(state, `Мутация: рост тела не удался${reasonLabel ? ` — ${reasonLabel}` : ""}.`, "mut_fail", { part: "body" });
+    return false;
+  }
   for (let step = 0; step < growthCount; step++){
     let forcedKind = null;
+    let forcedByPerimeter = false;
+
+    // Early game guarantee: the first step of each mutation cycle always attempts body growth.
+    if (earlyBody && step === 0){
+      forcedKind = "grow_body";
+    }
     if (Array.isArray(state.growthTarget) && targetPower >= 0.85){
       if (preferAppendageTarget && (state.modules?.length || 0) > 0){
         forcedKind = "grow_appendage";
       }
     }
-    const kind = forcedKind ?? weightedPick(rng, weights);
+    let kind = forcedKind ?? weightedPick(rng, weights);
     const appendageBudget = Number.isFinite(mutationContext?.appendageBudget)
       ? mutationContext.appendageBudget
       : null;
     const shouldThrottleAppendage = appendageBudget !== null && appendageBudget <= 0 && appendageKinds.has(kind);
 
+    // === Perimeter cap (strict): if new organs would exceed 85% perimeter usage,
+    // replace the organ spawn with body growth. No forced shell/defense fallback.
+    if (
+      kind !== "grow_body" &&
+      kind !== "grow_appendage" &&
+      kind !== "bud" &&
+      !shouldThrottleAppendage
+    ){
+      if (!canSpawnNewOrgan(state)){
+        kind = "grow_body";
+        forcedByPerimeter = true;
+      }
+    }
+
     // 1) Почкование
     if (kind === "bud"){
       const idx = pickBuddingModule(state, rng);
       if (idx === -1){
-        // нет подходящих модулей - просто рост тела
-        const addN = 1 + Math.floor(rng()*2);
-        const { biases } = getGrowthBiases(state, "body");
-        const grown = growBodyConnected(state, addN, rng, null, biases);
-        pushLog(state, grown
-          ? `Мутация: почкование не удалось → тело выросло (+${addN}).`
-          : `Мутация: почкование не удалось и рост тела не удался.`,
-          "mut_fail",
-          { part: "body" }
-        );
+        // нет подходящих модулей -> не тратим тик впустую: подрастим тело
+        pushLog(state, `Мутация: почкование не удалось (нет подходящего отростка).`, "mut_fail", { part: "bud" });
+        growBodyWithEarlyBoost("фолбэк после неудачного почкования");
         continue;
       }
 
@@ -641,29 +743,46 @@ export function applyMutation(state, momentSec){
         state.bars.hp = clamp01(state.bars.hp - 0.20);
         pushLog(state, `Мутация: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
       } else {
-        const addN = 1 + Math.floor(rng()*2);
-        const grown = growBodyConnected(state, addN, rng);
         pushLog(
           state,
-          grown
-            ? `Мутация: почкование не поместилось → тело выросло (+${addN}).`
-            : `Мутация: почкование не поместилось и рост тела не удался.`,
+          `Мутация: почкование не поместилось.`,
           "mut_fail",
           { part: budType }
         );
+        // fallback: if budding placement failed, expand body to create room
+        growBodyWithEarlyBoost("фолбэк после неудачного почкования");
       }
       continue;
     }
 
     // 2) Рост тела
     if (kind === "grow_body" || shouldThrottleAppendage){
-      // Body growth per mutation (scaled by EVO.bodyGrowMult).
-      const base = 1 + Math.floor(rng() * 3); // 1..3
-      const addN = Math.max(1, Math.round(base * (EVO.bodyGrowMult || 1)));
+      // Body growth per mutation (scaled by EVO.bodyGrowMult). Early stage is faster.
+      const base = earlyBody ? (3 + Math.floor(rng() * 4)) : (1 + Math.floor(rng() * 3)); // early 3..6, normal 1..3
+      let addN = Math.max(1, Math.round(base * (EVO.bodyGrowMult || 1)));
+      if (M.bodyBlocks < 120) addN += 2;
+      else if (M.bodyBlocks < 200) addN += 1;
+
+      // If we are forced to grow body due to perimeter cap, accelerate early-stage body growth.
+      if (forcedByPerimeter){
+        const earlyBonus = (M.bodyBlocks < EARLY_FAST_BODY_BLOCKS) ? 2 : (M.bodyBlocks < 200 ? 1 : 0);
+        addN += earlyBonus;
+      }
       const { biases } = getGrowthBiases(state, "body");
       const grown = growBodyConnected(state, addN, rng, null, biases);
 
-      if (grown) pushLog(state, `Мутация: тело выросло (+${addN}).`, "mut_ok", { part: "body" });
+      if (grown){
+        if (forcedByPerimeter){
+          pushLog(
+            state,
+            `Мутация: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → тело выросло (+${addN}).`,
+            "mut_ok",
+            { part: "body" }
+          );
+        } else {
+          pushLog(state, `Мутация: тело выросло (+${addN}).`, "mut_ok", { part: "body" });
+        }
+      }
       else pushLog(state, `Мутация: рост тела не удался.`, "mut_fail", { part: "body" });
       continue;
     }
@@ -705,24 +824,9 @@ export function applyMutation(state, momentSec){
           grownModules
         });
       } else {
-        const { biases: bodyBiases } = getGrowthBiases(state, "body");
-        const addN = 1 + Math.floor(rng() * 2); // +1..2
-        const grownBody = growBodyConnected(state, addN, rng, null, bodyBiases);
-        if (grownBody){
-          pushLog(
-            state,
-            `Мутация: рост отростков не удался → тело выросло (+${addN}).`,
-            "mut_fail",
-            { part: "appendage" }
-          );
-        } else {
-          pushLog(
-            state,
-            `Мутация: рост отростков не удался и рост тела не удался.`,
-            "mut_fail",
-            { part: "appendage" }
-          );
-        }
+        // Do not waste the mutation step: if appendage growth failed, expand body.
+        pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
+        growBodyWithEarlyBoost("фолбэк после неудачного роста отростка");
       }
       continue;
     }
@@ -744,32 +848,84 @@ export function applyMutation(state, momentSec){
       continue;
     }
 
-    const reason = added?.reason || "blocked";
+    // Не получилось добавить орган: пробуем найти ДРУГОЙ орган, который может появиться.
+    // По требованию: рост тела оставляем только если причина "не поместился".
+    const firstReason = added?.reason || "blocked";
+    // Reasons that should trigger "make room / grow body" fallback.
+    let blockedSeen = (firstReason === "blocked" || firstReason === "min_body");
+
+    const organKeys = weights
+      .map(([k]) => k)
+      .filter((k) => k !== "grow_body" && k !== "grow_appendage" && k !== "bud");
+
+    // Сортируем по весу (сильнее вероятные — раньше), но с небольшим шумом.
+    const weightMap = new Map(weights);
+    const candidates = organKeys
+      .filter((k) => k !== kind)
+      .map((k) => ({ k, w: (weightMap.get(k) || 0) }))
+      .sort((a, b) => (b.w - a.w) || (rng() - 0.5));
+
+    let altOk = false;
+    let altKind = null;
+    let altMi = null;
+    let lastReason = firstReason;
+
+    for (let i = 0; i < candidates.length; i++){
+      const kk = candidates[i].k;
+      const beforeAlt = state.modules ? state.modules.length : 0;
+      const addedAlt = addModule(state, kk, rng, target);
+      const afterAlt = state.modules ? state.modules.length : 0;
+
+      if (addedAlt?.ok){
+        altOk = true;
+        altKind = kk;
+        altMi = (afterAlt > beforeAlt) ? beforeAlt : null;
+        if (appendageBudget !== null && appendageKinds.has(kk)){
+          mutationContext.appendageBudget = Math.max(0, appendageBudget - 1);
+        }
+        break;
+      }
+
+      lastReason = addedAlt?.reason || lastReason;
+      if ((addedAlt?.reason || "") === "blocked") blockedSeen = true;
+    }
+
+    if (altOk){
+      pushLog(
+        state,
+        `Мутация: орган (${organLabel(kind)}) не смог появиться → появился другой орган (${organLabel(altKind)}).`,
+        "mut_ok",
+        { part: altKind, mi: altMi }
+      );
+      continue;
+    }
+
     const reasonLabel = {
       type_cap: "достигнут лимит типов",
       too_close: "слишком близко к органу того же типа",
       no_anchor: "не найден якорь",
+      min_body: "слишком рано (тело ещё мало)",
       blocked: "не поместился"
-    }[reason] || "не поместился";
+    }[firstReason] || "не поместился";
 
-    // Если орган не поместился -> вместо него растим тело (+1..2)
-    const addN = 1 + Math.floor(rng() * 2); // +1..2
-    const grown = growBodyConnected(state, addN, rng, null, biases);
-
-    if (grown){
-      pushLog(
-        state,
-        `Мутация: орган (${organLabel(kind)}) ${reasonLabel} → тело выросло (+${addN}) для следующей попытки.`,
-        "mut_fail",
-        { part: kind }
-      );
+    if (blockedSeen){
+      // Fallback: if an organ couldn't be spawned due to geometry or early gating,
+      // grow the body so the next mutation has new anchors/perimeter.
+      const ok = growBodyWithEarlyBoost(`фолбэк после неудачи органа (${organLabel(kind)}): ${reasonLabel}`);
+      if (!ok){
+        // already logged in helper
+      }
     } else {
+      // Иначе — просто фиксируем неудачу, без раздувания тела.
       pushLog(
         state,
-        `Мутация: орган (${organLabel(kind)}) ${reasonLabel} и рост тела не удался.`,
+        `Мутация: орган (${organLabel(kind)}) ${reasonLabel}.`,
         "mut_fail",
         { part: kind }
       );
     }
+  }
+  } finally {
+    state.evoBusy = false;
   }
 }

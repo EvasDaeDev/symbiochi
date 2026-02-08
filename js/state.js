@@ -1,19 +1,13 @@
 import { clamp, clamp01, key, nowSec, mulberry32, hash32, pick } from "./util.js";
-import { getMaxAppendageLen } from "./config.js";
 import { BAR_MAX } from "./world.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
-import { newGame, makeSmallConnectedBody, findFaceAnchor, repairDetachedModules } from "./creature.js";
+import { newGame, makeSmallConnectedBody, findFaceAnchor, repairDetachedModules, getOrganMaxLen } from "./creature.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
-const APPENDAGE_TYPE_LIMITS = {
-  spike: 10,
-  antenna: 27,
-  claw: 12
-};
 
 export function loadSave(){
   try{
@@ -69,7 +63,7 @@ org.seed = seed;
         axisDir: pick(prng, [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]),
         symmetry: prng(),
         wiggle: prng(),
-        ecotype: pick(rng, ["crawler","swimmer","sentinel","tank","sprinter","lurker","seer","fortress","bloomer"])
+        ecotype: pick(prng, ["crawler","swimmer","sentinel","tank","sprinter","lurker","seer","fortress","bloomer"])
       };
     }
 
@@ -100,9 +94,7 @@ org.seed = seed;
     for (const m of org.modules){ m.cells = normCells(m.cells); }
 
     function enforceAppendageRules(){
-      const bodyCells = org.body?.cells || [];
-      const maxAppendageLen = bodyCells.length * 3;
-      const typeLimits = APPENDAGE_TYPE_LIMITS;
+      // Без глобального cap от тела: длина ограничивается только параметрами органа.
       const kept = [];
       const typeBuckets = new Map();
 
@@ -123,22 +115,21 @@ org.seed = seed;
         const type = m.type || "organ";
         let cells = Array.isArray(m.cells) ? m.cells.slice() : [];
         if (!cells.length) continue;
-        const typeLimit = typeLimits[type] ?? Infinity;
-        const limit = maxAppendageLen > 0 ? Math.min(typeLimit, maxAppendageLen) : typeLimit;
-        if (Number.isFinite(limit) && limit > 0 && cells.length > limit){
-          cells = cells.slice(0, limit);
+
+        const maxLen = getOrganMaxLen(type);
+        if (Number.isFinite(maxLen) && maxLen > 0 && cells.length > maxLen){
+          cells = cells.slice(0, maxLen);
         }
         if (!cells.length) continue;
+
         const existing = typeBuckets.get(type);
         if (isTooCloseToType(cells, existing)) continue;
+
         m.cells = cells;
         if (Number.isFinite(m.growTo)) m.growTo = Math.min(m.growTo, cells.length);
         kept.push(m);
-        if (existing){
-          existing.push(...cells);
-        } else {
-          typeBuckets.set(type, cells.slice());
-        }
+        if (existing) existing.push(...cells);
+        else typeBuckets.set(type, cells.slice());
       }
 
       org.modules = kept;
@@ -186,7 +177,7 @@ org.seed = seed;
 
   // Feeding / shaping system (carrots)
   if (!Array.isArray(state.carrots)) state.carrots = [];
-  state.inv = state.inv || { carrots: 10 };
+  state.inv = state.inv || { carrots: CARROT.startInventory };
   state.carrotTick = state.carrotTick || { id: 0, used: 0 };
   if (state.growthTarget === undefined) state.growthTarget = null;
   if (state.growthTargetMode === undefined) state.growthTargetMode = null;
@@ -196,6 +187,8 @@ org.seed = seed;
   // UI / tuning settings
   if (!state.settings) state.settings = {};
   if (!Number.isFinite(state.settings.lengthPriority)) state.settings.lengthPriority = 0.65;
+  // Screen FX (post-processing). Default ON.
+  if (state.settings.fxEnabled === undefined) state.settings.fxEnabled = true;
   if (!state.partHue) state.partHue = {};
   if (!state.partColor) state.partColor = {};
 
@@ -218,16 +211,12 @@ org.seed = seed;
 
 function clampAppendageLengths(org){
   if (!org || !Array.isArray(org.modules)) return;
-  const bodyCells = org.body?.cells || [];
-  const maxAppendageLen = bodyCells.length * 3;
-
   for (const m of org.modules){
     if (!m || !Array.isArray(m.cells) || m.cells.length === 0) continue;
     const type = m.type || "organ";
-    const typeLimit = APPENDAGE_TYPE_LIMITS[type] ?? Infinity;
-    const limit = maxAppendageLen > 0 ? Math.min(typeLimit, maxAppendageLen) : typeLimit;
-    if (Number.isFinite(limit) && limit > 0 && m.cells.length > limit){
-      m.cells = m.cells.slice(0, limit);
+    const maxLen = getOrganMaxLen(type);
+    if (Number.isFinite(maxLen) && maxLen > 0 && m.cells.length > maxLen){
+      m.cells = m.cells.slice(0, maxLen);
     }
     if (Number.isFinite(m.growTo)){
       m.growTo = Math.min(m.growTo, m.cells.length);
@@ -294,6 +283,19 @@ export function simulate(state, deltaSec){
 
   // decay for parent + buds
   const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+
+  // Track block deltas for offline report.
+  const countBlocks = (org)=>{
+    if (!org) return 0;
+    const bodyN = Array.isArray(org.body?.cells) ? org.body.cells.length : 0;
+    const mods = Array.isArray(org.modules) ? org.modules : [];
+    let modN = 0;
+    for (const m of mods){
+      if (Array.isArray(m?.cells)) modN += m.cells.length;
+    }
+    return bodyN + modN;
+  };
+  const blocksBefore = orgs.map(countBlocks);
   for (const org of orgs){
     org.bars.food  = clamp(applyNonLinearDecay(org.bars.food, DECAY.food_per_sec, deltaSec), 0, BAR_MAX);
     org.bars.clean = clamp(applyNonLinearDecay(org.bars.clean, DECAY.clean_per_sec, deltaSec), 0, BAR_MAX);
@@ -313,19 +315,20 @@ export function simulate(state, deltaSec){
     // Hunger gate (mutations pause/resume with hysteresis)
     updateHungerGate(org);
 
-    // Offline shrink: if ALL bars are at 0 for long enough offline, shrink every 20 minutes.
-    if (isOffline){
-      if (allBarsZero(org)){
-        org._offlineZeroAccSec = (org._offlineZeroAccSec || 0) + deltaSec;
-        const stepSec = 20 * 60;
-        const steps = Math.floor(org._offlineZeroAccSec / stepSec);
-        if (steps > 0){
-          org._offlineZeroAccSec -= steps * stepSec;
-          org._offlineShrinks = (org._offlineShrinks || 0) + steps;
-        }
-      } else {
-        org._offlineZeroAccSec = 0;
+    // Shrink (usykhanie): if ANY bar reaches 0 and stays critical long enough,
+    // shrink every 20 minutes.
+    // Works both offline and during active play. Shrink is applied AFTER catch-up so it never
+    // changes mutation timing/placement.
+    if (minBarValue(org) <= 0){
+      org._offlineZeroAccSec = (org._offlineZeroAccSec || 0) + deltaSec;
+      const stepSec = 20 * 60;
+      const steps = Math.floor(org._offlineZeroAccSec / stepSec);
+      if (steps > 0){
+        org._offlineZeroAccSec -= steps * stepSec;
+        org._offlineShrinks = (org._offlineShrinks || 0) + steps;
       }
+    } else {
+      org._offlineZeroAccSec = 0;
     }
   }
 
@@ -389,6 +392,13 @@ export function simulate(state, deltaSec){
     return state._mutationContext;
   };
   const runMutationTick = (org, momentSec)=>{
+    // Movement lock: if organism is moving (view-driven), do not mutate now.
+    // Accumulate mutation debt to apply after full stop.
+    if (org && org.__moving){
+      org.mutationDebt = Math.max(0, (org.mutationDebt || 0) + 1);
+      return 0;
+    }
+
     const gate = updateHungerGate(org);
     if (gate.minBar <= 0){
       // Zero is allowed; mutations are simply paused by the hunger gate.
@@ -422,11 +432,8 @@ export function simulate(state, deltaSec){
   {
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
-      const gate = updateHungerGate(state);
-      if (!gate.paused){
-        applyMutation(state, state.lastMutationAt);
-        mutations++;
-      }
+      // Mutate only while standing; while moving we accumulate debt.
+      mutations += runMutationTick(state, state.lastMutationAt);
       eatBudAppendage(state);
     });
     dueSteps += normalResult.due;
@@ -445,8 +452,7 @@ export function simulate(state, deltaSec){
         if (minBar <= 0){
           applyShrinkDecay(state, state.lastMutationAt);
         } else {
-          applyMutation(state, state.lastMutationAt);
-          mutations++;
+          mutations += runMutationTick(state, state.lastMutationAt);
         }
         eatBudAppendage(state);
       });
@@ -467,11 +473,7 @@ export function simulate(state, deltaSec){
 
       applySteps(bud, budNormalEnd, intervalSec, ()=>{
         eaten += processCarrotsTick(state, bud);
-        const gate = updateHungerGate(bud);
-        if (!gate.paused){
-          applyMutation(bud, bud.lastMutationAt);
-          budMutations++;
-        }
+        budMutations += runMutationTick(bud, bud.lastMutationAt);
         eatParentAppendage(state, bud);
       });
       if (budUpTo > budNormalEnd){
@@ -487,8 +489,7 @@ export function simulate(state, deltaSec){
           if (minBar <= 0){
             applyShrinkDecay(bud, bud.lastMutationAt);
           } else {
-            applyMutation(bud, bud.lastMutationAt);
-            budMutations++;
+            budMutations += runMutationTick(bud, bud.lastMutationAt);
           }
           eatParentAppendage(state, bud);
         });
@@ -500,13 +501,21 @@ export function simulate(state, deltaSec){
     }
   }
 
-  // Apply accumulated offline shrink steps (every 20 min at all-zero bars).
+  // Apply accumulated shrink steps (every 20 min at all-zero bars).
   // Done AFTER time fast-forward, so shrink does not interfere with per-tick mutation placement.
   for (const org of orgs){
     const steps = (org && org._offlineShrinks) ? (org._offlineShrinks|0) : 0;
     if (steps > 0){
+      let local = 0;
       for (let i=0;i<steps;i++){
-        if (applyShrinkDecay(org, org.lastMutationAt || now)) simShrinks++;
+        if (applyShrinkDecay(org, org.lastMutationAt || now)){
+          simShrinks++;
+          local++;
+        }
+      }
+      if (local > 0){
+        // Red log entry
+        pushLog(org, `Организм усыхает (-${local} блок.)`, "alert");
       }
       org._offlineShrinks = 0;
     }
@@ -523,7 +532,18 @@ export function simulate(state, deltaSec){
 
   mergeTouchingOrganisms(state);
   state.lastSeen = now;
-  return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps, shrinks: simShrinks };
+
+  // Block delta summary (parent + buds). Used in offline report.
+  const blocksAfter = orgs.map(countBlocks);
+  let grownBlocks = 0;
+  let shrunkBlocks = 0;
+  for (let i=0;i<blocksBefore.length;i++){
+    const d = (blocksAfter[i] || 0) - (blocksBefore[i] || 0);
+    if (d > 0) grownBlocks += d;
+    else if (d < 0) shrunkBlocks += -d;
+  }
+
+  return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps, shrinks: simShrinks, grownBlocks, shrunkBlocks };
 }
 
 function reportCriticalState(org, momentSec){

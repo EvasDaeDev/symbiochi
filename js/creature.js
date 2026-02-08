@@ -1,5 +1,4 @@
 import { key, parseKey, mulberry32, hash32, pick } from "./util.js";
-import { getMaxAppendageLen } from "./config.js";
 import { ANTENNA } from "./organs/antenna.js";
 import { CLAW } from "./organs/claw.js";
 import { EYE } from "./organs/eye.js";
@@ -15,6 +14,7 @@ import { WORM } from "./organs/worm.js";
 import { BODY } from "./organs/body.js";
 import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
 import { EVO } from "./mods/evo.js";
+import { CARROT } from "./mods/carrots.js";
 
 const BASE_GROW_DUR_SEC = 0.7;
 
@@ -34,9 +34,19 @@ const ORGAN_CONFIGS = {
   body: BODY
 };
 
-function getOrganConfig(type){
+export function getOrganConfig(type){
   if (!type) return null;
   return ORGAN_CONFIGS[type] || null;
+}
+
+export function getOrganMaxLen(type){
+  const cfg = getOrganConfig(type);
+  if (!cfg) return Infinity;
+  if (Number.isFinite(cfg.maxLen) && cfg.maxLen > 0) return cfg.maxLen;
+  const minLen = Number.isFinite(cfg.minLen) ? cfg.minLen : 0;
+  const maxExtra = Number.isFinite(cfg.maxExtra) ? cfg.maxExtra : 0;
+  const derived = minLen + maxExtra;
+  return derived > 0 ? derived : Infinity;
 }
 
 function pickWeighted(rng, options, weights){
@@ -177,6 +187,22 @@ export function bodyCellSet(body){
   return s;
 }
 
+// Perimeter of the *body only* (counts external edges).
+// NOTE: uses 4-neighborhood (N/E/S/W), not DIR8.
+export function calcBodyPerimeter(body){
+  if (!body || !Array.isArray(body.cells) || body.cells.length === 0) return 0;
+  const set = bodyCellSet(body);
+  let p = 0;
+  for (const k of set){
+    const [x, y] = parseKey(k);
+    if (!set.has(key(x + 1, y))) p++;
+    if (!set.has(key(x - 1, y))) p++;
+    if (!set.has(key(x, y + 1))) p++;
+    if (!set.has(key(x, y - 1))) p++;
+  }
+  return p;
+}
+
 export function findFaceAnchor(body, seed){
   const rng = mulberry32(hash32(seed, 20202));
   const cells = body.cells.slice().sort((a,b)=>b[0]-a[0]);
@@ -217,7 +243,7 @@ export function newGame(){
     // 0..1: насколько "кривые" будут отростки (прямые/зигзаг/дуга)
     wiggle: rng(),
     // простой "экотип" — даёт разный стиль тела
-    ecotype: pick(rng, ["crawler","swimmer","sentinel","tank"])
+    ecotype: pick(rng, ["crawler","swimmer","sentinel","tank","sprinter","lurker","seer","fortress","bloomer"])
   };
   const state = {
     version: 6,
@@ -238,8 +264,8 @@ export function newGame(){
     buds: [],
     // Feeding items placed by the player
     carrots: [],
-    inv: { carrots: 10 },
-    carrotTick: { id: 0, used: 0 }, // max 3 per feeding tick
+    inv: { carrots: CARROT.startInventory },
+    carrotTick: { id: 0, used: 0 }, // лимит за тик: CARROT.maxPerTick
     growthTarget: null,
     growthTargetMode: null, // "body" | "appendage"
     growthTargetPower: 0,
@@ -323,8 +349,11 @@ export function growBodyConnected(state, addN, rng, target=null, biases=null){
       }
     }
     if (!candidates.length) return false;
+    // Важно: тело никогда не должно «врастать» в клетки органа.
+    // Если вокруг нет свободных клеток (все заняты модулями) — рост тела в этом тике невозможен.
     const freeCandidates = candidates.filter((c) => !c[2]);
-    const pool = freeCandidates.length ? freeCandidates : candidates;
+    if (!freeCandidates.length) return false;
+    const pool = freeCandidates;
 
     // If a growth target is provided (e.g. "carrot"), bias growth towards it,
     // otherwise bias towards the core for compact connected bodies.
@@ -408,11 +437,29 @@ function buildEyeOffsets(radius, shape){
   return out;
 }
 
+// Target growth helper: aim near the *maximum* (minLen + maxExtra) with ±10% jitter.
+// This keeps organs usually reaching their configured maximum length, while still adding variety.
+function targetLenNearMax(rng, minLen, maxExtra){
+  const minL = Math.max(0, (minLen ?? 0) | 0);
+  const extra = Math.max(0, (maxExtra ?? 0) | 0);
+  if (extra <= 0) return minL;
+  // Jitter the *extra* around its max: 90%..110%
+  const jitter = 0.9 + (rng() * 0.2);
+  const targetExtra = Math.max(0, Math.round(extra * jitter));
+  return minL + targetExtra;
+}
+
 export function addModule(state, type, rng, target=null){
   const bodySet = bodyCellSet(state.body);
   const bodyCells = state.body.cells.slice();
-  const maxAppendageLen = getMaxAppendageLen(state.body?.cells?.length || 0);
   const cfg = getOrganConfig(type);
+
+  // Per-organ spawn gating (single source of truth: organs/*.js).
+  // Useful to keep early-game body growth from being stalled by heavy perimeter organs.
+  const spawnMinBody = Number.isFinite(cfg?.spawnMinBody) ? cfg.spawnMinBody : null;
+  if (spawnMinBody !== null && bodyCells.length < spawnMinBody){
+    return { ok: false, reason: "min_body" };
+  }
   const moduleWidth = Number.isFinite(cfg?.width) ? cfg.width : 1;
   const moduleShape = pickWeighted(rng, cfg?.shapeOptions, cfg?.shapeWeights);
   const moduleGrowthChance = Number.isFinite(cfg?.growthChance) ? cfg.growthChance : 1;
@@ -524,15 +571,15 @@ export function addModule(state, type, rng, target=null){
   if (type === "tail" || type === "tentacle"){
     movable = true;
     const cfg = (type === "tail") ? TAIL : TENTACLE;
-    targetLen = cfg.minLen + Math.floor(rng() * cfg.maxExtra);
+    // Aim near configured maximum length (±10% on maxExtra)
+    targetLen = targetLenNearMax(rng, cfg.minLen, cfg.maxExtra);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "worm"){
     movable = true;
-    const maxWormLen = Math.max(1, Math.floor((state.body?.cells?.length || 0) * WORM.maxBodyMult));
-    targetLen = WORM.minLen + Math.floor(rng() * WORM.maxExtra);
-    targetLen = Math.min(targetLen, maxWormLen);
+    // Aim near configured maximum length (±10% on maxExtra)
+    targetLen = targetLenNearMax(rng, WORM.minLen, WORM.maxExtra);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
@@ -546,7 +593,8 @@ export function addModule(state, type, rng, target=null){
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "antenna"){
     movable = true;
-    targetLen = ANTENNA.minLen + Math.floor(rng() * ANTENNA.maxExtra);
+    // Aim near configured maximum length (±10% on maxExtra)
+    targetLen = targetLenNearMax(rng, ANTENNA.minLen, ANTENNA.maxExtra);
     const dir = rng() < ANTENNA.upBias ? [0,-1] : quantizeDirTo8(baseDir);
     dirForGrowth = dir;
     targetLen = Math.min(targetLen, ANTENNA.maxLen);
@@ -554,7 +602,8 @@ export function addModule(state, type, rng, target=null){
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "spike"){
     movable = false;
-    targetLen = SPIKE.minLen + Math.floor(rng() * SPIKE.maxExtra);
+    // Aim near configured maximum length (±10% on maxExtra)
+    targetLen = targetLenNearMax(rng, SPIKE.minLen, SPIKE.maxExtra);
     dirForGrowth = baseDir;
     targetLen = Math.min(targetLen, SPIKE.maxLen);
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
@@ -627,7 +676,8 @@ export function addModule(state, type, rng, target=null){
   } else if (type === "teeth"){
     // teeth: 1-wide line in front of face anchor, grows up to 6
     movable = false;
-    targetLen = TEETH.minLen + Math.floor(rng() * TEETH.maxExtra);
+    // Aim near configured maximum length (±10% on maxExtra)
+    targetLen = targetLenNearMax(rng, TEETH.minLen, TEETH.maxExtra);
     const fa = state.face?.anchor || anchor;
     const dir = [TEETH.dir[0], TEETH.dir[1]];
     dirForGrowth = dir;
@@ -636,7 +686,8 @@ export function addModule(state, type, rng, target=null){
   } else if (type === "claw"){
     // claw: like a limb but more "hook"-like (grows longer)
     movable = true;
-    targetLen = CLAW.minLen + Math.floor(rng() * CLAW.maxExtra);
+    // Aim near configured maximum length (±10% on maxExtra)
+    targetLen = targetLenNearMax(rng, CLAW.minLen, CLAW.maxExtra);
     targetLen = Math.min(targetLen, CLAW.maxLen);
     dirForGrowth = baseDir;
     const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
@@ -661,8 +712,11 @@ export function addModule(state, type, rng, target=null){
 
   if (!cells.length) return { ok: false, reason: "blocked" };
   if (isTooCloseToSameType(cells)) return { ok: false, reason: "too_close" };
-  if (dirForGrowth && maxAppendageLen > 0 && targetLen){
-    targetLen = Math.min(targetLen, maxAppendageLen);
+  // Больше НЕ ограничиваем длину отростка размером тела.
+  // Единственный источник лимита — параметры самого органа (organs/*.js).
+  if (dirForGrowth && targetLen){
+    const maxLen = getOrganMaxLen(type);
+    if (Number.isFinite(maxLen) && maxLen > 0) targetLen = Math.min(targetLen, maxLen);
   }
   for (const [x,y] of cells) markAnim(state, x, y, type);
   // slight per-module tone variation (±10% intended for rendering)
@@ -767,8 +821,8 @@ export function growPlannedModules(state, rng, options = {}){
   } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
-  const maxAppendageLen = getMaxAppendageLen(state.body?.cells?.length || 0);
-  const maxWormLen = (state.body?.cells?.length || 0) * WORM.maxBodyMult;
+  // Больше нет глобального ограничения длины отростков от размера тела.
+  // Единственный источник лимита — параметры органа (organs/*.js).
   const carrotCenters = useTarget
     ? [target]
     : Array.isArray(state.carrots)
@@ -882,16 +936,17 @@ export function growPlannedModules(state, rng, options = {}){
       m.growPos = [lastCell[0], lastCell[1]];
     }
     if (minLen > 0 && m.cells.length >= minLen) continue;
-    if (maxAppendageLen > 0 && m.cells.length >= maxAppendageLen) continue;
-    if (m.type === "worm" && maxWormLen > 0 && m.cells.length >= maxWormLen) continue;
-    if (m.type === "spike" && m.cells.length >= SPIKE.maxLen) continue;
-    if (m.type === "antenna" && m.cells.length >= ANTENNA.maxLen) continue;
-    if (m.type === "claw" && m.cells.length >= CLAW.maxLen) continue;
+    // Лимиты длины: только из organs/*.js
+    const maxLen = getOrganMaxLen(m.type);
+    if (Number.isFinite(maxLen) && maxLen > 0 && m.cells.length >= maxLen) continue;
     const growthChance = Number.isFinite(m.growthChance)
       ? m.growthChance
       : (Number.isFinite(cfg?.growthChance) ? cfg.growthChance : 1);
-    if (rng() > growthChance) continue;
-    if (requireSight && !seesCarrot(m)) continue;
+    // "Sees carrot" is no longer a hard gate: if the appendage is not oriented towards any
+    // carrot, just reduce its growth chance by 20% instead of blocking growth completely.
+    let effChance = growthChance;
+    if (requireSight && hasCarrots && !seesCarrot(m)) effChance *= 0.8;
+    if (rng() > effChance) continue;
 
     const last = m.cells[m.cells.length - 1];
     const growPos = Array.isArray(m.growPos) ? m.growPos : [last[0], last[1]];

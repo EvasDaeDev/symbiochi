@@ -58,7 +58,7 @@
         <div id="startOverlay">
           <div class="startBox">
             <h1>SYMBIOCHI</h1>
-            <p>Авто-обновление каждые 1 сек.<br>Перетаскивай питомца мышью.</p>
+            <p>Игрок не управляет эволюцией напрямую...</p>
             <button class="btn" id="playBtn">ИГРАТЬ!</button>
           </div>
         </div>
@@ -82,7 +82,7 @@
           <div class="field">
             <div>Интервал мутации (минуты мирового времени)</div>
             <input id="evoInput" type="number" min="0.1" step="0.1" />
-            <div class="hint">Чем меньше число — тем чаще мутации.</div>
+            
           </div>
           <div class="field">
             <div>Приоритет длины отростков (0% новые → 100% удлинять)</div>
@@ -91,11 +91,18 @@
           <div class="field">
             <div>Морковок в запасе</div>
             <input id="carrotsInput" type="number" min="0" step="1" />
-            <div class="hint">Клик по полю в режиме «КОРМ» бросает морковку 3×7. Лимит: 3/тик.</div>
+            
+          </div>
+          <div class="field">
+            <label style="display:flex; align-items:center; gap:10px; user-select:none;">
+              <input id="fxEnabled" type="checkbox" />
+              <span>Экранные FX (CRT-дисторшн + хроматика)</span>
+            </label>
+            
           </div>
           <div class="modalBtns">
             <button class="smallbtn" id="newCreature">НОВОЕ СУЩ.</button>
-            <button class="smallbtn" id="symbiosisBtn">СИМБИОЗ</button>
+            <button class="smallbtn" id="symbiosisBtn" disabled title="В разработке">СИМБИОЗ</button>
             <button class="smallbtn" id="saveSettings">СОХР</button>
             <button class="smallbtn" id="closeSettings">ЗАКР</button>
           </div>

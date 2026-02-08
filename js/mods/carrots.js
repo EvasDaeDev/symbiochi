@@ -5,8 +5,14 @@ export const CARROT = {
   w: 3,
   h: 7,
   maxPerTick: 3,
-  nearDist: 7,    // близко: растем телом (если нет органа-перехватчика)
-  farDist: 15,    // дальше: тянем отросток
+  // Дистанции (в блоках, Манхэттен):
+  // - если тело в радиусе nearDist: растим тело
+  // - иначе (но в пределах farDist): тянем отростки к морковке
+  nearDist: 10,
+  farDist: 60,
+
+  // Все настройки морковок храним здесь (единый источник правды)
+  startInventory: 200
 };
 
 export function carrotCellOffsets(w = CARROT.w, h = CARROT.h){
