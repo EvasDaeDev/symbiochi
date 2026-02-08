@@ -31,7 +31,7 @@
 
       <div class="panel" id="mainPanel">
         <div class="lifeOverlay">
-          <span class="pill lifePill" id="lifePill">жизнь: 00:00:00</span>
+          <div class="pill lifePill" id="lifePill">жизнь: 00:00:00</div>
           <div class="perfStats" id="perfStats">
             <div class="perfItem" id="gpuStat">GPU: —%</div>
             <div class="perfItem" id="cpuStat">CPU: —%</div>
@@ -96,7 +96,7 @@
           <div class="field">
             <label style="display:flex; align-items:center; gap:10px; user-select:none;">
               <input id="fxEnabled" type="checkbox" />
-              <span>Экранные FX (CRT-дисторшн + хроматика)</span>
+              <span>Эффкты(дисторшн + хроматика)</span>
             </label>
             
           </div>
@@ -143,8 +143,7 @@
     <div class="panel" id="infoPanel">
       <div class="hdr">
         <div class="t">ИНФОРМАЦИЯ</div>
-        <div class="s">Организм • легенда • журнал • правила роста.</div>
-      </div>
+            </div>
       <div class="tabs" id="infoTabs">
         <button class="tabBtn isActive" data-tab="org">ОРГАНИЗМ</button>
         <button class="tabBtn" data-tab="legend">ЛЕГЕНДА</button>
@@ -159,7 +158,7 @@
         <div class="huePicker" id="huePicker" style="display:none;">
           <div class="hueTitle" id="hueTitle">Цвет</div>
           <input id="hueRange" type="color" />
-          <div class="hint">Клик по цвету в легенде → меняешь цвет.</div>
+          <div class="hint">Подбери цвет по вкусу.</div>
         </div>
       </div>
       <div class="tabBody" id="tab-log">

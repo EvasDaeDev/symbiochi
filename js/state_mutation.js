@@ -519,45 +519,45 @@ export function applyMutation(state, momentSec){
 
   // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
   if (eco === "crawler"){
-    bump("limb", 0.30);
-	bump("tentacle", 0.30);
-    mul("tail", 1.00);
+    bump("limb", 0.10);
+	bump("tentacle", 0.10);
+    mul("tail", 0.90);
     mul("antenna", 0.95);
   } else if (eco === "swimmer"){
-    bump("tail", 0.20);
+    bump("tail", 0.15);
     bump("fin", 0.18);     // появится только в late-game, но пусть вес уже будет
-    mul("limb", 0.85);
+    mul("limb", 0.90);
   } else if (eco === "sentinel"){
-    bump("antenna", 0.30);
-    bump("eye", 0.20);
+    bump("antenna", 0.10);
+    bump("eye", 0.05);
     bump("spike", 0.10);
     mul("grow_body", 0.90);
   } else if (eco === "tank"){
-    bump("shell", 0.30);
-    bump("spike", 0.20);
+    bump("shell", 0.10);
+    bump("spike", 0.05);
     bump("grow_body", 0.12);
     mul("limb", 0.85);
     mul("tail", 0.85);
 	} else if (eco === "lurker"){
-  bump("tentacle", 0.30);
+  bump("tentacle", 0.10);
   bump("worm", 0.18);
   bump("eye", 0.10);
   mul("limb", 0.88);
   bump("grow_appendage", 0.14);
   } else if (eco === "seer"){
-  bump("antenna", 0.30);
-  bump("eye", 0.20);
-  mul("spike", 0.80);
+  bump("antenna", 0.10);
+  bump("eye", 0.05);
+  mul("spike", 0.90);
   mul("grow_body", 0.94);
   } else if (eco === "fortress"){
-  bump("shell", 0.28);
-  bump("spike", 0.20);
+  bump("shell", 0.18);
+  bump("spike", 0.10);
   mul("tail", 0.85);
   mul("limb", 0.85);
-  bump("grow_body", 0.16);
+  bump("grow_body", 0.06);
   } else if (eco === "bloomer"){
-  bump("grow_body", 0.22);
-  bump("grow_appendage", 0.22);
+  bump("grow_body", 0.04);
+  bump("grow_appendage", 0.02);
   bump("tail", 0.10);
   mul("shell", 0.90);
   }

@@ -3,7 +3,7 @@ export const BODY = {
   appendageGrowWeight: 0.12,
   appendageGrowPerModule: 0.03,
   growBodyPenaltyMult: 0.65,
-  growthChance: 1,
+  growthChance: 0.93,
   width: 1,
   anim: {
     growthSec: 0.7,
@@ -11,7 +11,7 @@ export const BODY = {
   },
   initialColor: "#1f2937",
   shapeOptions: ["compact", "amoeboid", "elongated"],
-  shapeWeights: [0.5, 0.3, 0.2]
+  shapeWeights: [0.5, 0.5, 0.5]
 };
 
 export const CORE = {

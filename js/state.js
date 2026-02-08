@@ -961,28 +961,51 @@ function processCarrotsTick(state, org = state){
 // actions: +10..17% cap 140%
 export function addRandom01(rng){ return 0.10 + rng() * 0.07; }
 
+function addBar(target, key, add){
+  const before = target.bars[key];
+  const after  = clamp(before + add, 0, BAR_MAX);
+  target.bars[key] = after;
+  return after - before; // реальный прирост (0 если упёрлись в кап)
+}
+
+function applyCareAction(target, kind, rng, logFn, label){
+  if (!target || !target.bars || !target.care) return 0;
+  const add = addRandom01(rng);
+
+  if (kind === "feed"){
+    const real = addBar(target, "food", add);
+    target.bars.mood = clamp(target.bars.mood + real * 0.35, 0, BAR_MAX);
+    target.care.feed += 1.0;
+    logFn?.(`Кормление${label || ""}: +${Math.round(real * 100)}% к еде.`);
+    return real;
+  }
+  if (kind === "wash"){
+    const real = addBar(target, "clean", add);
+    target.bars.mood = clamp(target.bars.mood + real * 0.20, 0, BAR_MAX);
+    target.care.wash += 1.0;
+    logFn?.(`Мытьё${label || ""}: +${Math.round(real * 100)}% к чистоте.`);
+    return real;
+  }
+  if (kind === "heal"){
+    const real = addBar(target, "hp", add);
+    target.bars.mood = clamp(target.bars.mood + real * 0.15, 0, BAR_MAX);
+    target.care.heal += 1.0;
+    logFn?.(`Лечение${label || ""}: +${Math.round(real * 100)}% к HP.`);
+    return real;
+  }
+  return 0;
+}
+
 export function act(state, kind){
   const rng = mulberry32(hash32(state.seed, nowSec()));
 
-  if (kind === "feed"){
-    const add = addRandom01(rng);
-    state.bars.food = clamp(state.bars.food + add, 0, BAR_MAX);
-    state.bars.mood = clamp(state.bars.mood + add*0.35, 0, BAR_MAX);
-    state.care.feed += 1.0;
-    pushLog(state, `Кормление: +${Math.round(add*100)}% к еде.`, "care");
-  } else if (kind === "wash"){
-    const add = addRandom01(rng);
-    state.bars.clean = clamp(state.bars.clean + add, 0, BAR_MAX);
-    state.bars.mood = clamp(state.bars.mood + add*0.20, 0, BAR_MAX);
-    state.care.wash += 1.0;
-    pushLog(state, `Мытьё: +${Math.round(add*100)}% к чистоте.`, "care");
-  } else if (kind === "heal"){
-    const add = addRandom01(rng);
-    state.bars.hp = clamp(state.bars.hp + add, 0, BAR_MAX);
-    state.bars.mood = clamp(state.bars.mood + add*0.15, 0, BAR_MAX);
-    state.care.heal += 1.0;
-    pushLog(state, `Лечение: +${Math.round(add*100)}% к HP.`, "care");
-  }
+  applyCareAction(
+    state,
+    kind,
+    rng,
+    (msg)=>pushLog(state, msg, "care"),
+    ""
+  );
 
   state.lastSeen = nowSec();
   saveGame(state);
@@ -1008,26 +1031,7 @@ export function actOn(rootState, org, kind){
     if (prevTag === undefined) delete target.__orgTag; else target.__orgTag = prevTag;
   };
 
-  if (kind === "feed"){
-    const add = addRandom01(rng);
-    target.bars.food = clamp(target.bars.food + add, 0, BAR_MAX);
-    target.bars.mood = clamp(target.bars.mood + add*0.35, 0, BAR_MAX);
-    target.care.feed += 1.0;
-    withTargetLog(`Кормление${label}: +${Math.round(add*100)}% к еде.`);
-  } else if (kind === "wash"){
-    const add = addRandom01(rng);
-    target.bars.clean = clamp(target.bars.clean + add, 0, BAR_MAX);
-    target.bars.mood = clamp(target.bars.mood + add*0.20, 0, BAR_MAX);
-    target.care.wash += 1.0;
-    withTargetLog(`Мытьё${label}: +${Math.round(add*100)}% к чистоте.`);
-  } else if (kind === "heal"){
-    const add = addRandom01(rng);
-    target.bars.hp = clamp(target.bars.hp + add, 0, BAR_MAX);
-    target.bars.mood = clamp(target.bars.mood + add*0.15, 0, BAR_MAX);
-    target.care.heal += 1.0;
-    withTargetLog(`Лечение${label}: +${Math.round(add*100)}% к HP.`);
-  }
-
+  applyCareAction(target, kind, rng, withTargetLog, label);
   const t = nowSec();
   rootState.lastSeen = t;
   if (target) target.lastSeen = t;

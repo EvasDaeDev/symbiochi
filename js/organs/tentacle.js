@@ -1,6 +1,6 @@
 export const TENTACLE = {
-  minLen: 2,
-  maxExtra: 6,
+  minLen: 7,
+  maxExtra: 36,
   spawnWeight: 0.15,
   growthChance: 0.9,
   width: 1,

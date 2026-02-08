@@ -35,6 +35,10 @@ const BREATH_AMPL_PX = 1.5;      // requested: 1 pixel (now 1.5x)
 const GROW_DUR_SEC = 0.7;        // requested: 0.7s extrusion
 const GLOW_PX = 3;               // requested: ~3px glow thickness
 
+// Parallax: render grid overlay with a slightly "farther" camera so it drifts vs organism
+// 0.85..0.95 (smaller = stronger separation)
+const GRID_PARALLAX = 0.90;
+
 // =====================
 // Color helpers (Hue tuning)
 // =====================
@@ -550,7 +554,7 @@ function drawBlock(ctx, x, y, s, colorHex, breathK, neighMask){
 
   // Corner smoothing: if an outer corner is free (no neighbors on the two touching sides)
   // cut a *single pixel* (per project rules). For tiny blocks (<=2px), skip smoothing.
-  const cut = (s >= 3) ? 1 : 0;
+  const cut = (s >= 2) ? 1 : 0;
   if (cut){
     if (!(neighMask & 1) && !(neighMask & 8)) ctx.clearRect(x,         y,         cut, cut); // TL
     if (!(neighMask & 1) && !(neighMask & 2)) ctx.clearRect(x + s-cut, y,         cut, cut); // TR
@@ -583,6 +587,16 @@ function buildOccupancy(org){
     for (const m of org.modules){
       for (const [x,y] of (m.cells || [])) occ.add(`${x},${y}`);
     }
+  }
+  return occ;
+}
+
+// Body-only occupancy (used for "skin" / perimeter tint of body blocks).
+// IMPORTANT: This ignores modules so organs touching the body do not "erase" the body perimeter.
+function buildBodyOccupancy(org){
+  const occ = new Set();
+  if (org?.body?.cells){
+    for (const [x,y] of org.body.cells) occ.add(`${x},${y}`);
   }
   return occ;
 }
@@ -755,19 +769,26 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
 
   // BODY blocks
   const bodyColor = getPartColor(org, "body", 0);
+  const bodySkinColor = scaleBrightness(bodyColor, 1.15); // подсветка периметра
   const bodyCells = org?.body?.cells || [];
-  const staticCells = [];
+  const bodyOcc = buildBodyOccupancy(org); // body-only occupancy for perimeter detection
+
+  const staticInner = [];
+  const staticSkin = [];
+
   for (const [wx, wy] of bodyCells){
     const nm = neighMaskAt(occ, wx, wy);
     const kGrow = animProgress(org, wx, wy);
+    const isSkin = isBoundary(bodyOcc, wx, wy);
+    const col = isSkin ? bodySkinColor : bodyColor;
 
     if (kGrow < 0.999){
       const p = worldToScreenPx(cam, wx, wy, view);
       const x = p.x;
       const y = p.y + breathY;
-      drawBlockAnim(ctx, x, y, s, bodyColor, breathK, nm, kGrow);
+      drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
     } else {
-      staticCells.push([wx, wy]);
+      (isSkin ? staticSkin : staticInner).push([wx, wy]);
     }
 
     if (isSelected && isBoundary(occ, wx, wy)){
@@ -775,16 +796,21 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
     }
   }
 
-  if (staticCells.length){
-    const rects = buildPackedRects(staticCells);
-    ctx.fillStyle = breathK ? brighten(bodyColor, 0.04) : bodyColor;
+  const fillPacked = (cells, col)=>{
+    if (!cells.length) return;
+    const rects = buildPackedRects(cells);
+    ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
     for (const r of rects){
       const p = worldToScreenPx(cam, r.x, r.y, view);
       const x = p.x;
       const y = p.y + breathY;
       ctx.fillRect(x, y, r.w * s, r.h * s);
     }
-  }
+  };
+
+  // Draw bulk static cells in two passes (inner + perimeter skin), so the body outline stays 1-block thick.
+  fillPacked(staticInner, bodyColor);
+  fillPacked(staticSkin, bodySkinColor);
 
   // MODULES
   const modules = org?.modules || [];
@@ -1299,9 +1325,15 @@ export function renderGrid(state, canvas, gridEl, view){
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
 
-  drawGridOverlay(ctx, view, view.cam);
+    // Grid parallax: grid follows camera slightly slower than world objects
+  const camBg = {
+    ox: (cam.ox || 0) * GRID_PARALLAX,
+    oy: (cam.oy || 0) * GRID_PARALLAX,
+  };
 
-  // Carrots (rect blocks, orange)
+  drawGridOverlay(ctx, view, camBg);
+
+// Carrots (rect blocks, orange)
 if (Array.isArray(state.carrots)){
   const sPx = view.blockPx;
   const cw = (CARROT.w|0) || 3;
@@ -1452,6 +1484,8 @@ export function barStatus(org){
   // (e.g. buds array contains empty slots). In that case, treat as "good".
   const bars = org?.bars || {food:1,clean:1,hp:1,mood:1};
   const minBar = Math.min(bars.food, bars.clean, bars.hp, bars.mood);
+  if (minBar <= 0.01) return { txt:"усыхание", cls:"bad" };
+  if (minBar <= 0.1) return { txt:"анабиоз", cls:"bad" };
   if (minBar <= 0.15) return { txt:"критично", cls:"bad" };
   if (minBar <= 0.35) return { txt:"плохо", cls:"bad" };
   if (minBar <= 0.65) return { txt:"норма", cls:"" };
@@ -1477,23 +1511,23 @@ export function renderLegend(org, legendEl){
   }
 
   const items = [
-    { part:"body",    title:"Тело",    desc:"Блоки биоматериала (объём/тень)." },
+    { part:"body",    title:"Тело",    desc:"Основная биомасса." },
     { part:"core",     title:"Ядро",    desc:"Центр жизненной активности. Цвет отражает текущее состояние организма." },
-    { part:"eye",     title:"Глаза",   desc:"Растут вместе с телом, рисуются поверх." },
+    { part:"eye",     title:"Глаза",   desc:"Растут вместе с телом." },
 
-    { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный отросток.	Формируется при попытках «лечить» и вмешиваться." },
+    { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный отросток." },
     { part:"tentacle", title:organLabel("tentacle"), desc:"Мягкая, подвижная структура." },
     { part:"tail",     title:organLabel("tail"),     desc:"Чем лучше уход, тем дальше он тянется от тела." },
-    { part:"worm",     title:organLabel("worm"),     desc:"Мягкое волнообразное движение и перистальтика." },
-    { part:"limb",     title:organLabel("limb"),     desc:"Опора/движение (коричневый)." },
-    { part:"spike",    title:organLabel("spike"),    desc:"Защитная реакция.Возникают, когда организм испытывает давление или стресс." },
+    { part:"worm",     title:organLabel("worm"),     desc:"Мягкое волнообразное движение." },
+    { part:"limb",     title:organLabel("limb"),     desc:"Опора/движение." },
+    { part:"spike",    title:organLabel("spike"),    desc:"Защитная реакция." },
     { part:"shell",    title:organLabel("shell"),    desc:"Закрытая форма. Тело пытается изолироваться." },
 
     // поздние органы (добавлены в PARTS)
     { part:"teeth",    title:organLabel("teeth"),    desc:"Атака (зубы)." },
-    { part:"claw",     title:organLabel("claw"),     desc:"Схватить/рубить (клешня)." },
-    { part:"mouth",    title:organLabel("mouth"),    desc:"Питание/атака (рот)." },
-    { part:"fin",      title:organLabel("fin"),      desc:"Плавание/манёвр (плавник)." },
+    { part:"claw",     title:organLabel("claw"),     desc:"Клешня." },
+    { part:"mouth",    title:organLabel("mouth"),    desc:"Питание/рот." },
+    { part:"fin",      title:organLabel("fin"),      desc:"плавник." },
   ];
 
   const filtered = items.filter((it) => present.has(it.part));
@@ -1555,9 +1589,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     <span class="pill ${barToneCls(target.bars.hp)}">здор: ${barPct(target.bars.hp)}%</span>
     <span class="pill ${barToneCls(target.bars.mood)}">настр: ${barPct(target.bars.mood)}%</span>
     <span class="pill ${status.cls}">сост: ${status.txt}</span>
-    <span class="pill">блоков: ${getTotalBlocks(target)}</span>
-    <span class="pill">детей: ${(target.buds?.length || 0)}</span>
-  `;
+      `;
 
   // second row: life time + carrots inventory (input is static in DOM)
   if (els.lifePill){
@@ -1589,7 +1621,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const pTxt = t ? `${Math.round(power*100)}%` : "";
 
     els.hudMeta2.innerHTML = `
-      <span class="pill">морковки: поле ${fieldCount}, инв ${Math.max(0, inv|0)}</span>
+      <span class="pill">морковки: ${Math.max(0, inv|0)}</span>
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
   }
@@ -1599,6 +1631,6 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const intervalSec = Math.max(1, Math.floor(state.evoIntervalMin * 60));
     const until = Math.max(0, (state.lastMutationAt + intervalSec) - state.lastSeen);
     els.footerInfo.textContent =
-      `Мутация через ~${fmtAgeSeconds(until)} (интервал ${state.evoIntervalMin} мин) • max 140% • drag • zoom:${zoom ?? ""}`;
+      `Мутация через ~${fmtAgeSeconds(until)} (интервал ${state.evoIntervalMin} мин) zoom:${zoom ?? ""}`;
   }
 }

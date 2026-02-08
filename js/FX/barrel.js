@@ -11,8 +11,8 @@ export function barrelMap(
   v,
   k = 0.06,
   aspect = 1,
-  cx = 0.5,
-  cy = 0.5,
+  cx = 0.53,
+  cy = 0.47,
 ){
   // Map [0..1] -> [-1..1] around custom center
   let x = (u - cx) * 2;

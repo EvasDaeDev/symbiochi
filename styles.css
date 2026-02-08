@@ -59,7 +59,7 @@ html, body {
   display: grid;
   grid-template-rows: auto auto 1fr;
   height: calc(var(--statusH) + var(--gameH) + 10px);
-  min-width: 300px;
+  min-width: 355px;
 
   /* раньше resize был только у #mainPanel, поэтому тянуть можно было лишь одно окно */
   resize: both;
@@ -99,7 +99,7 @@ html, body {
 }
 .hueTitle{ font-weight:800; margin-bottom:6px; }
 
-.orgInfo{ padding: 10px; color: rgba(255,255,255,0.85); font-size: 13px; line-height: 1.35; }
+.orgInfo{ padding: 10px; color: rgba(255,255,255,0.85); font-size: 13px; line-height: 1.35; min-width: 210px; }
 
 #statusPanel{
   width: 100%;          /* было var(--centerW) */
@@ -131,7 +131,7 @@ html, body {
 
 .lifePill{
   color: #f59e0b;
-  border-color: rgba(245, 158, 11, 0.55);
+  
 }
 
 .perfStats{

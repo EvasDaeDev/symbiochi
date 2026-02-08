@@ -226,7 +226,7 @@ function rerenderAll(deltaSec){
 
     els.orgInfo.innerHTML = `
       <div class="orgList">${listHtml}</div>
-      <div style="color:var(--muted); font-size:11px;">Тап по ячейке — выбрать и центрировать камеру на ядре. Дабл-клик/тап по полю — отправить выбранного в плавание.</div>
+      <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре. Дабл-клик по полю — отправить путь.</div>
     `;
   }
   renderGrid(view.state, els.canvas, els.grid, view);
