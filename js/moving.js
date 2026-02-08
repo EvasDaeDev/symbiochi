@@ -253,8 +253,20 @@ m.v = v0 + (vDesired - v0) * a;
 const step = Math.max(0, m.v) * dt;
 if (dist <= step || dist < 1e-4){
   // Sharp stop: snap exactly to target
-  m.offsetX = (tx - (core[0] || 0));
-  m.offsetY = (ty - (core[1] || 0));
+  // IMPORTANT:
+  // Movement is "view-driven", but the organism world position must survive page reloads.
+  // If we leave the final displacement in view-only offsetX/Y, a refresh will reset it to 0
+  // and the creature will jump back.
+  //
+  // Bake the final delta into the organism geometry, and reset offsets to 0.
+  const fx = (tx - (core[0] || 0));
+  const fy = (ty - (core[1] || 0));
+  const sx = Number.isFinite(fx) ? Math.trunc(fx) : 0;
+  const sy = Number.isFinite(fy) ? Math.trunc(fy) : 0;
+  if (sx || sy) shiftOrgCells(org, sx, sy);
+
+  m.offsetX = 0;
+  m.offsetY = 0;
   m.moving = false;
   m.breathMul = 1;
   m.v = 0;
