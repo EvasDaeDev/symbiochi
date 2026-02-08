@@ -1,9 +1,10 @@
-// moving.js
+// js/moving.js
 // View-only organism movement: selected organism can "swim" to a target point.
 //
 // Design:
 // - speedPxS (pixels/sec) is converted to world-cells/sec using current view.blockPx.
-// - motion.offsetX/Y (cells) shifts the entire organism during rendering.
+// - motion.offsetX/Y (cells) shifts the organism during rendering (fractional remainder only).
+// - integer offset is baked into state geometry so world-position persists in save.
 // - motion.angleDeg is view-only and preserved after reaching target.
 // - while motion.moving === true => breathMul = 2.
 //
@@ -12,31 +13,23 @@
 
 import { clamp } from "./util.js";
 
-// Angle helpers
-// The creature is considered "horizontal" at the start of the game (angle 0).
-// We also treat headings as equivalent modulo 180° (no front/back), so the
-// renderer always chooses the closest angle to the horizontal state regardless
-// of direction (prevents continuous spinning).
+// Angle helpers (modulo 180°, no front/back)
 function norm180(a){
-  // -> [-90..90)
   a = ((a % 180) + 180) % 180;
   if (a >= 90) a -= 180;
   return a;
 }
-
 function angleDeltaHalfTurn(fromDeg, toDeg){
-  // shortest delta considering modulo 180° equivalence
   return norm180(toDeg - fromDeg);
 }
+
+function snapCell(v){ return Math.round(v); }
 
 export function ensureMoving(view){
   if (!view) return;
   if (!view.moving){
     view.moving = {
-      params: {
-        speedPxS: 5,
-        turnDegS: 5,
-      },
+      params: { speedPxS: 5, turnDegS: 5 },
       org: Object.create(null),
     };
   }
@@ -56,44 +49,12 @@ export function getOrgMotion(view, orgId){
     targetY: null,
     pendingTarget: null, // {x,y} if move requested during mutation
     moving: false,
-    // Keep angle unwrapped to avoid visible jumps at -180/180.
     angleDeg: 0,
-    // Smoothed speed (cells/sec) for ease-in / ease-out.
     v: 0,
     breathMul: 1,
   };
   view.moving.org[k] = init;
   return init;
-}
-
-export function setMoveTarget(view, state, orgId, wx, wy){
-  const m = getOrgMotion(view, orgId);
-  if (!Number.isFinite(wx) || !Number.isFinite(wy)) return;
-
-  // If a mutation is being applied right now, we don't start moving immediately.
-  // Store a pending target and we'll start once evoBusy is cleared.
-  const org = getOrgById(state, orgId);
-  if (org && org.evoBusy){
-    m.pendingTarget = { x: wx, y: wy };
-    return;
-  }
-
-  m.pendingTarget = null;
-  m.targetX = wx;
-  m.targetY = wy;
-  m.moving = true;
-  m.breathMul = 2;
-  m.v = 0;
-  m._lastTargetX = wx;
-  m._lastTargetY = wy;
-}
-
-export function clearMove(view, orgId){
-  const m = getOrgMotion(view, orgId);
-  m.targetX = null;
-  m.targetY = null;
-  m.moving = false;
-  m.breathMul = 1;
 }
 
 function getOrgById(state, orgId){
@@ -112,6 +73,38 @@ function getCore(org){
   return [0, 0];
 }
 
+export function setMoveTarget(view, state, orgId, wx, wy){
+  const m = getOrgMotion(view, orgId);
+  if (!Number.isFinite(wx) || !Number.isFinite(wy)) return;
+
+  // IMPORTANT: geometry is integer cell-based => snap targets to integer cells
+  const sx = snapCell(wx);
+  const sy = snapCell(wy);
+
+  const org = getOrgById(state, orgId);
+  if (org && org.evoBusy){
+    m.pendingTarget = { x: sx, y: sy };
+    return;
+  }
+
+  m.pendingTarget = null;
+  m.targetX = sx;
+  m.targetY = sy;
+  m.moving = true;
+  m.breathMul = 2;
+  m.v = 0;
+  m._lastTargetX = sx;
+  m._lastTargetY = sy;
+}
+
+export function clearMove(view, orgId){
+  const m = getOrgMotion(view, orgId);
+  m.targetX = null;
+  m.targetY = null;
+  m.moving = false;
+  m.breathMul = 1;
+}
+
 export function tickMoving(view, state, dtSec){
   ensureMoving(view);
   if (!state) return;
@@ -121,12 +114,8 @@ export function tickMoving(view, state, dtSec){
   const blockPx = Math.max(1, view.blockPx || 1);
   const speedCellsS = (view.moving.params.speedPxS || 5) / blockPx;
   const turnDegS = (view.moving.params.turnDegS || 5);
-  const accel = 5;      // how quickly speed converges (1/sec)
- // const slowRadius = 10; // cells, start slowing near target
+  const accel = 5; // ease-in responsiveness (1/sec)
 
-  // Movement is view-driven, but the world has real objects (e.g. carrots) in cell coordinates.
-  // To keep interactions correct, we apply integer cell shifts to the organism geometry whenever
-  // the visual offset accumulates >= 1 cell, and keep only the fractional остаток in offsetX/Y.
   function shiftOrgCells(org, dx, dy){
     if (!org || (!dx && !dy)) return;
 
@@ -150,26 +139,20 @@ export function tickMoving(view, state, dtSec){
     shiftCells(org.body?.cells);
 
     if (Array.isArray(org.modules)){
-      for (const m of org.modules){
-        shiftCells(m?.cells);
+      for (const mod of org.modules){
+        shiftCells(mod?.cells);
 
-        // Critical: growing organs use growPos as a continuation point.
-        // If we shift only cells but not growPos, new segments will spawn at the old location
-        // and look like "floating" detached organs.
-        if (Array.isArray(m?.growPos) && m.growPos.length === 2){
-          m.growPos[0] = (m.growPos[0] || 0) + dx;
-          m.growPos[1] = (m.growPos[1] || 0) + dy;
+        if (Array.isArray(mod?.growPos) && mod.growPos.length === 2){
+          mod.growPos[0] = (mod.growPos[0] || 0) + dx;
+          mod.growPos[1] = (mod.growPos[1] || 0) + dy;
         }
-        // Some modules may keep an anchor position as well.
-        if (Array.isArray(m?.anchor) && m.anchor.length === 2){
-          m.anchor[0] = (m.anchor[0] || 0) + dx;
-          m.anchor[1] = (m.anchor[1] || 0) + dy;
+        if (Array.isArray(mod?.anchor) && mod.anchor.length === 2){
+          mod.anchor[0] = (mod.anchor[0] || 0) + dx;
+          mod.anchor[1] = (mod.anchor[1] || 0) + dy;
         }
       }
     }
 
-    // Shift growth animation map keys (view-only, but stored on org).
-    // Not shifting this doesn't break logic, but can cause "ghost" growth glows in the old place.
     if (org.anim && typeof org.anim === "object"){
       const next = Object.create(null);
       for (const kk of Object.keys(org.anim)){
@@ -196,12 +179,12 @@ export function tickMoving(view, state, dtSec){
     const m = view.moving.org[k];
     if (!m) continue;
 
-    // If move was requested during mutation, start it as soon as evoBusy is cleared.
+    // Start pending target after mutation finishes
     if (!m.moving && m.pendingTarget){
       const org = getOrgById(state, orgId);
       if (org && !org.evoBusy){
-        m.targetX = m.pendingTarget.x;
-        m.targetY = m.pendingTarget.y;
+        m.targetX = snapCell(m.pendingTarget.x);
+        m.targetY = snapCell(m.pendingTarget.y);
         m.pendingTarget = null;
         m.moving = true;
         m.breathMul = 2;
@@ -214,10 +197,6 @@ export function tickMoving(view, state, dtSec){
     const org = getOrgById(state, orgId);
     const core = getCore(org);
 
-    // Current core position (world cells, float)
-    const cx = (core[0] || 0) + (m.offsetX || 0);
-    const cy = (core[1] || 0) + (m.offsetY || 0);
-
     const tx = m.targetX;
     const ty = m.targetY;
     if (!Number.isFinite(tx) || !Number.isFinite(ty)){
@@ -226,66 +205,63 @@ export function tickMoving(view, state, dtSec){
       continue;
     }
 
+    const cx = (core[0] || 0) + (m.offsetX || 0);
+    const cy = (core[1] || 0) + (m.offsetY || 0);
+
     const dx = tx - cx;
     const dy = ty - cy;
     const dist = Math.hypot(dx, dy);
 
-    // Desired heading.
-    // NOTE: we map the desired heading into [-90..90) because we treat
-    // angles modulo 180° (no front/back). This matches the rule:
-    // "choose the nearest angle from the horizontal state regardless of direction".
+    // Turn towards desired heading (mod 180)
     if (dist > 1e-6){
       const desiredRaw = Math.atan2(dy, dx) * 180 / Math.PI;
       const desired = norm180(desiredRaw);
       const cur = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
       const deltaA = angleDeltaHalfTurn(cur, desired);
       const maxTurn = turnDegS * dt;
-      const stepA = clamp(deltaA, -maxTurn, maxTurn);
-      m.angleDeg = norm180(cur + stepA);
+      m.angleDeg = norm180(cur + clamp(deltaA, -maxTurn, maxTurn));
     }
 
-// Smooth start ONLY (no slow-down near target):
-const vDesired = speedCellsS; // <-- всегда хотим полную скорость
-const a = 1 - Math.exp(-accel * dt);
-const v0 = (Number.isFinite(m.v) ? m.v : 0);
-m.v = v0 + (vDesired - v0) * a;
+    // Smooth start only
+    const a = 1 - Math.exp(-accel * dt);
+    const v0 = Number.isFinite(m.v) ? m.v : 0;
+    m.v = v0 + (speedCellsS - v0) * a;
 
-const step = Math.max(0, m.v) * dt;
-if (dist <= step || dist < 1e-4){
-  // Sharp stop: snap exactly to target
-  // IMPORTANT:
-  // Movement is "view-driven", but the organism world position must survive page reloads.
-  // If we leave the final displacement in view-only offsetX/Y, a refresh will reset it to 0
-  // and the creature will jump back.
-  //
-  // Bake the final delta into the organism geometry, and reset offsets to 0.
-  const fx = (tx - (core[0] || 0));
-  const fy = (ty - (core[1] || 0));
-  const sx = Number.isFinite(fx) ? Math.trunc(fx) : 0;
-  const sy = Number.isFinite(fy) ? Math.trunc(fy) : 0;
-  if (sx || sy) shiftOrgCells(org, sx, sy);
+    const step = Math.max(0, m.v) * dt;
 
-  m.offsetX = 0;
-  m.offsetY = 0;
-  m.moving = false;
-  m.breathMul = 1;
-  m.v = 0;
-  continue;
-}
+    if (dist <= step || dist < 1e-4){
+      // FINALIZE: bake exact cell snap into state (PERSISTENT)
+      const fx = (tx - (core[0] || 0));
+      const fy = (ty - (core[1] || 0));
 
-    // Move core towards target by 'step'
+      // tx/ty are ints => fx/fy are ints too, but round for safety
+      const sx = Number.isFinite(fx) ? Math.round(fx) : 0;
+      const sy = Number.isFinite(fy) ? Math.round(fy) : 0;
+
+      if (sx || sy) shiftOrgCells(org, sx, sy);
+
+      m.offsetX = 0;
+      m.offsetY = 0;
+      m.moving = false;
+      m.breathMul = 1;
+      m.v = 0;
+      continue;
+    }
+
+    // Move fractionally
     const nx = dx / dist;
     const ny = dy / dist;
     m.offsetX = (m.offsetX || 0) + nx * step;
     m.offsetY = (m.offsetY || 0) + ny * step;
 
-    // Apply integer part to geometry (keeps carrots/contacts correct)
-    const sx = (m.offsetX >= 1) ? Math.floor(m.offsetX) : (m.offsetX <= -1 ? Math.ceil(m.offsetX) : 0);
-    const sy = (m.offsetY >= 1) ? Math.floor(m.offsetY) : (m.offsetY <= -1 ? Math.ceil(m.offsetY) : 0);
-    if (sx || sy){
-      shiftOrgCells(org, sx, sy);
-      m.offsetX -= sx;
-      m.offsetY -= sy;
+    // Bake integer part to geometry
+    const ix = (m.offsetX >= 1) ? Math.floor(m.offsetX) : (m.offsetX <= -1 ? Math.ceil(m.offsetX) : 0);
+    const iy = (m.offsetY >= 1) ? Math.floor(m.offsetY) : (m.offsetY <= -1 ? Math.ceil(m.offsetY) : 0);
+
+    if (ix || iy){
+      shiftOrgCells(org, ix, iy);
+      m.offsetX -= ix;
+      m.offsetY -= iy;
     }
   }
 }
