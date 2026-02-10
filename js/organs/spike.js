@@ -1,4 +1,7 @@
 export const SPIKE = {
+  label: "Шипы",
+  wind: false,
+  growthDir: 8,
   // Don't allow spikes too early; they can quickly occupy the perimeter and stall early body growth.
   // This keeps the "<300 blocks" phase focused on expanding the core body.
   spawnMinBody: 90,

@@ -1,4 +1,9 @@
+import { thicknessTail } from "./_thickness.js";
+
 export const TAIL = {
+  label: "Хвост",
+  wind: true,
+  growthDir: 16,
   minLen: 7,
   maxExtra: 36,
   spawnWeight: 0.1,
@@ -8,6 +13,11 @@ export const TAIL = {
     growthSec: 0.7,
     swayAmp: 1.1,
     swaySec: 6
+  },
+  render: {
+    // Visual-only thickness. Render may draw lateral "support" blocks when free.
+    // Tail: becomes thick along the whole length once it is long enough.
+    thicknessLevel: (i, len) => thicknessTail(i, len, { minLen: 4 })
   },
   initialColor: "#22d3ee",
   shapeOptions: ["straight", "curve", "fin"],

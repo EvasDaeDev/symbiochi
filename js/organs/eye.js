@@ -1,4 +1,7 @@
 export const EYE = {
+  label: "Глаза",
+  wind: false,
+  growthDir: 8,
   shapeOptions: ["diamond", "sphere"],
   shapeWeights: [0.5, 0.5],
   smallBodyThreshold: 20,

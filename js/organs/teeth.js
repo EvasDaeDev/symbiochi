@@ -1,4 +1,7 @@
 export const TEETH = {
+  label: "Зубы",
+  wind: false,
+  growthDir: 8,
   minLen: 2,
   maxExtra: 5,
   dir: [1, 0],

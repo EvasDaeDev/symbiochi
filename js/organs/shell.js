@@ -1,4 +1,7 @@
 export const SHELL = {
+  label: "Панцирь",
+  wind: false,
+  growthDir: 8,
   // Shell plates are strong perimeter-occupiers; delay them until the body has room.
   spawnMinBody: 130,
   size: 2,

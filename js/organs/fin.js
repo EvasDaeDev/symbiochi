@@ -1,4 +1,7 @@
 export const FIN = {
+  label: "Плавник",
+  wind: true,
+  growthDir: 16,
   offsets: [
     [1, 0],
     [1, 1],

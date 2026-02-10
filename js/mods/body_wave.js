@@ -8,22 +8,22 @@ import { clamp01, hash32, mulberry32 } from "../util.js";
 
 export const BODY_WAVE = {
   // Требование пользователя: шум радиусом 3..9 блоков.
-  ampMinBlocks:  6,
-  ampMaxBlocks: 16,
+  ampMinBlocks: 15,
+  ampMaxBlocks: 18,
 
   // Кол-во "лепестков" по окружности (чем больше — тем чаще смена направления).
   lobesMin: 0,
-  lobesMax: 1,
+  lobesMax: 2,
 
   // Скорость дрейфа фазы (медленно, чтобы форма "помнила" себя)
-  phaseSpeedMin: 0.0005,
-  phaseSpeedMax: 0.0015,
+  phaseSpeedMin: 0.0003,
+  phaseSpeedMax: 0.001,
 
   // Сколько дискретных узлов для 1D value-noise по углу
-  bins: 12,
+  bins: 10,
 
   // Слабый микро-джиттер на кандидата, чтобы не застревать в локальных паттернах
-  microJitter: 0.01
+  microJitter: 0.05
 };
 
 function smoothstep(t){
@@ -94,7 +94,7 @@ export function ensureBodyWave(state, rng = null){
 
 // Вызывай раз в "мутационный" тик, если хочешь лёгкое дыхание формы.
 // (Можно не вызывать вообще: форма будет полностью стабильной.)
-export function advanceBodyWave(state, dtTicks = 1){
+export function advanceBodyWave(state, dtTicks = 0){
   if (!state?.body?.wave) return;
   const w = state.body.wave;
   const step = Number.isFinite(w.phaseSpeed) ? w.phaseSpeed : BODY_WAVE.phaseSpeedMin;

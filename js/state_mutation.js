@@ -1,5 +1,5 @@
 import { mulberry32, hash32, clamp01, pick, key, parseKey } from "./util.js";
-import { organLabel } from "./mods/labels.js";
+import { organLabel } from "./organs/index.js";
 import { DIR8, PALETTES } from "./world.js";
 import { BUD } from "./mods/budding.js";
 import { EVO } from "./mods/evo.js";

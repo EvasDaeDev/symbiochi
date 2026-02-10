@@ -1,6 +1,9 @@
 export const LIMB = {
-  phalanxCountMin: 3,
-  phalanxCountMax: 7,
+  label: "Лапка",
+  wind: true,
+  growthDir: 16,
+  phalanxCountMin: 2,
+  phalanxCountMax: 5,
   phalanxLenMin: 5,
   phalanxLenMax: 7,
   downBias: 0.65,
@@ -14,6 +17,6 @@ export const LIMB = {
     stepSec: 3.6
   },
   initialColor: "#a16207",
-  shapeOptions: ["jointed", "spade", "fork"],
+  shapeOptions: ["jointed", "spade"],
   shapeWeights: [0.6, 0.25, 0.15]
 };

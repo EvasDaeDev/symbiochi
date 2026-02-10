@@ -1,17 +1,17 @@
 // js/moving.js
-// View-only organism movement: selected organism can "swim" to a target point.
+// Grid-true organism movement (dir8) with smooth *render-time* gait.
 //
-// Design:
-// - speedPxS (pixels/sec) is converted to world-cells/sec using current view.blockPx.
-// - motion.offsetX/Y (cells) shifts the organism during rendering (fractional remainder only).
-// - integer offset is baked into state geometry so world-position persists in save.
-// - motion.angleDeg is view-only and preserved after reaching target.
-// - while motion.moving === true => breathMul = 2.
+// Key rules:
+// - World geometry stays integer-cell based and is ONLY shifted by whole-cell steps.
+// - Steps are executed as a "gait" animation: front moves first, back catches up.
+// - No canvas rotation: heading is stored as dir8 + deg for logic/face orientation.
+// - During gait, render.js deforms the drawing without changing state geometry.
+// - While moving => breathMul = 2.
 //
 // Stored in: view.moving.org[orgId]
 // where orgId = 0 for parent, orgId = i+1 for buds.
 
-import { clamp } from "./util.js";
+// (no util imports required here)
 
 // Angle helpers (modulo 180°, no front/back)
 function norm180(a){
@@ -24,6 +24,44 @@ function angleDeltaHalfTurn(fromDeg, toDeg){
 }
 
 function snapCell(v){ return Math.round(v); }
+
+// dir8 helpers
+// 0:E, 1:NE, 2:N, 3:NW, 4:W, 5:SW, 6:S, 7:SE
+const DIR8 = [
+  [ 1, 0],
+  [ 1,-1],
+  [ 0,-1],
+  [-1,-1],
+  [-1, 0],
+  [-1, 1],
+  [ 0, 1],
+  [ 1, 1],
+];
+
+function vecToDir8(dx, dy){
+  const sx = Math.sign(dx);
+  const sy = Math.sign(dy);
+  if (sx === 0 && sy === 0) return null;
+  // map (sx,sy) to dir8 index
+  for (let i=0;i<8;i++){
+    if (DIR8[i][0] === sx && DIR8[i][1] === sy) return i;
+  }
+  return 0;
+}
+
+function dir8ToDeg(d){
+  const dd = ((d|0) % 8 + 8) % 8;
+  return dd * 45;
+}
+
+function stepDir8Towards(cur, want){
+  const c = ((cur|0)%8+8)%8;
+  const w = ((want|0)%8+8)%8;
+  const cw = (w - c + 8) % 8;
+  const ccw = (c - w + 8) % 8;
+  if (cw === 0) return c;
+  return (cw <= ccw) ? ((c + 1) % 8) : ((c + 7) % 8);
+}
 
 export function ensureMoving(view){
   if (!view) return;
@@ -43,17 +81,18 @@ export function getOrgMotion(view, orgId){
   const m = view.moving.org[k];
   if (m) return m;
   const init = {
-    offsetX: 0,
-    offsetY: 0,
     targetX: null,
     targetY: null,
     pendingTarget: null, // {x,y} if move requested during mutation
     moving: false,
-    // NOTE: heading angle is also persisted into the organism state (org.headingDeg).
-    // The view motion uses it as initial value so visuals remain consistent after reload.
+    // Heading is persisted into organism state as:
+    // - org.headingDir8 (0..7)
+    // - org.headingDeg (0..315)
+    headingDir8: 0,
     angleDeg: 0,
     _initAngleFromState: false,
-    v: 0,
+    // Active gait step: {dx,dy,t,dur} or null
+    gait: null,
     breathMul: 1,
   };
   view.moving.org[k] = init;
@@ -64,6 +103,12 @@ function getPersistedHeadingDeg(state, orgId){
   const org = getOrgById(state, orgId);
   const a = org?.headingDeg;
   return Number.isFinite(a) ? a : 0;
+}
+
+function getPersistedHeadingDir8(state, orgId){
+  const org = getOrgById(state, orgId);
+  const d = org?.headingDir8;
+  return Number.isFinite(d) ? (((d|0)%8+8)%8) : 0;
 }
 
 function getOrgById(state, orgId){
@@ -121,9 +166,12 @@ export function tickMoving(view, state, dtSec){
   if (dt <= 0) return;
 
   const blockPx = Math.max(1, view.blockPx || 1);
-  const speedCellsS = (view.moving.params.speedPxS || 5) / blockPx;
-  const turnDegS = (view.moving.params.turnDegS || 5);
-  const accel = 5; // ease-in responsiveness (1/sec)
+  const speedCellsS = Math.max(0.25, (view.moving.params.speedPxS || 5) / blockPx);
+  // turnDegS is in deg/sec. We'll snap heading by 45° steps, but we still use this
+  // value to control how quickly we advance toward the desired dir8.
+  const turnDegS = Math.max(30, view.moving.params.turnDegS || 120);
+  // Each grid step is animated as a gait over this duration (sec).
+  const stepDur = 1 / speedCellsS;
 
   function shiftOrgCells(org, dx, dy){
     if (!org || (!dx && !dy)) return;
@@ -182,6 +230,9 @@ export function tickMoving(view, state, dtSec){
     }
   }
 
+  // Prevent "spiral of death" on huge dt (tab inactive): cap how many cell-steps we bake per tick.
+  const MAX_STEPS_PER_TICK = 12;
+
   for (const k of Object.keys(view.moving.org)){
     const orgId = parseInt(k, 10);
     if (!Number.isFinite(orgId)) continue;
@@ -192,8 +243,9 @@ export function tickMoving(view, state, dtSec){
     // This prevents angle reset after reload/offline which would desync
     // growth targeting vs what the player sees.
     if (!m._initAngleFromState){
+      m.headingDir8 = getPersistedHeadingDir8(state, orgId);
       const a = getPersistedHeadingDeg(state, orgId);
-      if (Number.isFinite(a)) m.angleDeg = norm180(a);
+      m.angleDeg = Number.isFinite(a) ? (((a%360)+360)%360) : dir8ToDeg(m.headingDir8);
       m._initAngleFromState = true;
     }
 
@@ -206,91 +258,97 @@ export function tickMoving(view, state, dtSec){
         m.pendingTarget = null;
         m.moving = true;
         m.breathMul = 2;
-        m.v = 0;
       }
     }
 
-    if (!m.moving) {
-      // Keep persisted heading updated even when standing (e.g., after load).
-      const orgStanding = getOrgById(state, orgId);
-      if (orgStanding) orgStanding.headingDeg = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
+    const org = getOrgById(state, orgId);
+    if (!org) continue;
+
+    // If not moving, just keep heading persisted.
+    if (!m.moving){
+      org.headingDir8 = ((m.headingDir8|0)%8+8)%8;
+      org.headingDeg = dir8ToDeg(org.headingDir8);
       continue;
     }
 
-    const org = getOrgById(state, orgId);
-    const core = getCore(org);
-
+    // Abort movement if target is invalid.
     const tx = m.targetX;
     const ty = m.targetY;
     if (!Number.isFinite(tx) || !Number.isFinite(ty)){
       m.moving = false;
       m.breathMul = 1;
+      m.gait = null;
       continue;
     }
 
-    const cx = (core[0] || 0) + (m.offsetX || 0);
-    const cy = (core[1] || 0) + (m.offsetY || 0);
-
-    const dx = tx - cx;
-    const dy = ty - cy;
-    const dist = Math.hypot(dx, dy);
-
-    // Turn towards desired heading (mod 180)
-    if (dist > 1e-6){
-      const desiredRaw = Math.atan2(dy, dx) * 180 / Math.PI;
-      const desired = norm180(desiredRaw);
-      const cur = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
-      const deltaA = angleDeltaHalfTurn(cur, desired);
-      const maxTurn = turnDegS * dt;
-      m.angleDeg = norm180(cur + clamp(deltaA, -maxTurn, maxTurn));
+    // If we're mid-gait, advance animation time; bake the whole-cell step when done.
+    if (m.gait){
+      m.gait.t += dt;
+      if (m.gait.t >= m.gait.dur - 1e-6){
+        // bake one cell step
+        shiftOrgCells(org, m.gait.dx, m.gait.dy);
+        m.gait = null;
+      }
+      // Keep heading persisted continuously.
+      org.headingDir8 = ((m.headingDir8|0)%8+8)%8;
+      org.headingDeg = dir8ToDeg(org.headingDir8);
+      continue;
     }
 
-    // Persist heading into state so growth/targeting can use the same angle.
-    if (org) org.headingDeg = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
+    // Not in gait: decide whether we need another step.
+    const core = getCore(org);
+    const cx = (core[0] || 0);
+    const cy = (core[1] || 0);
+    const ddx = tx - cx;
+    const ddy = ty - cy;
 
-    // Persist heading into state so mutation/growth logic can reference it.
-    if (org) org.headingDeg = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
-
-    // Smooth start only
-    const a = 1 - Math.exp(-accel * dt);
-    const v0 = Number.isFinite(m.v) ? m.v : 0;
-    m.v = v0 + (speedCellsS - v0) * a;
-
-    const step = Math.max(0, m.v) * dt;
-
-    if (dist <= step || dist < 1e-4){
-      // FINALIZE: bake exact cell snap into state (PERSISTENT)
-      const fx = (tx - (core[0] || 0));
-      const fy = (ty - (core[1] || 0));
-
-      // tx/ty are ints => fx/fy are ints too, but round for safety
-      const sx = Number.isFinite(fx) ? Math.round(fx) : 0;
-      const sy = Number.isFinite(fy) ? Math.round(fy) : 0;
-
-      if (sx || sy) shiftOrgCells(org, sx, sy);
-
-      m.offsetX = 0;
-      m.offsetY = 0;
+    // Stop if we're at target cell.
+    if (Math.abs(ddx) < 0.5 && Math.abs(ddy) < 0.5){
       m.moving = false;
       m.breathMul = 1;
-      m.v = 0;
+      m.gait = null;
+      // Persist final heading.
+      org.headingDir8 = ((m.headingDir8|0)%8+8)%8;
+      org.headingDeg = dir8ToDeg(org.headingDir8);
       continue;
     }
 
-    // Move fractionally
-    const nx = dx / dist;
-    const ny = dy / dist;
-    m.offsetX = (m.offsetX || 0) + nx * step;
-    m.offsetY = (m.offsetY || 0) + ny * step;
-
-    // Bake integer part to geometry
-    const ix = (m.offsetX >= 1) ? Math.floor(m.offsetX) : (m.offsetX <= -1 ? Math.ceil(m.offsetX) : 0);
-    const iy = (m.offsetY >= 1) ? Math.floor(m.offsetY) : (m.offsetY <= -1 ? Math.ceil(m.offsetY) : 0);
-
-    if (ix || iy){
-      shiftOrgCells(org, ix, iy);
-      m.offsetX -= ix;
-      m.offsetY -= iy;
+    // Desired dir8 from target.
+    const want = vecToDir8(ddx, ddy);
+    if (want === null){
+      m.moving = false;
+      m.breathMul = 1;
+      continue;
     }
+
+    // Smoothly rotate heading toward want (in 45° increments).
+    // We can rotate multiple 45° steps per tick depending on turnDegS and dt.
+    let cur = ((m.headingDir8|0)%8+8)%8;
+    const stepsAllowed = Math.max(1, Math.floor((turnDegS * dt) / 45));
+    for (let i=0;i<stepsAllowed;i++){
+      if (cur === want) break;
+      cur = stepDir8Towards(cur, want);
+    }
+    m.headingDir8 = cur;
+    m.angleDeg = dir8ToDeg(cur);
+    org.headingDir8 = cur;
+    org.headingDeg = m.angleDeg;
+
+    // Take ONE gait step in the *current* heading.
+    const v = DIR8[cur];
+    const sx = v[0];
+    const sy = v[1];
+
+    // Cap baked steps per tick (in case dt is large but we still want smoothness).
+    m._stepsThisTick = (m._stepsThisTick|0) + 1;
+    if (m._stepsThisTick > MAX_STEPS_PER_TICK) continue;
+
+    m.gait = { dx: sx, dy: sy, t: 0, dur: stepDur };
+  }
+
+  // reset per tick counters
+  for (const k of Object.keys(view.moving.org)){
+    const m = view.moving.org[k];
+    if (m) m._stepsThisTick = 0;
   }
 }

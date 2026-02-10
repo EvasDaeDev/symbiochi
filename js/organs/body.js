@@ -1,4 +1,6 @@
 export const BODY = {
+  label: "Тело",
+  wind: false,
   growWeight: 0.92,
   appendageGrowWeight: 0.12,
   appendageGrowPerModule: 0.03,
@@ -15,6 +17,8 @@ export const BODY = {
 };
 
 export const CORE = {
+  label: "Ядро",
+  wind: false,
   sizeScale: 1,
   anim: {
     pulseSec: 5

@@ -1,14 +1,11 @@
 // js/render.js
 import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { getOrgMotion } from "./moving.js";
-
-import { organLabel } from "./mods/labels.js";
-import { PARTS } from "./mods/parts.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
-import { ORGAN_COLORS } from "./mods/colors.js";
 import { getFxPipeline } from "./FX/pipeline.js";
-import { BODY, CORE } from "./organs/body.js";
-import { EYE } from "./organs/eye.js";
+import { getOrganDef, organLabel } from "./organs/index.js";
+import { wormOffset as wormOffsetAnim } from "./organs/worm.js";
+import { tentacleOffset as tentacleOffsetAnim } from "./organs/tentacle.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 import { RULES } from "./rules-data.js";
 
@@ -71,9 +68,10 @@ function hslCss(h,s,l){
   return `hsl(${hh.toFixed(1)},${clamp(s,0,100).toFixed(1)}%,${clamp(l,0,100).toFixed(1)}%)`;
 }
 function getPartBaseHex(org, part){
-  if (part === "body") return org?.partColor?.body || org?.palette?.body || BODY.initialColor || "#1f2937";
-  if (part === "eye") return org?.partColor?.eye || org?.palette?.eye || ORGAN_COLORS.eye || "#f472b6";
-  return org?.partColor?.[part] || ORGAN_COLORS[part] || "#cbd5e1";
+  const def = getOrganDef(part);
+  if (part === "body") return org?.partColor?.body || org?.palette?.body || def?.initialColor || "#1f2937";
+  if (part === "eye") return org?.partColor?.eye || org?.palette?.eye || def?.initialColor || "#f472b6";
+  return org?.partColor?.[part] || def?.initialColor || "#cbd5e1";
 }
 function getPartColor(org, part, hueShiftDeg){
   const baseHex = getPartBaseHex(org, part);
@@ -432,66 +430,52 @@ function tailAmpProfile(u){
 
 function windOffsetPx(i, len, blockPx, offsetSec=0, type="tail"){
   if (i < 2) return 0;
+  const def = getOrganDef(type);
+  const swayAmp = Number.isFinite(def?.anim?.swayAmp) ? def.anim.swayAmp : 1.0;
+  const swaySec = Number.isFinite(def?.anim?.swaySec) ? def.anim.swaySec : 6.0;
   const t = (Date.now()/1000) + offsetSec;
   const denom = Math.max(1, len - 2);
   const u = Math.min(1, (i - 1) / denom);
   const amp01 = tailAmpProfile(u);
-  const omega1 = 2 * Math.PI / 6;
-  const omega2 = 2 * Math.PI / 4.5;
-  const omega3 = 2 * Math.PI / 9;
+  const omega1 = 2 * Math.PI / swaySec;
+  const omega2 = 2 * Math.PI / (swaySec * 0.75);
+  const omega3 = 2 * Math.PI / (swaySec * 1.5);
   const phase1 = omega1 * t - u * 3.4;
   const phase2 = omega2 * t - u * 5.1 + 1.3;
   const phase3 = omega3 * t - u * 2.2 + 2.1;
   const mix = 0.6 * Math.sin(phase1) + 0.3 * Math.sin(phase2) + 0.1 * Math.sin(phase3);
-  const ampScale = (type === "tentacle") ? 1.5 : 1;
-  const ampPx = blockPx * 1.05 * amp01 * lengthAmpScale(len) * ampScale;
+  const ampPx = blockPx * 1.05 * amp01 * lengthAmpScale(len) * swayAmp;
   return mix * ampPx;
 }
 
 function windOffset(i, len, offsetSec=0, type="tail"){
   if (i < 2) return 0;
+  const def = getOrganDef(type);
+  const swayAmp = Number.isFinite(def?.anim?.swayAmp) ? def.anim.swayAmp : 1.0;
+  const swaySec = Number.isFinite(def?.anim?.swaySec) ? def.anim.swaySec : 6.0;
   const t = (Date.now()/1000) + offsetSec;
   const denom = Math.max(1, len - 2);
   const u = Math.min(1, (i - 1) / denom);
   const amp01 = tailAmpProfile(u);
-  const omega1 = 2 * Math.PI / 6;
-  const omega2 = 2 * Math.PI / 4.5;
-  const omega3 = 2 * Math.PI / 9;
+  const omega1 = 2 * Math.PI / swaySec;
+  const omega2 = 2 * Math.PI / (swaySec * 0.75);
+  const omega3 = 2 * Math.PI / (swaySec * 1.5);
   const phase1 = omega1 * t - u * 3.4;
   const phase2 = omega2 * t - u * 5.1 + 1.3;
   const phase3 = omega3 * t - u * 2.2 + 2.1;
   const mix = 0.6 * Math.sin(phase1) + 0.3 * Math.sin(phase2) + 0.1 * Math.sin(phase3);
-  const ampScale = (type === "tentacle") ? 1.5 : 1;
-  return mix * 0.57 * amp01 * lengthAmpScale(len) * ampScale;
-}
-
-function wormOffset(i, len, offsetSec, dir, perp){
-  if (!dir || !perp) return { x: 0, y: 0 };
-  const t = (Date.now()/1000) + offsetSec;
-  const denom = Math.max(1, len - 1);
-  const u = i / denom;
-  const peristalsis = Math.sin((t * (2 * Math.PI / 5.5)) - u * 4.2);
-  const twist = Math.sin((t * (2 * Math.PI / 8)) + u * 6.0) * 0.35;
-  const amp = 0.35 * tailAmpProfile(u) * lengthAmpScale(len);
-  const axial = Math.sin((t * (2 * Math.PI / 7)) - u * 3.3) * 0.18 * amp;
-  const cos = Math.cos(twist);
-  const sin = Math.sin(twist);
-  const rx = perp[0] * cos - perp[1] * sin;
-  const ry = perp[0] * sin + perp[1] * cos;
-  return {
-    x: rx * (peristalsis * amp) + dir[0] * axial,
-    y: ry * (peristalsis * amp) + dir[1] * axial
-  };
+  return mix * 0.57 * amp01 * lengthAmpScale(len) * swayAmp;
 }
 
 function eyeBlinkScale(orgId, baseSeed){
   const t = Date.now() / 1000;
   const seed = hash01(`${baseSeed}|eye-blink|${orgId}`);
-  const pauseRange = Array.isArray(EYE?.anim?.blinkPauseSec) ? EYE.anim.blinkPauseSec : [10, 17];
+  const eyeDef = getOrganDef("eye");
+  const pauseRange = Array.isArray(eyeDef?.anim?.blinkPauseSec) ? eyeDef.anim.blinkPauseSec : [10, 17];
   const pauseMin = pauseRange[0] ?? 10;
   const pauseMax = pauseRange[1] ?? 17;
   const pause = pauseMin + (pauseMax - pauseMin) * seed;
-  const blinkDur = Number.isFinite(EYE?.anim?.blinkDurSec) ? EYE.anim.blinkDurSec : 0.3;
+  const blinkDur = Number.isFinite(eyeDef?.anim?.blinkDurSec) ? eyeDef.anim.blinkDurSec : 0.3;
   const cycle = pause + blinkDur * 2;
   const phase = (t + seed * 11.7) % cycle;
   if (phase >= blinkDur * 2) return 1;
@@ -517,7 +501,8 @@ function animProgress(org, wx, wy){
 // Colors per organ instance + subtle variations
 // =====================
 function organBaseColor(org, type){
-  return org?.partColor?.[type] || ORGAN_COLORS[type] || "#cbd5e1";
+  const def = getOrganDef(type);
+  return org?.partColor?.[type] || def?.initialColor || "#cbd5e1";
 }
 
 function organColor(org, type, orgId, organIndex, baseSeed){
@@ -763,6 +748,59 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
   const s = view.blockPx;
   const occ = buildOccupancy(org);
 
+  // Smooth movement gait (render-only deformation)
+  const motion = getOrgMotion(view, orgId);
+  const gait = motion?.gait || null;
+  const gaitPhase = gait ? clamp(gait.t / Math.max(1e-6, gait.dur), 0, 1) : 0;
+  const gaitDx = gait ? (gait.dx || 0) : 0;
+  const gaitDy = gait ? (gait.dy || 0) : 0;
+  // Front-first travel: back lags by up to ~60% of the step, then catches up.
+  // This makes the body look like it "leans" into motion without rotating canvas.
+  let gaitMinScore = 0;
+  let gaitInvRange = 1;
+  if (gait && Array.isArray(org?.body?.cells) && org.body.cells.length){
+    const core = org?.body?.core || org.body.cells[0];
+    const cx = core?.[0] || 0;
+    const cy = core?.[1] || 0;
+    let mn = Infinity;
+    let mx = -Infinity;
+    for (const c of org.body.cells){
+      const wx = c?.[0] || 0;
+      const wy = c?.[1] || 0;
+      const sc = (wx - cx) * gaitDx + (wy - cy) * gaitDy;
+      if (sc < mn) mn = sc;
+      if (sc > mx) mx = sc;
+    }
+    gaitMinScore = Number.isFinite(mn) ? mn : 0;
+    const range = (Number.isFinite(mx) ? mx : mn) - gaitMinScore;
+    gaitInvRange = (range > 1e-6) ? (1 / range) : 1;
+  }
+
+  function gaitLocalFromIntCell(wx0, wy0){
+    if (!gait) return 1;
+    const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
+    const cx = core?.[0] || 0;
+    const cy = core?.[1] || 0;
+    const sc = (wx0 - cx) * gaitDx + (wy0 - cy) * gaitDy;
+    const wFront = clamp((sc - gaitMinScore) * gaitInvRange, 0, 1);
+    const delay = (1 - wFront) * 0.60;
+    const local = clamp((gaitPhase - delay) / 0.40, 0, 1);
+    return local;
+  }
+
+  function gaitPositions(wx, wy, wx0, wy0){
+    if (!gaitActive) return [[wx, wy]];
+    const local = gaitLocalFromIntCell(wx0, wy0);
+    const out = [];
+    if (local < 1 - 1e-6) out.push([wx, wy]);
+    if (local > 1e-6) out.push([wx + gaitDx, wy + gaitDy]);
+    return out;
+  }
+
+  // During gait we disable packed-rect rendering for body (otherwise you'd see
+  // the entire blob jump as a rectangle).
+  const gaitActive = !!gait;
+
   const breathY = breathYOffsetPx(org, orgId, baseSeed, breathMul);
   const breathK = (breathY !== 0); // slight tint toggle
 
@@ -775,50 +813,79 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
   const bodyCells = org?.body?.cells || [];
   const bodyOcc = buildBodyOccupancy(org); // body-only occupancy for perimeter detection
 
-  const staticInner = [];
-  const staticSkin = [];
+  if (!gaitActive){
+    const staticInner = [];
+    const staticSkin = [];
 
-  for (const [wx, wy] of bodyCells){
-    const nm = neighMaskAt(occ, wx, wy);
-    const kGrow = animProgress(org, wx, wy);
-    const isSkin = isBoundary(bodyOcc, wx, wy);
-    const col = isSkin ? bodySkinColor : bodyColor;
+    for (const [wx, wy] of bodyCells){
+      const nm = neighMaskAt(occ, wx, wy);
+      const kGrow = animProgress(org, wx, wy);
+      const isSkin = isBoundary(bodyOcc, wx, wy);
+      const col = isSkin ? bodySkinColor : bodyColor;
 
-    if (kGrow < 0.999){
-      const p = worldToScreenPx(cam, wx, wy, view);
-      const x = p.x;
-      const y = p.y + breathY;
-      drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
-    } else {
-      (isSkin ? staticSkin : staticInner).push([wx, wy]);
+      if (kGrow < 0.999){
+        const p = worldToScreenPx(cam, wx, wy, view);
+        const x = p.x;
+        const y = p.y + breathY;
+        drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
+      } else {
+        (isSkin ? staticSkin : staticInner).push([wx, wy]);
+      }
+
+      if (isSelected && isBoundary(occ, wx, wy)){
+        boundaryCells.push([wx, wy]);
+      }
     }
 
-    if (isSelected && isBoundary(occ, wx, wy)){
-      boundaryCells.push([wx, wy]);
+    const fillPacked = (cells, col)=>{
+      if (!cells.length) return;
+      const rects = buildPackedRects(cells);
+      ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
+      for (const r of rects){
+        const p = worldToScreenPx(cam, r.x, r.y, view);
+        const x = p.x;
+        const y = p.y + breathY;
+        ctx.fillRect(x, y, r.w * s, r.h * s);
+      }
+    };
+
+    // Draw bulk static cells in two passes (inner + perimeter skin), so the body outline stays 1-block thick.
+    fillPacked(staticInner, bodyColor);
+    fillPacked(staticSkin, bodySkinColor);
+  } else {
+    // Gait render: draw per cell (and a render-only bridge) so motion is smooth.
+    for (const [wx0, wy0] of bodyCells){
+      const local = gaitLocalFromIntCell(wx0, wy0);
+      const isSkin = isBoundary(bodyOcc, wx0, wy0);
+      const col = isSkin ? bodySkinColor : bodyColor;
+      const kGrow = animProgress(org, wx0, wy0);
+
+      // Old position (until fully transferred)
+      if (local < 1 - 1e-6){
+        const p0 = worldToScreenPx(cam, wx0, wy0, view);
+        const nm0 = neighMaskAt(occ, wx0, wy0);
+        drawBlockAnim(ctx, p0.x, p0.y + breathY, s, col, breathK, nm0, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx0, wy0]);
+      }
+
+      // New position (as soon as the cell starts moving)
+      if (local > 1e-6){
+        const wx1 = wx0 + gaitDx;
+        const wy1 = wy0 + gaitDy;
+        const p1 = worldToScreenPx(cam, wx1, wy1, view);
+        const nm1 = neighMaskAt(occ, wx0, wy0); // shading based on true occupancy
+        drawBlockAnim(ctx, p1.x, p1.y + breathY, s, col, breathK, nm1, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx1, wy1]);
+      }
     }
   }
-
-  const fillPacked = (cells, col)=>{
-    if (!cells.length) return;
-    const rects = buildPackedRects(cells);
-    ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
-    for (const r of rects){
-      const p = worldToScreenPx(cam, r.x, r.y, view);
-      const x = p.x;
-      const y = p.y + breathY;
-      ctx.fillRect(x, y, r.w * s, r.h * s);
-    }
-  };
-
-  // Draw bulk static cells in two passes (inner + perimeter skin), so the body outline stays 1-block thick.
-  fillPacked(staticInner, bodyColor);
-  fillPacked(staticSkin, bodySkinColor);
 
   // MODULES
   const modules = org?.modules || [];
   for (let mi=0; mi<modules.length; mi++){
     const m = modules[mi];
     const type = m.type || "organ";
+	const def = getOrganDef(type);
     const cells = m.cells || [];
     if (cells.length === 0) continue;
 
@@ -829,10 +896,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
       const len = cells.length;
 
       for (let i=0;i<len;i++){
-        const [wx,wy] = cells[i];
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
+        const [wx0,wy0] = cells[i];
 
         // spike tip blink changes brightness
         let c = base;
@@ -841,12 +905,12 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
         c = organSegmentColor(c, i, len, baseSeed, orgId, mi);
         if (isTip && on) c = scaleBrightness(c, 2);
 
-        const nm = neighMaskAt(occ, wx, wy);
-        const kGrow = animProgress(org, wx, wy);
-        drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
-
-        if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryCells.push([wx, wy]);
+        const nm = neighMaskAt(occ, wx0, wy0);
+        const kGrow = animProgress(org, wx0, wy0);
+        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+          const p = worldToScreenPx(cam, wx, wy, view);
+          drawBlockAnim(ctx, p.x, p.y + breathY, s, c, breathK, nm, kGrow);
+          if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -855,19 +919,16 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
     if (type === "shell"){
       // shell draws slightly darker plates
       for (let i=0;i<cells.length;i++){
-        const [wx,wy] = cells[i];
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
+        const [wx0,wy0] = cells[i];
 
         let c = organSegmentColor(brighten(base, -0.05), i, cells.length, baseSeed, orgId, mi);
 
-        const nm = neighMaskAt(occ, wx, wy);
-        const kGrow = animProgress(org, wx, wy);
-        drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
-
-        if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryCells.push([wx, wy]);
+        const nm = neighMaskAt(occ, wx0, wy0);
+        const kGrow = animProgress(org, wx0, wy0);
+        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+          const p = worldToScreenPx(cam, wx, wy, view);
+          drawBlockAnim(ctx, p.x, p.y + breathY, s, c, breathK, nm, kGrow);
+          if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -876,27 +937,27 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
     if (type === "eye"){
       const blinkScale = eyeBlinkScale(orgId, baseSeed);
       for (let i=0;i<cells.length;i++){
-        const [wx, wy] = cells[i];
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
-        const nm = neighMaskAt(occ, wx, wy);
-        const kGrow = animProgress(org, wx, wy);
-        if (blinkScale !== 1){
-          const cx = x + s / 2;
-          const cy = y + s / 2;
-          ctx.save();
-          ctx.translate(cx, cy);
-          ctx.scale(1, blinkScale);
-          ctx.translate(-cx, -cy);
-          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
-          ctx.restore();
-        } else {
-          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
-        }
+        const [wx0, wy0] = cells[i];
+        const nm = neighMaskAt(occ, wx0, wy0);
+        const kGrow = animProgress(org, wx0, wy0);
 
-        if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryCells.push([wx, wy]);
+        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+          const p = worldToScreenPx(cam, wx, wy, view);
+          const x = p.x;
+          const y = p.y + breathY;
+          if (blinkScale !== 1){
+            const cx = x + s / 2;
+            const cy = y + s / 2;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(1, blinkScale);
+            ctx.translate(-cx, -cy);
+            drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+            ctx.restore();
+          } else {
+            drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+          }
+          if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -939,34 +1000,20 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
       return set;
     })() : null;
 
-// Variable thickness profile (visual-only)
-// Goal:
-// - first 1/4 of length: maximum thickness
-// - up to 2/3 of length: thick
-// - rest: thin
-// - if no lateral space: stays thinner (never blocks growth)
-// - antenna is always thin
-function thicknessLevel(type, i, len){
-  if (type === "antenna") return 1;
-  if (type === "limb") return 1;
-  if (type === "tail") return len >= 4 ? 2 : 1;
-  if (type === "worm") return 1;
-  if (len < 6) return 1;
-  if (type === "claw"){
-    const mid = (len - 1) / 2;
-    const dist = Math.abs(i - mid);
-    const maxThickness = 2;
-    if (dist <= len * 0.2) return maxThickness;
-    if (dist <= len * 0.35) return Math.min(2, maxThickness);
-    return 1;
+// Visual-only thickness. Each organ can define its own profile in its organ module:
+// organDef.render.thicknessLevel(i, len) => 1 (thin) or 2 (thick).
+// If absent, the organ is treated as thin.
+function getThicknessLevel(organDef, i, len){
+  const fn = organDef?.render?.thicknessLevel;
+  if (typeof fn === "function"){
+    try {
+      const v = fn(i, len);
+      return v === 2 ? 2 : 1;
+    } catch {
+      return 1;
+    }
   }
-
-  const maxZone = Math.max(1, Math.floor(len * 0.25));
-  const midZone = Math.max(maxZone, Math.floor(len * (2/3)));
-
-  if (i < maxZone) return 2;   // max thickness
-  if (i < midZone) return 2;   // thick
-  return 1;                    // thin
+  return 1;
 }
 
 // Try to draw a lateral "support" block if that world-cell is free.
@@ -1031,8 +1078,15 @@ function limbPhalanxIndex(lengths, idx){
 
       let off = 0;
       let wormShift = null;
+      let tentacleShift = null;
       if (type === "worm"){
-        wormShift = wormOffset(i, len, offsetSec, dir, perp);
+        const seed01 = hash01(`${baseSeed}|worm|${orgId}|${mi}`);
+        const tSec = (Date.now()/1000) + offsetSec;
+        wormShift = wormOffsetAnim(i, len, tSec, dir, perp, seed01);
+      } else if (type === "tentacle"){
+        const seed01 = hash01(`${baseSeed}|tentacle|${orgId}|${mi}`);
+        const tSec = (Date.now()/1000) + offsetSec;
+        tentacleShift = tentacleOffsetAnim(i, len, tSec, dir, perp, seed01);
       } else if (type !== "antenna" && type !== "claw" && !isJointedLimb){
         off = windOffset(i, len, offsetSec, type);
       }
@@ -1040,25 +1094,43 @@ function limbPhalanxIndex(lengths, idx){
         if (wormShift){
           wx += wormShift.x;
           wy += wormShift.y;
+        } else if (tentacleShift){
+          wx += tentacleShift.x;
+          wy += tentacleShift.y;
         } else {
           wx += perp[0] * off;
           wy += perp[1] * off;
         }
       }
 
-      const p = worldToScreenPx(cam, wx, wy, view);
-      const x = p.x;
-      const y = p.y + breathY;
+      const wx0 = cells[i][0];
+      const wy0 = cells[i][1];
 
       let c = organSegmentColor(base, i, len, baseSeed, orgId, mi);
       if (type === "antenna" && antennaPulse !== null && i === antennaPulse){
         c = scaleBrightness(c, 3);
       }
 
-      const nm = neighMaskAt(occ, cells[i][0], cells[i][1]); // for shading based on true occupancy
-      const kGrow = animProgress(org, cells[i][0], cells[i][1]);
+      const nm = neighMaskAt(occ, wx0, wy0); // shading based on true occupancy
+      const kGrow = animProgress(org, wx0, wy0);
 
-      drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
+      // Draw in 1..2 positions during gait (bridge union) to avoid full-blob jumps.
+      let drawX = 0;
+      let drawY = 0;
+      for (const [wxD, wyD] of gaitPositions(wx, wy, wx0, wy0)){
+        const p = worldToScreenPx(cam, wxD, wyD, view);
+        drawX = p.x;
+        drawY = p.y + breathY;
+        drawBlockAnim(ctx, drawX, drawY, s, c, breathK, nm, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)){
+          if (Number.isInteger(wxD) && Number.isInteger(wyD)) boundaryCells.push([wxD, wyD]);
+          else boundaryRects.push({x: drawX, y: drawY, w: s, h: s});
+        }
+      }
+
+      // Use the last drawn position as the anchor for extra decoration blocks.
+      const x = drawX;
+      const y = drawY;
 
       if (isJointedLimb && jointStarts?.has(i)){
         const shade = brighten(c, -0.04);
@@ -1079,7 +1151,7 @@ function limbPhalanxIndex(lengths, idx){
         }
       } else {
         // variable thickness: tries to be thick, but can stay thin if blocked
-        const lvl = thicknessLevel(type, i, len);
+        const lvl = getThicknessLevel(def, i, len);
         const shade = brighten(c, -0.04);
 
         // IMPORTANT: use real cell coords for occupancy test
@@ -1126,9 +1198,11 @@ function limbPhalanxIndex(lengths, idx){
 
   // core color by condition
   const st = barStatus(org);
+  const CORE_DEF = getOrganDef("core");
+  const coreColors = CORE_DEF?.colors || {};
   const coreCol = (st.cls === "bad")
-    ? (CORE.colors?.bad || "#fb7185")
-    : (st.txt === "норм" ? (CORE.colors?.ok || "#fbbf24") : (CORE.colors?.good || "#34d399"));
+    ? (coreColors.bad || "#fb7185")
+    : (st.txt === "норм" ? (coreColors.ok || "#fbbf24") : (coreColors.good || "#34d399"));
 
   ctx.save();
   ctx.fillStyle = coreCol;
@@ -1549,7 +1623,8 @@ export function renderLegend(org, legendEl){
   const filtered = items.filter((it) => present.has(it.part));
 
   legendEl.innerHTML = filtered.map(it => {
-    const sw = (it.part === "core") ? (CORE.colors?.good || "#34d399") : getPartColor(org, it.part, 0);
+    const CORE_DEF = getOrganDef("core");
+    const sw = (it.part === "core") ? (CORE_DEF?.colors?.good || "#34d399") : getPartColor(org, it.part, 0);
     const cls = (it.part === "core") ? "legendSwatch" : "legendSwatch swatch";
     const data = (it.part === "core")
       ? ""

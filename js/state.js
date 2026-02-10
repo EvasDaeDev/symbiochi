@@ -239,8 +239,19 @@ function clampAppendageLengths(org){
     if (Number.isFinite(maxLen) && maxLen > 0 && m.cells.length > maxLen){
       m.cells = m.cells.slice(0, maxLen);
     }
+    // IMPORTANT:
+    // growTo is the *target* length. Never clamp it down to the current length,
+    // otherwise appendages will immediately stop growing after load/migration.
+    // Only enforce:
+    //  - growTo >= current length
+    //  - growTo <= maxLen (if maxLen is finite)
     if (Number.isFinite(m.growTo)){
-      m.growTo = Math.min(m.growTo, m.cells.length);
+      if (m.growTo < m.cells.length) m.growTo = m.cells.length;
+      if (Number.isFinite(maxLen) && maxLen > 0) m.growTo = Math.min(m.growTo, maxLen);
+    } else {
+      // If growTo is missing (old saves), keep at least the current length.
+      m.growTo = m.cells.length;
+      if (Number.isFinite(maxLen) && maxLen > 0) m.growTo = Math.min(m.growTo, maxLen);
     }
   }
 }

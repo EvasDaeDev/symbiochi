@@ -1,47 +1,57 @@
 import { key, parseKey, mulberry32, hash32, pick } from "./util.js";
-import { ANTENNA } from "./organs/antenna.js";
-import { CLAW } from "./organs/claw.js";
-import { EYE } from "./organs/eye.js";
-import { FIN } from "./organs/fin.js";
-import { LIMB } from "./organs/limb.js";
-import { MOUTH } from "./organs/mouth.js";
-import { SHELL } from "./organs/shell.js";
-import { SPIKE } from "./organs/spike.js";
-import { TAIL } from "./organs/tail.js";
-import { TEETH } from "./organs/teeth.js";
-import { TENTACLE } from "./organs/tentacle.js";
-import { WORM } from "./organs/worm.js";
-import { BODY } from "./organs/body.js";
+import { getOrganDef } from "./organs/index.js";
 import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT } from "./mods/carrots.js";
 import { ensureBodyWave, bodyWaveScore } from "./mods/body_wave.js";
 
+// ---------------------------------------------------------------------------
+// Back-compat shims for legacy code paths
+// ---------------------------------------------------------------------------
+// Some older files referenced ALLCAPS identifiers like TAIL/WORM/EYE as if they
+// were globally available type strings. After the refactor we use string types
+// directly ("tail", "worm", ...). These constants keep any lingering legacy
+// references from crashing if they still exist in a local branch.
+//
+// NOTE: These are *type strings*, not config objects.
+const BODY = "body";
+const CORE = "core";
+const EYE = "eye";
+const TAIL = "tail";
+const TENTACLE = "tentacle";
+const WORM = "worm";
+const LIMB = "limb";
+const ANTENNA = "antenna";
+const SPIKE = "spike";
+const SHELL = "shell";
+
+// 16-way directions for growth.
+// Includes 8 cardinal/diagonal plus 8 "semi" directions (2:1 / 1:2).
+// We keep integer pairs for indexing and normalize to float vectors for use
+// with buildLineFrom() and stepFromDir().
+const DIR16_INT = [
+  [ 1, 0], [ 2, 1], [ 1, 1], [ 1, 2],
+  [ 0, 1], [-1, 2], [-1, 1], [-2, 1],
+  [-1, 0], [-2,-1], [-1,-1], [-1,-2],
+  [ 0,-1], [ 1,-2], [ 1,-1], [ 2,-1]
+];
+
+function norm2(d){
+  const len = Math.hypot(d[0], d[1]) || 1;
+  return [d[0] / len, d[1] / len];
+}
+
+const DIR16 = DIR16_INT.map(norm2);
+
 const BASE_GROW_DUR_SEC = 0.7;
 
-const ORGAN_CONFIGS = {
-  antenna: ANTENNA,
-  claw: CLAW,
-  eye: EYE,
-  fin: FIN,
-  limb: LIMB,
-  mouth: MOUTH,
-  shell: SHELL,
-  spike: SPIKE,
-  tail: TAIL,
-  teeth: TEETH,
-  tentacle: TENTACLE,
-  worm: WORM,
-  body: BODY
-};
-
+// Backward-compatible helper used across the codebase.
 export function getOrganConfig(type){
-  if (!type) return null;
-  return ORGAN_CONFIGS[type] || null;
+  return getOrganDef(type);
 }
 
 export function getOrganMaxLen(type){
-  const cfg = getOrganConfig(type);
+  const cfg = getOrganDef(type);
   if (!cfg) return Infinity;
   if (Number.isFinite(cfg.maxLen) && cfg.maxLen > 0) return cfg.maxLen;
   const minLen = Number.isFinite(cfg.minLen) ? cfg.minLen : 0;
@@ -120,6 +130,46 @@ function quantizeDirTo8(dir){
     }
   }
   return [best[0], best[1]];
+}
+
+function quantizeDirTo16(dir){
+  if (!dir) return dir;
+  const len = Math.hypot(dir[0], dir[1]) || 1;
+  let best = DIR16[0];
+  let bestDot = -Infinity;
+  for (const d of DIR16){
+    const dot = (dir[0] * d[0] + dir[1] * d[1]) / len;
+    if (dot > bestDot){
+      bestDot = dot;
+      best = d;
+    }
+  }
+  return [best[0], best[1]];
+}
+
+function rotateDir16(dir, steps){
+  if (!dir) return dir;
+  const q = quantizeDirTo16(dir);
+  let idx = 0;
+  for (let i = 0; i < DIR16.length; i++){
+    if (DIR16[i][0] === q[0] && DIR16[i][1] === q[1]){ idx = i; break; }
+  }
+  const next = (idx + steps + DIR16.length) % DIR16.length;
+  return [DIR16[next][0], DIR16[next][1]];
+}
+
+function growthDirCount(type){
+  const def = getOrganDef(type);
+  const c = def?.growthDir || def?.growthDirs;
+  return c === 16 ? 16 : 8;
+}
+
+function quantizeDirForGrowth(type, dir){
+  return growthDirCount(type) === 16 ? quantizeDirTo16(dir) : quantizeDirTo8(dir);
+}
+
+function rotateDirForGrowth(type, dir, steps){
+  return growthDirCount(type) === 16 ? rotateDir16(dir, steps) : rotateDir8(dir, steps);
 }
 
 function rotateDir8(dir, steps){
@@ -234,7 +284,8 @@ export function newGame(){
   const targetBodySize = baseBodySize * (2 + Math.floor(rng() * 3));
   const body = makeSmallConnectedBody(seed, targetBodySize);
   const face = findFaceAnchor(body, seed);
-  const eyeShape = pickWeighted(rng, EYE.shapeOptions, EYE.shapeWeights) || "diamond";
+  const eyeCfg = getOrganDef("eye");
+  const eyeShape = pickWeighted(rng, eyeCfg?.shapeOptions, eyeCfg?.shapeWeights) || "diamond";
 
  const plan = {
     // предпочитаемое направление роста (силуэт)
@@ -369,15 +420,16 @@ function buildLineFrom(anchor, dir, len, state, bodySet){
 }
 
 function buildLimbPlan(rng, baseDir){
-  const count = LIMB.phalanxCountMin + Math.floor(rng() * (LIMB.phalanxCountMax - LIMB.phalanxCountMin + 1));
+  const LIMB = getOrganDef("limb") || {};
+  const count = (LIMB.phalanxCountMin || 1) + Math.floor(rng() * ((LIMB.phalanxCountMax || 1) - (LIMB.phalanxCountMin || 1) + 1));
   const lengths = Array.from({ length: count }, () => (
-    LIMB.phalanxLenMin + Math.floor(rng() * (LIMB.phalanxLenMax - LIMB.phalanxLenMin + 1))
+    (LIMB.phalanxLenMin || 1) + Math.floor(rng() * ((LIMB.phalanxLenMax || 1) - (LIMB.phalanxLenMin || 1) + 1))
   ));
   const turnSteps = Array.from({ length: count - 1 }, () => 0);
-  const base = quantizeDirTo8(baseDir);
+  const base = quantizeDirForGrowth("limb", baseDir);
   const dirs = Array.from({ length: count }, () => [base[0], base[1]]);
   const angles = Array.from({ length: count }, () => (
-    LIMB.animAngleMin + Math.floor(rng() * (LIMB.animAngleMax - LIMB.animAngleMin + 1))
+    (LIMB.animAngleMin || 0) + Math.floor(rng() * ((LIMB.animAngleMax || 0) - (LIMB.animAngleMin || 0) + 1))
   ));
   const animDirection = rng() < 0.5 ? -1 : 1;
   return {
@@ -538,22 +590,24 @@ export function addModule(state, type, rng, target=null){
 
   if (type === "tail" || type === "tentacle"){
     movable = true;
-    const cfg = (type === "tail") ? TAIL : TENTACLE;
+    const cfg = getOrganDef(type) || {};
     // Aim near configured maximum length (±10% on maxExtra)
     targetLen = targetLenNearMax(rng, cfg.minLen, cfg.maxExtra);
-    dirForGrowth = baseDir;
-    const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
+    dirForGrowth = quantizeDirForGrowth(type, baseDir);
+    const full = buildLineFrom(anchor, dirForGrowth, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "worm"){
     movable = true;
     // Aim near configured maximum length (±10% on maxExtra)
-    targetLen = targetLenNearMax(rng, WORM.minLen, WORM.maxExtra);
-    dirForGrowth = baseDir;
-    const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
+    const cfg = getOrganDef("worm") || {};
+    targetLen = targetLenNearMax(rng, cfg.minLen, cfg.maxExtra);
+    dirForGrowth = quantizeDirForGrowth(type, baseDir);
+    const full = buildLineFrom(anchor, dirForGrowth, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "limb"){
     movable = true;
-    const dir = rng() < LIMB.downBias ? [0,1] : quantizeDirTo8(baseDir);
+    const cfg = getOrganDef("limb") || {};
+    const dir = rng() < (cfg.downBias ?? 0) ? [0,1] : quantizeDirForGrowth(type, baseDir);
     limbPlan = buildLimbPlan(rng, dir);
     targetLen = limbPlan.totalLength;
     dirForGrowth = dir;
@@ -562,22 +616,25 @@ export function addModule(state, type, rng, target=null){
   } else if (type === "antenna"){
     movable = true;
     // Aim near configured maximum length (±10% on maxExtra)
-    targetLen = targetLenNearMax(rng, ANTENNA.minLen, ANTENNA.maxExtra);
-    const dir = rng() < ANTENNA.upBias ? [0,-1] : quantizeDirTo8(baseDir);
+    const cfg = getOrganDef("antenna") || {};
+    targetLen = targetLenNearMax(rng, cfg.minLen, cfg.maxExtra);
+    const dir = rng() < (cfg.upBias ?? 0) ? [0,-1] : quantizeDirForGrowth(type, baseDir);
     dirForGrowth = dir;
-    targetLen = Math.min(targetLen, ANTENNA.maxLen);
+    if (Number.isFinite(cfg.maxLen)) targetLen = Math.min(targetLen, cfg.maxLen);
     const full = buildLineFrom(anchor, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "spike"){
     movable = false;
     // Aim near configured maximum length (±10% on maxExtra)
-    targetLen = targetLenNearMax(rng, SPIKE.minLen, SPIKE.maxExtra);
-    dirForGrowth = baseDir;
-    targetLen = Math.min(targetLen, SPIKE.maxLen);
-    const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
+    const cfg = getOrganDef("spike") || {};
+    targetLen = targetLenNearMax(rng, cfg.minLen, cfg.maxExtra);
+    dirForGrowth = quantizeDirForGrowth(type, baseDir);
+    if (Number.isFinite(cfg.maxLen)) targetLen = Math.min(targetLen, cfg.maxLen);
+    const full = buildLineFrom(anchor, dirForGrowth, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "shell"){
     movable = false;
+    const cfg = getOrganDef("shell") || {};
     const baseStep = stepFromDir([ax, ay], baseDir).cell;
     const dx = baseStep[0] - ax;
     const dy = baseStep[1] - ay;
@@ -587,16 +644,17 @@ export function addModule(state, type, rng, target=null){
       [ox + 1, oy],
       [ox, oy + 1],
       [ox + 1, oy + 1]
-    ].slice(0, SHELL.size * SHELL.size);
+    ].slice(0, (cfg.size || 2) * (cfg.size || 2));
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
   } else if (type === "eye"){
-    eyeShape = pickWeighted(rng, EYE.shapeOptions, EYE.shapeWeights) || "diamond";
-    eyeRadius = (state.body?.cells?.length || 0) < EYE.smallBodyThreshold
+    const cfg = getOrganDef("eye") || {};
+    eyeShape = pickWeighted(rng, cfg.shapeOptions, cfg.shapeWeights) || "diamond";
+    eyeRadius = (state.body?.cells?.length || 0) < (cfg.smallBodyThreshold ?? 0)
       ? 1
-      : (rng() < EYE.largeRadiusChance ? 1 : 2);
+      : (rng() < (cfg.largeRadiusChance ?? 0) ? 1 : 2);
     const faceAnchor = state.face?.anchor;
     const faceEyeRadius = Math.max(0, (state.face?.eyeRadius ?? ((state.face?.eyeSize ?? 1) - 1)) | 0);
-    const faceEyeShape = state.face?.eyeShape || (pickWeighted(rng, EYE.shapeOptions, EYE.shapeWeights) || "diamond");
+    const faceEyeShape = state.face?.eyeShape || (pickWeighted(rng, cfg.shapeOptions, cfg.shapeWeights) || "diamond");
     const faceEyeSet = new Set();
     if (faceAnchor && faceEyeRadius >= 0){
       for (const [dx, dy] of buildEyeOffsets(faceEyeRadius, faceEyeShape)){
@@ -816,10 +874,10 @@ export function growPlannedModules(state, rng, options = {}){
     return dirFromAngle(angle);
   }
   function rotateDirForModule(m, dir, steps){
-    if (m?.type === "limb" || m?.type === "antenna"){
-      return rotateDir8(dir, steps);
-    }
-    return rotateDir(dir, steps);
+    // Growth turns are quantized per-organ:
+    // - animated appendages: DIR16
+    // - static organs: DIR8
+    return rotateDirForGrowth(m?.type, dir, steps);
   }
 
   function phalanxIndex(lengths, idx){
@@ -929,10 +987,10 @@ export function growPlannedModules(state, rng, options = {}){
     const growPos = Array.isArray(m.growPos) ? m.growPos : [last[0], last[1]];
     let baseDir = m.growDir;
     const moduleInfluence = useTarget ? targetInfluence(moduleDistance(m, target[0], target[1])) : 0;
-    if (m.type === "limb" || m.type === "antenna"){
-      baseDir = quantizeDirTo8(baseDir);
-      m.growDir = baseDir;
-    }
+    // Quantize growth direction per-organ: animated appendages use DIR16,
+    // static organs use DIR8.
+    baseDir = quantizeDirForGrowth(m.type, baseDir);
+    m.growDir = baseDir;
 
     if (m.type === "antenna" || m.type === "spike"){
       m.growStyle = "straight";
@@ -985,19 +1043,19 @@ export function growPlannedModules(state, rng, options = {}){
 
     if (m.growStyle === "jointed"){
       pushDir(dir);
-      pushDir(rotateDir8(dir, 1));
-      pushDir(rotateDir8(dir, -1));
-      pushDir(rotateDir8(dir, 2));
-      pushDir(rotateDir8(dir, -2));
+      pushDir(rotateDirForGrowth(m.type, dir, 1));
+      pushDir(rotateDirForGrowth(m.type, dir, -1));
+      pushDir(rotateDirForGrowth(m.type, dir, 2));
+      pushDir(rotateDirForGrowth(m.type, dir, -2));
     } else {
       if (appendage) pushDir(baseDir);
       pushDir(dir);
-      pushDir(rotateDirForModule(m, dir, 1));
-      pushDir(rotateDirForModule(m, dir, -1));
-      pushDir(rotateDirForModule(m, dir, 2));
-      pushDir(rotateDirForModule(m, dir, -2));
-      pushDir(rotateDirForModule(m, dir, 3));
-      pushDir(rotateDirForModule(m, dir, -3));
+      pushDir(rotateDirForGrowth(m.type, dir, 1));
+      pushDir(rotateDirForGrowth(m.type, dir, -1));
+      pushDir(rotateDirForGrowth(m.type, dir, 2));
+      pushDir(rotateDirForGrowth(m.type, dir, -2));
+      pushDir(rotateDirForGrowth(m.type, dir, 3));
+      pushDir(rotateDirForGrowth(m.type, dir, -3));
     }
 
     if (useTarget && moduleInfluence > 0){

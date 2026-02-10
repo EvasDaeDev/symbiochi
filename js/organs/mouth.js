@@ -1,4 +1,7 @@
 export const MOUTH = {
+  label: "Рот",
+  wind: false,
+  growthDir: 8,
   size: 2,
   offset: 1,
   spawnWeight: 0.06,
