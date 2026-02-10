@@ -49,12 +49,21 @@ export function getOrgMotion(view, orgId){
     targetY: null,
     pendingTarget: null, // {x,y} if move requested during mutation
     moving: false,
+    // NOTE: heading angle is also persisted into the organism state (org.headingDeg).
+    // The view motion uses it as initial value so visuals remain consistent after reload.
     angleDeg: 0,
+    _initAngleFromState: false,
     v: 0,
     breathMul: 1,
   };
   view.moving.org[k] = init;
   return init;
+}
+
+function getPersistedHeadingDeg(state, orgId){
+  const org = getOrgById(state, orgId);
+  const a = org?.headingDeg;
+  return Number.isFinite(a) ? a : 0;
 }
 
 function getOrgById(state, orgId){
@@ -179,6 +188,15 @@ export function tickMoving(view, state, dtSec){
     const m = view.moving.org[k];
     if (!m) continue;
 
+    // Initialize view angle from persisted state once per org.
+    // This prevents angle reset after reload/offline which would desync
+    // growth targeting vs what the player sees.
+    if (!m._initAngleFromState){
+      const a = getPersistedHeadingDeg(state, orgId);
+      if (Number.isFinite(a)) m.angleDeg = norm180(a);
+      m._initAngleFromState = true;
+    }
+
     // Start pending target after mutation finishes
     if (!m.moving && m.pendingTarget){
       const org = getOrgById(state, orgId);
@@ -192,7 +210,12 @@ export function tickMoving(view, state, dtSec){
       }
     }
 
-    if (!m.moving) continue;
+    if (!m.moving) {
+      // Keep persisted heading updated even when standing (e.g., after load).
+      const orgStanding = getOrgById(state, orgId);
+      if (orgStanding) orgStanding.headingDeg = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
+      continue;
+    }
 
     const org = getOrgById(state, orgId);
     const core = getCore(org);
@@ -221,6 +244,12 @@ export function tickMoving(view, state, dtSec){
       const maxTurn = turnDegS * dt;
       m.angleDeg = norm180(cur + clamp(deltaA, -maxTurn, maxTurn));
     }
+
+    // Persist heading into state so growth/targeting can use the same angle.
+    if (org) org.headingDeg = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
+
+    // Persist heading into state so mutation/growth logic can reference it.
+    if (org) org.headingDeg = Number.isFinite(m.angleDeg) ? m.angleDeg : 0;
 
     // Smooth start only
     const a = 1 - Math.exp(-accel * dt);

@@ -669,7 +669,9 @@ function buildPackedRects(cells){
 // Core + Eyes scaling rules
 // =====================
 function computeCorePx(view, bodyBlocks){
-  const base = Math.max(8, view.blockPx * 2); // base 8px (2 blocks at 4px)
+  // Core default: 3x3 blocks ("9 blocks").
+  // Corners are beveled at render-time (see CORE draw below) to read as a pseudo-sphere.
+  const base = Math.max(12, view.blockPx * 3);
   // limit core area <= 10% body area (in pixels)
   if (bodyBlocks < 20) return base; // allow early stages to violate
   const bodyArea = bodyBlocks * view.blockPx * view.blockPx;
@@ -1130,10 +1132,24 @@ function limbPhalanxIndex(lengths, idx){
 
   ctx.save();
   ctx.fillStyle = coreCol;
-  ctx.fillRect(coreX, coreY, corePx, corePx);
+  // Beveled corners (45°) to read as a pseudo-sphere while keeping 3x3-block scale.
+  // We draw an octagon inscribed in the core square.
+  const bevel = Math.max(1, Math.floor(corePx / 3));
+  ctx.beginPath();
+  ctx.moveTo(coreX + bevel, coreY);
+  ctx.lineTo(coreX + corePx - bevel, coreY);
+  ctx.lineTo(coreX + corePx, coreY + bevel);
+  ctx.lineTo(coreX + corePx, coreY + corePx - bevel);
+  ctx.lineTo(coreX + corePx - bevel, coreY + corePx);
+  ctx.lineTo(coreX + bevel, coreY + corePx);
+  ctx.lineTo(coreX, coreY + corePx - bevel);
+  ctx.lineTo(coreX, coreY + bevel);
+  ctx.closePath();
+  ctx.fill();
   // tiny highlight
   ctx.fillStyle = "rgba(255,255,255,0.22)";
-  ctx.fillRect(coreX, coreY, Math.max(1, Math.floor(corePx*0.35)), 1);
+  // keep highlight within beveled silhouette
+  ctx.fillRect(coreX + bevel, coreY + 1, Math.max(1, Math.floor((corePx - bevel*2) * 0.35)), 1);
   ctx.restore();
 
   if (isSelected){

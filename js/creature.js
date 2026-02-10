@@ -15,6 +15,7 @@ import { BODY } from "./organs/body.js";
 import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT } from "./mods/carrots.js";
+import { ensureBodyWave, bodyWaveScore } from "./mods/body_wave.js";
 
 const BASE_GROW_DUR_SEC = 0.7;
 
@@ -275,6 +276,10 @@ export function newGame(){
     // NOTE: camera lives in view/UI and is not part of the saved state.
   };
 
+  // Variant A: initialize organic body-wave growth parameters in one place.
+  // Stored under state.body.wave.
+  ensureBodyWave(state, rng);
+
   pushLog(state, `Вылупился питомец "${state.name}".`, "system");
   return state;
 }
@@ -294,47 +299,9 @@ export function growBodyConnected(state, addN, rng, target=null, biases=null){
   const biasList = [];
   if (Array.isArray(target)) biasList.push({ point: target, weight: 3 });
   if (Array.isArray(biases)) biasList.push(...biases);
-  const plan = state?.plan || {};
-  const axisDir = Array.isArray(plan.axisDir) ? plan.axisDir : null;
-  const axisLen = axisDir ? (Math.hypot(axisDir[0], axisDir[1]) || 1) : 1;
-  const axisUnit = axisDir ? [axisDir[0] / axisLen, axisDir[1] / axisLen] : null;
-  let axisScale = 1;
-  switch (plan.ecotype){
-    case "swimmer":
-      axisScale = 1.6;
-      break;
-    case "crawler":
-      axisScale = 1.35;
-      break;
-    case "sentinel":
-      axisScale = 1.1;
-      break;
-    case "tank":
-      axisScale = 0.9;
-      break;
-    default:
-      axisScale = 1.15;
-  }
-  if (Number.isFinite(plan.symmetry)){
-    axisScale += (plan.symmetry - 0.5) * 0.2;
-    axisScale = Math.max(0.75, Math.min(1.9, axisScale));
-  }
-  const wiggle = Number.isFinite(plan.wiggle) ? plan.wiggle : 0;
-  const noiseWeight = 0.08 + 0.22 * wiggle;
-
-  function anisotropicDistance(x, y, origin){
-    const dx = x - origin[0];
-    const dy = y - origin[1];
-    if (!axisUnit) return Math.hypot(dx, dy);
-    const proj = dx * axisUnit[0] + dy * axisUnit[1];
-    const perp = -dx * axisUnit[1] + dy * axisUnit[0];
-    return Math.hypot(proj / axisScale, perp * axisScale);
-  }
-  function jitterScore(x, y){
-    const seed = (state?.seed ?? 1) | 0;
-    const h = hash32(seed, (x * 73856093) ^ (y * 19349663));
-    return ((h & 1023) / 1023) * noiseWeight;
-  }
+  // Variant A: organic growth scoring lives in mods/body_wave.js.
+  // Keep it centralized so we don't hunt through creature/state files.
+  ensureBodyWave(state, rng);
 
   for (let i=0;i<addN;i++){
     const candidates = [];
@@ -358,8 +325,9 @@ export function growBodyConnected(state, addN, rng, target=null, biases=null){
     // If a growth target is provided (e.g. "carrot"), bias growth towards it,
     // otherwise bias towards the core for compact connected bodies.
     pool.sort((a,b)=>{
-      const daCore = anisotropicDistance(a[0], a[1], core) + jitterScore(a[0], a[1]);
-      const dbCore = anisotropicDistance(b[0], b[1], core) + jitterScore(b[0], b[1]);
+      // Smaller score => preferred growth direction.
+      const daCore = bodyWaveScore(state, a[0], a[1]);
+      const dbCore = bodyWaveScore(state, b[0], b[1]);
       if (!biasList.length) return daCore - dbCore;
       let scoreA = daCore;
       let scoreB = dbCore;
@@ -835,6 +803,14 @@ export function growPlannedModules(state, rng, options = {}){
   const cos45 = Math.SQRT1_2;
   const requireSight = !useTarget;
 
+  function rotDirByHeading(dir){
+    const a = (state && Number.isFinite(state.headingDeg)) ? (state.headingDeg * Math.PI / 180) : 0;
+    if (!a) return dir;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return [dir[0]*c - dir[1]*s, dir[0]*s + dir[1]*c];
+  }
+
   function rotateDir(dir, steps){
     const angle = Math.atan2(dir[1], dir[0]) + steps * ANGLE_STEP_RAD;
     return dirFromAngle(angle);
@@ -866,7 +842,8 @@ export function growPlannedModules(state, rng, options = {}){
       m.type === "antenna" ||
       m.type === "claw";
     if (!appendage) return true;
-    const dir = m.growDir || m.baseDir;
+    const rawDir = m.growDir || m.baseDir;
+    const dir = rawDir ? rotDirByHeading(rawDir) : null;
     if (!dir) return true;
     const base = m.cells?.[0] || m.cells?.[m.cells.length - 1];
     if (!base) return true;

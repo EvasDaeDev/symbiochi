@@ -100,6 +100,19 @@ export function applyShrinkDecay(state, momentSec){
     const pickIdx = Math.floor(rng() * Math.min(3, sortedModules.length));
     const target = sortedModules[pickIdx].mod;
     target.cells.pop();
+    // IMPORTANT: keep growth cursor in sync with actual geometry.
+    // Offline shrink pops cells, but growth uses growPos/growStep. If we don't
+    // clamp them, next growth can "continue" from an old endpoint (growing from air).
+    if (Array.isArray(target.cells) && target.cells.length){
+      const last = target.cells[target.cells.length - 1];
+      target.growPos = [last[0], last[1]];
+      if (Number.isFinite(target.growStep)){
+        target.growStep = Math.min(target.growStep, Math.max(0, target.cells.length - 1));
+      }
+    } else {
+      target.growPos = null;
+      if (Number.isFinite(target.growStep)) target.growStep = 0;
+    }
     if (target.cells.length === 0){
       state.modules.splice(sortedModules[pickIdx].idx, 1);
     }

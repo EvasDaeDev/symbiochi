@@ -5,6 +5,7 @@ import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor, repairDetachedModules, getOrganMaxLen } from "./creature.js";
+import { ensureBodyWave } from "./mods/body_wave.js";
 import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
@@ -91,6 +92,12 @@ org.seed = seed;
       org.body.cells = normCells(org.body.cells);
       org.body.core = Array.isArray(org.body.core) ? [org.body.core[0]|0, org.body.core[1]|0] : [0,0];
     }
+
+    // Variant A: ensure organic body-wave growth params exist (single source: mods/body_wave.js)
+    ensureBodyWave(org);
+
+    // Variant A: make sure body wave params exist for old saves.
+    ensureBodyWave(org);
     for (const m of org.modules){ m.cells = normCells(m.cells); }
 
     function enforceAppendageRules(){
@@ -126,6 +133,17 @@ org.seed = seed;
         if (isTooCloseToType(cells, existing)) continue;
 
         m.cells = cells;
+        // Keep growth cursor consistent with the trimmed/validated geometry.
+        if (cells.length){
+          const last = cells[cells.length - 1];
+          m.growPos = [last[0], last[1]];
+          if (Number.isFinite(m.growStep)){
+            m.growStep = Math.min(m.growStep, Math.max(0, cells.length - 1));
+          }
+        } else {
+          m.growPos = null;
+          if (Number.isFinite(m.growStep)) m.growStep = 0;
+        }
         if (Number.isFinite(m.growTo)) m.growTo = Math.min(m.growTo, cells.length);
         kept.push(m);
         if (existing) existing.push(...cells);
@@ -159,6 +177,9 @@ org.seed = seed;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;
     if (!Number.isFinite(org.growthQueueIndex)) org.growthQueueIndex = 0;
+    // Persisted heading angle (in degrees, modulo 180). Used so carrot targeting and
+    // appendage "vision" stay consistent when organism is rendered rotated.
+    if (!Number.isFinite(org.headingDeg)) org.headingDeg = 0;
     if (org.growthPattern !== undefined) delete org.growthPattern;
   }
 
@@ -848,12 +869,22 @@ function processCarrotsTick(state, org = state){
     "claw"
   ]);
   const cos45 = Math.SQRT1_2;
+  function rotDirByHeading(org, dir){
+    const a = (org && Number.isFinite(org.headingDeg)) ? (org.headingDeg * Math.PI / 180) : 0;
+    if (!a) return dir;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return [dir[0]*c - dir[1]*s, dir[0]*s + dir[1]*c];
+  }
   function moduleSeesTarget(m, tx, ty){
     if (!m) return false;
     const appendage = m.movable || appendageTypes.has(m.type);
     if (!appendage) return false;
-    const dir = m.growDir || m.baseDir;
-    if (!dir) return false;
+    // Use persisted heading angle (org.headingDeg) so "vision" matches
+    // what the player sees when organism is rotated.
+    const rawDir = m.growDir || m.baseDir;
+    if (!rawDir) return false;
+    const dir = rotDirByHeading(org, rawDir);
     const base = m.cells?.[0] || m.cells?.[m.cells.length - 1];
     if (!base) return false;
     const vx = tx - base[0];
