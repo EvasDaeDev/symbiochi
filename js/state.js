@@ -71,6 +71,13 @@ org.seed = seed;
     org.version = 6;
     org.care = org.care || { feed:0, wash:0, heal:0, neglect:0 };
     org.bars = org.bars || { food:1, clean:1, hp:1, mood:1 };
+    // Normalize bars (protect against NaN/null from older/corrupted saves).
+    // If a bar is invalid, default to a healthy "1.0" rather than 0 so offline
+    // catch-up does not instantly kill the organism.
+    for (const k of ["food","clean","hp","mood"]){
+      const v = org.bars[k];
+      org.bars[k] = clamp(Number.isFinite(v) ? v : 1, 0, BAR_MAX);
+    }
     org.palette = org.palette || pick(mulberry32(seed), PALETTES);
     org.body = org.body || makeSmallConnectedBody(seed, 9);
     org.modules = org.modules || [];
@@ -329,6 +336,13 @@ export function simulate(state, deltaSec){
   };
   const blocksBefore = orgs.map(countBlocks);
   for (const org of orgs){
+    // Defensive: protect offline progress from corrupted bars (NaN/null/undefined).
+    // If a bar becomes NaN and gets saved, JSON turns it into null; on next load
+    // offline decay would instantly drop everything to 0 and trigger shrink.
+    for (const k of ["food","clean","hp","mood"]){
+      const v = org?.bars?.[k];
+      if (!Number.isFinite(v)) org.bars[k] = 1; // safe fallback
+    }
     org.bars.food  = clamp(applyNonLinearDecay(org.bars.food, DECAY.food_per_sec, deltaSec), 0, BAR_MAX);
     org.bars.clean = clamp(applyNonLinearDecay(org.bars.clean, DECAY.clean_per_sec, deltaSec), 0, BAR_MAX);
     org.bars.mood  = clamp(applyNonLinearDecay(org.bars.mood, DECAY.mood_per_sec, deltaSec), 0, BAR_MAX);
@@ -719,28 +733,6 @@ function promoteBudToParent(state, bud){
   state.active = -1;
 }
 
-function trimModuleToLenAndRebaseGrowPos(state, mod, keepLen){
-  if (!mod || !Array.isArray(mod.cells) || mod.cells.length === 0) return false;
-  const klen = Math.max(0, keepLen|0);
-  if (klen <= 0){
-    mod.cells.length = 0;
-    mod.growPos = null;
-    return true;
-  }
-  if (mod.cells.length > klen){
-    // IMPORTANT: module growth always appends to the end; index 0 is the stump near the body.
-    // When we "eat" an appendage we must keep the stump *and* rebase growPos to the new tip.
-    mod.cells = mod.cells.slice(0, klen);
-  }
-  const last = mod.cells[mod.cells.length - 1];
-  mod.growPos = last ? [last[0], last[1]] : null;
-
-  // If the stump accidentally became detached (can happen if cell order was altered),
-  // run a repair pass that reattaches or removes the module.
-  repairDetachedModules(state);
-  return true;
-}
-
 function eatParentAppendage(state, bud){
   if (!bud || !Array.isArray(state.modules) || state.modules.length === 0) return false;
 
@@ -769,9 +761,9 @@ function eatParentAppendage(state, bud){
       }
     }
     if (overlap >= minOverlap){
-      // IMPORTANT: when trimming an organ, rebase growPos so it cannot keep growing
-      // from the old (now detached) tip.
-      trimModuleToLenAndRebaseGrowPos(state, mod, minLen);
+      if (cells.length > minLen){
+        mod.cells = cells.slice(0, minLen);
+      }
       bud.bars.food = clamp(bud.bars.food + 0.10, 0, BAR_MAX);
       return true;
     }
@@ -817,9 +809,9 @@ function eatBudAppendage(state){
         }
       }
       if (contact){
-        // IMPORTANT: rebase growPos to the new stump so the bud cannot keep growing
-        // from its old detached tip.
-        trimModuleToLenAndRebaseGrowPos(bud, mod, minLen);
+        if (cells.length > minLen){
+          mod.cells = cells.slice(0, minLen);
+        }
         state.bars.food = clamp(state.bars.food + 0.10, 0, BAR_MAX);
         return true;
       }
@@ -903,10 +895,7 @@ function processCarrotsTick(state, org = state){
   ]);
   const cos45 = Math.SQRT1_2;
   function rotDirByHeading(org, dir){
-    // NOTE: World coordinates are screen-like (Y grows downward).
-    // headingDeg is defined as 0°=E, 90°=N (up). In a Y-down system, the
-    // correct rotation is by the NEGATIVE angle (otherwise N/S get mirrored).
-    const a = (org && Number.isFinite(org.headingDeg)) ? (-org.headingDeg * Math.PI / 180) : 0;
+    const a = (org && Number.isFinite(org.headingDeg)) ? (org.headingDeg * Math.PI / 180) : 0;
     if (!a) return dir;
     const c = Math.cos(a);
     const s = Math.sin(a);
@@ -1029,7 +1018,10 @@ function processCarrotsTick(state, org = state){
 export function addRandom01(rng){ return 0.10 + rng() * 0.07; }
 
 function addBar(target, key, add){
-  const before = target.bars[key];
+  // Defensive: bars can become null/NaN due to older saves or partial state.
+  // Important: clamp(NaN, ..) => NaN, and JSON.stringify(NaN) => null.
+  // After reload, non-finite values would make offline decay set everything to 0.
+  const before = Number.isFinite(target.bars[key]) ? target.bars[key] : 0;
   const after  = clamp(before + add, 0, BAR_MAX);
   target.bars[key] = after;
   return after - before; // реальный прирост (0 если упёрлись в кап)
