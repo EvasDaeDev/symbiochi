@@ -1,4 +1,4 @@
-import { thicknessBulkyBase } from "./_thickness.js";
+import { thicknessBulkyBase } from "./thickness.js";
 
 export const TENTACLE = {
   label: "Щупальце",
