@@ -748,6 +748,59 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
   const s = view.blockPx;
   const occ = buildOccupancy(org);
 
+  // Smooth movement gait (render-only deformation)
+  const motion = getOrgMotion(view, orgId);
+  const gait = motion?.gait || null;
+  const gaitPhase = gait ? clamp(gait.t / Math.max(1e-6, gait.dur), 0, 1) : 0;
+  const gaitDx = gait ? (gait.dx || 0) : 0;
+  const gaitDy = gait ? (gait.dy || 0) : 0;
+  // Front-first travel: back lags by up to ~60% of the step, then catches up.
+  // This makes the body look like it "leans" into motion without rotating canvas.
+  let gaitMinScore = 0;
+  let gaitInvRange = 1;
+  if (gait && Array.isArray(org?.body?.cells) && org.body.cells.length){
+    const core = org?.body?.core || org.body.cells[0];
+    const cx = core?.[0] || 0;
+    const cy = core?.[1] || 0;
+    let mn = Infinity;
+    let mx = -Infinity;
+    for (const c of org.body.cells){
+      const wx = c?.[0] || 0;
+      const wy = c?.[1] || 0;
+      const sc = (wx - cx) * gaitDx + (wy - cy) * gaitDy;
+      if (sc < mn) mn = sc;
+      if (sc > mx) mx = sc;
+    }
+    gaitMinScore = Number.isFinite(mn) ? mn : 0;
+    const range = (Number.isFinite(mx) ? mx : mn) - gaitMinScore;
+    gaitInvRange = (range > 1e-6) ? (1 / range) : 1;
+  }
+
+  function gaitLocalFromIntCell(wx0, wy0){
+    if (!gait) return 1;
+    const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
+    const cx = core?.[0] || 0;
+    const cy = core?.[1] || 0;
+    const sc = (wx0 - cx) * gaitDx + (wy0 - cy) * gaitDy;
+    const wFront = clamp((sc - gaitMinScore) * gaitInvRange, 0, 1);
+    const delay = (1 - wFront) * 0.60;
+    const local = clamp((gaitPhase - delay) / 0.40, 0, 1);
+    return local;
+  }
+
+  function gaitPositions(wx, wy, wx0, wy0){
+    if (!gaitActive) return [[wx, wy]];
+    const local = gaitLocalFromIntCell(wx0, wy0);
+    const out = [];
+    if (local < 1 - 1e-6) out.push([wx, wy]);
+    if (local > 1e-6) out.push([wx + gaitDx, wy + gaitDy]);
+    return out;
+  }
+
+  // During gait we disable packed-rect rendering for body (otherwise you'd see
+  // the entire blob jump as a rectangle).
+  const gaitActive = !!gait;
+
   const breathY = breathYOffsetPx(org, orgId, baseSeed, breathMul);
   const breathK = (breathY !== 0); // slight tint toggle
 
@@ -760,44 +813,72 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
   const bodyCells = org?.body?.cells || [];
   const bodyOcc = buildBodyOccupancy(org); // body-only occupancy for perimeter detection
 
-  const staticInner = [];
-  const staticSkin = [];
+  if (!gaitActive){
+    const staticInner = [];
+    const staticSkin = [];
 
-  for (const [wx, wy] of bodyCells){
-    const nm = neighMaskAt(occ, wx, wy);
-    const kGrow = animProgress(org, wx, wy);
-    const isSkin = isBoundary(bodyOcc, wx, wy);
-    const col = isSkin ? bodySkinColor : bodyColor;
+    for (const [wx, wy] of bodyCells){
+      const nm = neighMaskAt(occ, wx, wy);
+      const kGrow = animProgress(org, wx, wy);
+      const isSkin = isBoundary(bodyOcc, wx, wy);
+      const col = isSkin ? bodySkinColor : bodyColor;
 
-    if (kGrow < 0.999){
-      const p = worldToScreenPx(cam, wx, wy, view);
-      const x = p.x;
-      const y = p.y + breathY;
-      drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
-    } else {
-      (isSkin ? staticSkin : staticInner).push([wx, wy]);
+      if (kGrow < 0.999){
+        const p = worldToScreenPx(cam, wx, wy, view);
+        const x = p.x;
+        const y = p.y + breathY;
+        drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
+      } else {
+        (isSkin ? staticSkin : staticInner).push([wx, wy]);
+      }
+
+      if (isSelected && isBoundary(occ, wx, wy)){
+        boundaryCells.push([wx, wy]);
+      }
     }
 
-    if (isSelected && isBoundary(occ, wx, wy)){
-      boundaryCells.push([wx, wy]);
+    const fillPacked = (cells, col)=>{
+      if (!cells.length) return;
+      const rects = buildPackedRects(cells);
+      ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
+      for (const r of rects){
+        const p = worldToScreenPx(cam, r.x, r.y, view);
+        const x = p.x;
+        const y = p.y + breathY;
+        ctx.fillRect(x, y, r.w * s, r.h * s);
+      }
+    };
+
+    // Draw bulk static cells in two passes (inner + perimeter skin), so the body outline stays 1-block thick.
+    fillPacked(staticInner, bodyColor);
+    fillPacked(staticSkin, bodySkinColor);
+  } else {
+    // Gait render: draw per cell (and a render-only bridge) so motion is smooth.
+    for (const [wx0, wy0] of bodyCells){
+      const local = gaitLocalFromIntCell(wx0, wy0);
+      const isSkin = isBoundary(bodyOcc, wx0, wy0);
+      const col = isSkin ? bodySkinColor : bodyColor;
+      const kGrow = animProgress(org, wx0, wy0);
+
+      // Old position (until fully transferred)
+      if (local < 1 - 1e-6){
+        const p0 = worldToScreenPx(cam, wx0, wy0, view);
+        const nm0 = neighMaskAt(occ, wx0, wy0);
+        drawBlockAnim(ctx, p0.x, p0.y + breathY, s, col, breathK, nm0, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx0, wy0]);
+      }
+
+      // New position (as soon as the cell starts moving)
+      if (local > 1e-6){
+        const wx1 = wx0 + gaitDx;
+        const wy1 = wy0 + gaitDy;
+        const p1 = worldToScreenPx(cam, wx1, wy1, view);
+        const nm1 = neighMaskAt(occ, wx0, wy0); // shading based on true occupancy
+        drawBlockAnim(ctx, p1.x, p1.y + breathY, s, col, breathK, nm1, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx1, wy1]);
+      }
     }
   }
-
-  const fillPacked = (cells, col)=>{
-    if (!cells.length) return;
-    const rects = buildPackedRects(cells);
-    ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
-    for (const r of rects){
-      const p = worldToScreenPx(cam, r.x, r.y, view);
-      const x = p.x;
-      const y = p.y + breathY;
-      ctx.fillRect(x, y, r.w * s, r.h * s);
-    }
-  };
-
-  // Draw bulk static cells in two passes (inner + perimeter skin), so the body outline stays 1-block thick.
-  fillPacked(staticInner, bodyColor);
-  fillPacked(staticSkin, bodySkinColor);
 
   // MODULES
   const modules = org?.modules || [];
@@ -815,10 +896,7 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
       const len = cells.length;
 
       for (let i=0;i<len;i++){
-        const [wx,wy] = cells[i];
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
+        const [wx0,wy0] = cells[i];
 
         // spike tip blink changes brightness
         let c = base;
@@ -827,12 +905,12 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
         c = organSegmentColor(c, i, len, baseSeed, orgId, mi);
         if (isTip && on) c = scaleBrightness(c, 2);
 
-        const nm = neighMaskAt(occ, wx, wy);
-        const kGrow = animProgress(org, wx, wy);
-        drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
-
-        if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryCells.push([wx, wy]);
+        const nm = neighMaskAt(occ, wx0, wy0);
+        const kGrow = animProgress(org, wx0, wy0);
+        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+          const p = worldToScreenPx(cam, wx, wy, view);
+          drawBlockAnim(ctx, p.x, p.y + breathY, s, c, breathK, nm, kGrow);
+          if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -841,19 +919,16 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
     if (type === "shell"){
       // shell draws slightly darker plates
       for (let i=0;i<cells.length;i++){
-        const [wx,wy] = cells[i];
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
+        const [wx0,wy0] = cells[i];
 
         let c = organSegmentColor(brighten(base, -0.05), i, cells.length, baseSeed, orgId, mi);
 
-        const nm = neighMaskAt(occ, wx, wy);
-        const kGrow = animProgress(org, wx, wy);
-        drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
-
-        if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryCells.push([wx, wy]);
+        const nm = neighMaskAt(occ, wx0, wy0);
+        const kGrow = animProgress(org, wx0, wy0);
+        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+          const p = worldToScreenPx(cam, wx, wy, view);
+          drawBlockAnim(ctx, p.x, p.y + breathY, s, c, breathK, nm, kGrow);
+          if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -862,27 +937,27 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
     if (type === "eye"){
       const blinkScale = eyeBlinkScale(orgId, baseSeed);
       for (let i=0;i<cells.length;i++){
-        const [wx, wy] = cells[i];
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
-        const nm = neighMaskAt(occ, wx, wy);
-        const kGrow = animProgress(org, wx, wy);
-        if (blinkScale !== 1){
-          const cx = x + s / 2;
-          const cy = y + s / 2;
-          ctx.save();
-          ctx.translate(cx, cy);
-          ctx.scale(1, blinkScale);
-          ctx.translate(-cx, -cy);
-          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
-          ctx.restore();
-        } else {
-          drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
-        }
+        const [wx0, wy0] = cells[i];
+        const nm = neighMaskAt(occ, wx0, wy0);
+        const kGrow = animProgress(org, wx0, wy0);
 
-        if (isSelected && isBoundary(occ, wx, wy)){
-          boundaryCells.push([wx, wy]);
+        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+          const p = worldToScreenPx(cam, wx, wy, view);
+          const x = p.x;
+          const y = p.y + breathY;
+          if (blinkScale !== 1){
+            const cx = x + s / 2;
+            const cy = y + s / 2;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(1, blinkScale);
+            ctx.translate(-cx, -cy);
+            drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+            ctx.restore();
+          } else {
+            drawBlockAnim(ctx, x, y, s, base, breathK, nm, kGrow);
+          }
+          if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
       continue;
@@ -1028,19 +1103,34 @@ function limbPhalanxIndex(lengths, idx){
         }
       }
 
-      const p = worldToScreenPx(cam, wx, wy, view);
-      const x = p.x;
-      const y = p.y + breathY;
+      const wx0 = cells[i][0];
+      const wy0 = cells[i][1];
 
       let c = organSegmentColor(base, i, len, baseSeed, orgId, mi);
       if (type === "antenna" && antennaPulse !== null && i === antennaPulse){
         c = scaleBrightness(c, 3);
       }
 
-      const nm = neighMaskAt(occ, cells[i][0], cells[i][1]); // for shading based on true occupancy
-      const kGrow = animProgress(org, cells[i][0], cells[i][1]);
+      const nm = neighMaskAt(occ, wx0, wy0); // shading based on true occupancy
+      const kGrow = animProgress(org, wx0, wy0);
 
-      drawBlockAnim(ctx, x, y, s, c, breathK, nm, kGrow);
+      // Draw in 1..2 positions during gait (bridge union) to avoid full-blob jumps.
+      let drawX = 0;
+      let drawY = 0;
+      for (const [wxD, wyD] of gaitPositions(wx, wy, wx0, wy0)){
+        const p = worldToScreenPx(cam, wxD, wyD, view);
+        drawX = p.x;
+        drawY = p.y + breathY;
+        drawBlockAnim(ctx, drawX, drawY, s, c, breathK, nm, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)){
+          if (Number.isInteger(wxD) && Number.isInteger(wyD)) boundaryCells.push([wxD, wyD]);
+          else boundaryRects.push({x: drawX, y: drawY, w: s, h: s});
+        }
+      }
+
+      // Use the last drawn position as the anchor for extra decoration blocks.
+      const x = drawX;
+      const y = drawY;
 
       if (isJointedLimb && jointStarts?.has(i)){
         const shade = brighten(c, -0.04);

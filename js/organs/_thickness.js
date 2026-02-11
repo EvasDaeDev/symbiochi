@@ -1,5 +1,5 @@
 // js/organs/_thickness.js
-// Visual-only thickness helpers for appendages.!
+// Visual-only thickness helpers for appendages.
 // These rules MUST NOT affect simulation (growth/occupancy). Render uses them to
 // optionally draw lateral "support" blocks when there is free space.
 
