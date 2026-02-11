@@ -1,4 +1,4 @@
-import { thicknessTail } from "./_thickness.js";
+import { thicknessTail } from "./thickness.js";
 
 export const TAIL = {
   label: "Хвост",
