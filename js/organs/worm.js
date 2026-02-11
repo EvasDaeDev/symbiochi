@@ -12,11 +12,11 @@ export const WORM = {
     growthSec: 0.7,
     // Visual-only animation (render-space). State/geometry are NOT modified.
     // Requested: 10–13 seconds per cycle (one direction), with a stronger curl at the tip.
-    wiggleSec: [10, 13],
+    wiggleSec: [5, 9],
 
     // Lateral offset (in *world cells*, not pixels). Amplitude grows to the tip.
     latMaxCells: 1.15,
-    ampPow: 1.6,
+    ampPow: 1.8,
 
     // How many "bends" along the length. Slightly increases with length.
     bendsMin: 1.6,

@@ -719,6 +719,28 @@ function promoteBudToParent(state, bud){
   state.active = -1;
 }
 
+function trimModuleToLenAndRebaseGrowPos(state, mod, keepLen){
+  if (!mod || !Array.isArray(mod.cells) || mod.cells.length === 0) return false;
+  const klen = Math.max(0, keepLen|0);
+  if (klen <= 0){
+    mod.cells.length = 0;
+    mod.growPos = null;
+    return true;
+  }
+  if (mod.cells.length > klen){
+    // IMPORTANT: module growth always appends to the end; index 0 is the stump near the body.
+    // When we "eat" an appendage we must keep the stump *and* rebase growPos to the new tip.
+    mod.cells = mod.cells.slice(0, klen);
+  }
+  const last = mod.cells[mod.cells.length - 1];
+  mod.growPos = last ? [last[0], last[1]] : null;
+
+  // If the stump accidentally became detached (can happen if cell order was altered),
+  // run a repair pass that reattaches or removes the module.
+  repairDetachedModules(state);
+  return true;
+}
+
 function eatParentAppendage(state, bud){
   if (!bud || !Array.isArray(state.modules) || state.modules.length === 0) return false;
 
@@ -747,9 +769,9 @@ function eatParentAppendage(state, bud){
       }
     }
     if (overlap >= minOverlap){
-      if (cells.length > minLen){
-        mod.cells = cells.slice(0, minLen);
-      }
+      // IMPORTANT: when trimming an organ, rebase growPos so it cannot keep growing
+      // from the old (now detached) tip.
+      trimModuleToLenAndRebaseGrowPos(state, mod, minLen);
       bud.bars.food = clamp(bud.bars.food + 0.10, 0, BAR_MAX);
       return true;
     }
@@ -795,9 +817,9 @@ function eatBudAppendage(state){
         }
       }
       if (contact){
-        if (cells.length > minLen){
-          mod.cells = cells.slice(0, minLen);
-        }
+        // IMPORTANT: rebase growPos to the new stump so the bud cannot keep growing
+        // from its old detached tip.
+        trimModuleToLenAndRebaseGrowPos(bud, mod, minLen);
         state.bars.food = clamp(state.bars.food + 0.10, 0, BAR_MAX);
         return true;
       }
@@ -881,7 +903,10 @@ function processCarrotsTick(state, org = state){
   ]);
   const cos45 = Math.SQRT1_2;
   function rotDirByHeading(org, dir){
-    const a = (org && Number.isFinite(org.headingDeg)) ? (org.headingDeg * Math.PI / 180) : 0;
+    // NOTE: World coordinates are screen-like (Y grows downward).
+    // headingDeg is defined as 0°=E, 90°=N (up). In a Y-down system, the
+    // correct rotation is by the NEGATIVE angle (otherwise N/S get mirrored).
+    const a = (org && Number.isFinite(org.headingDeg)) ? (-org.headingDeg * Math.PI / 180) : 0;
     if (!a) return dir;
     const c = Math.cos(a);
     const s = Math.sin(a);

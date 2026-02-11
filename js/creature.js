@@ -755,8 +755,8 @@ export function addModule(state, type, rng, target=null){
   const wiggle = state?.plan?.wiggle ?? 0.0;
   let growStyle = "straight";
   if (movable || type === "spike" || type === "teeth"){
-    if (wiggle > 0.66) growStyle = "curve";
-    else if (wiggle > 0.33) growStyle = "zigzag";
+    if (wiggle > 0.36) growStyle = "curve";
+    else if (wiggle > 0.13) growStyle = "zigzag";
   }
   if (type === "limb"){
     growStyle = "jointed";
@@ -772,7 +772,7 @@ export function addModule(state, type, rng, target=null){
     growStep: 0,
     zigzagSign: rng() < 0.5 ? 1 : -1,
     curveSign: rng() < 0.5 ? 1 : -1,
-    turnChance: 0.15 + 0.35 * wiggle // чем выше wiggle, тем чаще повороты
+    turnChance: 0.05 + 0.25 * wiggle // чем выше wiggle, тем чаще повороты
   };
   
   state.modules.push({
@@ -862,7 +862,10 @@ export function growPlannedModules(state, rng, options = {}){
   const requireSight = !useTarget;
 
   function rotDirByHeading(dir){
-    const a = (state && Number.isFinite(state.headingDeg)) ? (state.headingDeg * Math.PI / 180) : 0;
+    // NOTE: World coordinates are screen-like (Y grows downward).
+    // headingDeg is defined as 0°=E, 90°=N (up). In a Y-down system, the
+    // correct rotation is by the NEGATIVE angle (otherwise N/S get mirrored).
+    const a = (state && Number.isFinite(state.headingDeg)) ? (-state.headingDeg * Math.PI / 180) : 0;
     if (!a) return dir;
     const c = Math.cos(a);
     const s = Math.sin(a);

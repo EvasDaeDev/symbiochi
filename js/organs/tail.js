@@ -1,4 +1,4 @@
-import { thicknessTail } from "./thickness.js";
+import { thicknessTail } from "./_thickness.js";
 
 export const TAIL = {
   label: "Хвост",
@@ -11,7 +11,7 @@ export const TAIL = {
   width: 1,
   anim: {
     growthSec: 0.7,
-    swayAmp: 1.1,
+    swayAmp: 2.1,
     swaySec: 6
   },
   render: {
@@ -21,5 +21,5 @@ export const TAIL = {
   },
   initialColor: "#22d3ee",
   shapeOptions: ["straight", "curve", "fin"],
-  shapeWeights: [0.55, 0.3, 0.15]
+  shapeWeights: [0.55, 0.2, 0.15]
 };

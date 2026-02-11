@@ -1,4 +1,4 @@
-import { thicknessBulkyBase } from "./thickness.js";
+import { thicknessBulkyBase } from "./_thickness.js";
 
 export const TENTACLE = {
   label: "Щупальце",
@@ -37,7 +37,7 @@ export const TENTACLE = {
   },
   initialColor: "#fb7185",
   shapeOptions: ["wave", "curve", "spiral"],
-  shapeWeights: [0.5, 0.3, 0.2]
+  shapeWeights: [0.3, 0.15, 0.25]
 };
 
 function clamp01(x){ return Math.max(0, Math.min(1, x)); }

@@ -182,7 +182,7 @@ function mix(hexA, hexB, t){
 // small brightness tweak (-0.2..+0.2)
 function brighten(hex, amt){
   const c = hexToRgb(hex);
-  const k = 1 + amt;
+  const k = 0.93 + amt;
   return rgbToHex(c.r*k, c.g*k, c.b*k);
 }
 
@@ -754,48 +754,124 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
   const gaitPhase = gait ? clamp(gait.t / Math.max(1e-6, gait.dur), 0, 1) : 0;
   const gaitDx = gait ? (gait.dx || 0) : 0;
   const gaitDy = gait ? (gait.dy || 0) : 0;
+  const gaitDist = gait ? Math.max(1, gait.dist || 1) : 1;
   // Front-first travel: back lags by up to ~60% of the step, then catches up.
   // This makes the body look like it "leans" into motion without rotating canvas.
+  // Gait segmentation should be driven by the *body*, not by modules.
+  // If we include modules in the range, even a 1-cell organ on the extreme
+  // front/back can become its own "segment" and visually detach (it reaches
+  // +2 while the body is still catching up).
+  //
+  // Fix:
+  // - Build the score range using BODY cells only.
+  // - For each module, use the module's base cell (anchor) score for all its
+  //   cells, so the whole organ moves together with the attachment point.
   let gaitMinScore = 0;
   let gaitInvRange = 1;
-  if (gait && Array.isArray(org?.body?.cells) && org.body.cells.length){
-    const core = org?.body?.core || org.body.cells[0];
-    const cx = core?.[0] || 0;
-    const cy = core?.[1] || 0;
+  let gaitCoreX = 0;
+  let gaitCoreY = 0;
+  if (gait){
+    const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
+    gaitCoreX = core?.[0] || 0;
+    gaitCoreY = core?.[1] || 0;
     let mn = Infinity;
     let mx = -Infinity;
-    for (const c of org.body.cells){
-      const wx = c?.[0] || 0;
-      const wy = c?.[1] || 0;
-      const sc = (wx - cx) * gaitDx + (wy - cy) * gaitDy;
+    const accScore = (wx, wy)=>{
+      const sc = (wx - gaitCoreX) * gaitDx + (wy - gaitCoreY) * gaitDy;
       if (sc < mn) mn = sc;
       if (sc > mx) mx = sc;
-    }
+    };
+
+    // Body drives the segmenting.
+    for (const c of (org?.body?.cells || [])) accScore(c?.[0] || 0, c?.[1] || 0);
+
     gaitMinScore = Number.isFinite(mn) ? mn : 0;
     const range = (Number.isFinite(mx) ? mx : mn) - gaitMinScore;
     gaitInvRange = (range > 1e-6) ? (1 / range) : 1;
   }
 
-  function gaitLocalFromIntCell(wx0, wy0){
-    if (!gait) return 1;
-    const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
-    const cx = core?.[0] || 0;
-    const cy = core?.[1] || 0;
-    const sc = (wx0 - cx) * gaitDx + (wy0 - cy) * gaitDy;
-    const wFront = clamp((sc - gaitMinScore) * gaitInvRange, 0, 1);
-    const delay = (1 - wFront) * 0.60;
-    const local = clamp((gaitPhase - delay) / 0.40, 0, 1);
-    return local;
+  function gaitWFront(wx0, wy0){
+    const sc = (wx0 - gaitCoreX) * gaitDx + (wy0 - gaitCoreY) * gaitDy;
+    return clamp((sc - gaitMinScore) * gaitInvRange, 0, 1);
   }
 
-  function gaitPositions(wx, wy, wx0, wy0){
+  // Convert an integer-cell position to a continuous travel offset in [0..gaitDist].
+  // - For dist=1: front-first ease (previous behavior)
+  // - For dist=2: 3-part "caterpillar" gait:
+  //   * front third moves 0->1->2
+  //   * middle third follows a bit later (two-stage)
+  //   * back third follows last (two-stage)
+  // This creates TWO stretch points (divides the body into 3 parts), like a crawling caterpillar.
+  function gaitOffsetFromIntCell(wx0, wy0, wFrontOverride=null){
+    if (!gait) return gaitDist;
+    const wFront = (wFrontOverride === null) ? gaitWFront(wx0, wy0) : wFrontOverride;
+
+    // dist=1: simple front-lag smoothing
+    if (gaitDist <= 1){
+      const delay = (1 - wFront) * 0.60;
+      const local = clamp((gaitPhase - delay) / 0.40, 0, 1);
+      return local;
+    }
+
+    // dist=2: segmented timeline
+    // Segment: 0=front, 1=mid, 2=back
+    let seg = 2;
+    if (wFront > 0.66) seg = 0;
+    else if (wFront > 0.33) seg = 1;
+
+    // Helper: two-stage ramp (0->1 then 1->2)
+    const ramp2 = (p, a0, a1, b0, b1)=>{
+      if (p <= a0) return 0;
+      if (p < a1) return (p - a0) / Math.max(1e-6, (a1 - a0));
+      if (p <= b0) return 1;
+      if (p < b1) return 1 + (p - b0) / Math.max(1e-6, (b1 - b0));
+      return 2;
+    };
+
+    // Timings chosen to look like: front moves (0..0.5), mid follows (0.25..0.75), back follows (0.5..1)
+    if (seg === 0) return ramp2(gaitPhase, 0.00, 0.25, 0.25, 0.50);
+    if (seg === 1) return ramp2(gaitPhase, 0.25, 0.50, 0.50, 0.75);
+    return ramp2(gaitPhase, 0.50, 0.75, 0.75, 1.00);
+  }
+
+  function gaitPositions(wx, wy, wx0, wy0, wFrontOverride=null){
     if (!gaitActive) return [[wx, wy]];
-    const local = gaitLocalFromIntCell(wx0, wy0);
+    const o = gaitOffsetFromIntCell(wx0, wy0, wFrontOverride);
+    // Distances are integer-cell based; during transition we render a union of two adjacent states.
     const out = [];
-    if (local < 1 - 1e-6) out.push([wx, wy]);
-    if (local > 1e-6) out.push([wx + gaitDx, wy + gaitDy]);
+    if (gaitDist <= 1){
+      if (o < 1 - 1e-6) out.push([wx, wy]);
+      if (o > 1e-6) out.push([wx + gaitDx, wy + gaitDy]);
+      return out;
+    }
+
+    if (o < 1e-6){
+      out.push([wx, wy]);
+    } else if (o < 1 - 1e-6){
+      out.push([wx, wy]);
+      out.push([wx + gaitDx, wy + gaitDy]);
+    } else if (o < 2 - 1e-6){
+      out.push([wx + gaitDx, wy + gaitDy]);
+      out.push([wx + gaitDx*2, wy + gaitDy*2]);
+    } else {
+      out.push([wx + gaitDx*2, wy + gaitDy*2]);
+    }
     return out;
   }
+
+// For MODULES: do NOT stretch. Render only one integer position (no union bridge).
+function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
+  if (!gaitActive) return [wx, wy];
+  const o = gaitOffsetFromIntCell(wx0, wy0, wFrontOverride);
+  if (gaitDist <= 1){
+    return (o < 0.5) ? [wx, wy] : [wx + gaitDx, wy + gaitDy];
+  }
+  // dist=2: choose step 0/1/2 by thresholds
+  if (o < 0.5) return [wx, wy];
+  if (o < 1.5) return [wx + gaitDx, wy + gaitDy];
+  return [wx + gaitDx*2, wy + gaitDy*2];
+}
+
 
   // During gait we disable packed-rect rendering for body (otherwise you'd see
   // the entire blob jump as a rectangle).
@@ -855,27 +931,14 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
   } else {
     // Gait render: draw per cell (and a render-only bridge) so motion is smooth.
     for (const [wx0, wy0] of bodyCells){
-      const local = gaitLocalFromIntCell(wx0, wy0);
       const isSkin = isBoundary(bodyOcc, wx0, wy0);
       const col = isSkin ? bodySkinColor : bodyColor;
       const kGrow = animProgress(org, wx0, wy0);
-
-      // Old position (until fully transferred)
-      if (local < 1 - 1e-6){
-        const p0 = worldToScreenPx(cam, wx0, wy0, view);
-        const nm0 = neighMaskAt(occ, wx0, wy0);
-        drawBlockAnim(ctx, p0.x, p0.y + breathY, s, col, breathK, nm0, kGrow);
-        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx0, wy0]);
-      }
-
-      // New position (as soon as the cell starts moving)
-      if (local > 1e-6){
-        const wx1 = wx0 + gaitDx;
-        const wy1 = wy0 + gaitDy;
-        const p1 = worldToScreenPx(cam, wx1, wy1, view);
-        const nm1 = neighMaskAt(occ, wx0, wy0); // shading based on true occupancy
-        drawBlockAnim(ctx, p1.x, p1.y + breathY, s, col, breathK, nm1, kGrow);
-        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx1, wy1]);
+      const nm = neighMaskAt(occ, wx0, wy0);
+      for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+        const p = worldToScreenPx(cam, wx, wy, view);
+        drawBlockAnim(ctx, p.x, p.y + breathY, s, col, breathK, nm, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
       }
     }
   }
@@ -890,6 +953,11 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
     if (cells.length === 0) continue;
 
     let base = organColor(org, type, orgId, mi, baseSeed);
+
+    // Module gait phase should follow its attachment point.
+    // Use base cell score for the whole module to prevent detachment.
+    const baseCellForGait = (cells && cells.length) ? cells[0] : null;
+    const modWFront = (gait && baseCellForGait) ? gaitWFront(baseCellForGait[0]||0, baseCellForGait[1]||0) : null;
 
     if (type === "spike"){
       const on = spikeBlinkOn();
@@ -907,7 +975,9 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
 
         const nm = neighMaskAt(occ, wx0, wy0);
         const kGrow = animProgress(org, wx0, wy0);
-        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+        {
+          const [wx, wy] = gaitSinglePosition(wx0, wy0, wx0, wy0, modWFront);
+
           const p = worldToScreenPx(cam, wx, wy, view);
           drawBlockAnim(ctx, p.x, p.y + breathY, s, c, breathK, nm, kGrow);
           if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
@@ -925,7 +995,9 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
 
         const nm = neighMaskAt(occ, wx0, wy0);
         const kGrow = animProgress(org, wx0, wy0);
-        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+        {
+          const [wx, wy] = gaitSinglePosition(wx0, wy0, wx0, wy0, modWFront);
+
           const p = worldToScreenPx(cam, wx, wy, view);
           drawBlockAnim(ctx, p.x, p.y + breathY, s, c, breathK, nm, kGrow);
           if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
@@ -941,7 +1013,9 @@ function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1
         const nm = neighMaskAt(occ, wx0, wy0);
         const kGrow = animProgress(org, wx0, wy0);
 
-        for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+        {
+          const [wx, wy] = gaitSinglePosition(wx0, wy0, wx0, wy0, modWFront);
+
           const p = worldToScreenPx(cam, wx, wy, view);
           const x = p.x;
           const y = p.y + breathY;
@@ -1114,18 +1188,18 @@ function limbPhalanxIndex(lengths, idx){
       const nm = neighMaskAt(occ, wx0, wy0); // shading based on true occupancy
       const kGrow = animProgress(org, wx0, wy0);
 
-      // Draw in 1..2 positions during gait (bridge union) to avoid full-blob jumps.
+      // MODULES: do NOT render a "bridge union" during gait.
+      // Appendages must look like they are being re-positioned, not duplicated.
       let drawX = 0;
       let drawY = 0;
-      for (const [wxD, wyD] of gaitPositions(wx, wy, wx0, wy0)){
-        const p = worldToScreenPx(cam, wxD, wyD, view);
-        drawX = p.x;
-        drawY = p.y + breathY;
-        drawBlockAnim(ctx, drawX, drawY, s, c, breathK, nm, kGrow);
-        if (isSelected && isBoundary(occ, wx0, wy0)){
-          if (Number.isInteger(wxD) && Number.isInteger(wyD)) boundaryCells.push([wxD, wyD]);
-          else boundaryRects.push({x: drawX, y: drawY, w: s, h: s});
-        }
+      const [wxD, wyD] = gaitSinglePosition(wx, wy, wx0, wy0, modWFront);
+      const p = worldToScreenPx(cam, wxD, wyD, view);
+      drawX = p.x;
+      drawY = p.y + breathY;
+      drawBlockAnim(ctx, drawX, drawY, s, c, breathK, nm, kGrow);
+      if (isSelected && isBoundary(occ, wx0, wy0)){
+        if (Number.isInteger(wxD) && Number.isInteger(wyD)) boundaryCells.push([wxD, wyD]);
+        else boundaryRects.push({x: drawX, y: drawY, w: s, h: s});
       }
 
       // Use the last drawn position as the anchor for extra decoration blocks.

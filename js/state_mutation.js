@@ -148,44 +148,49 @@ function weightedPick(rng, pairs){
 const MAX_PERIMETER_USAGE = 0.85;
 const EARLY_FAST_BODY_BLOCKS = 80; // early stage grows faster
 
-const ORGAN_BASE_COST = {
-  // internal/face: do not consume perimeter
-  eye: 0,
-  core: 0,
-
-  // cheap bases
-  antenna: 1,
-  tentacle: 1,
-  spike: 1,
-  teeth: 1,
-
-  // thicker bases
-  limb: 2,
-  tail: 2,
-  worm: 2,
-  claw: 2,
-  fin: 2,
-  mouth: 2,
-
-  // heavy
-  shell: 3
-};
-
-function calcUsedPerimeter(state){
-  let used = 0;
-  for (const m of (state.modules || [])){
-    const t = m?.type;
-    used += (ORGAN_BASE_COST[t] ?? 1);
-  }
-  // eyes are tracked as modules; face-anchor is not an organ module and should not count.
-  return used;
-}
+// STRICT perimeter usage: count which *body perimeter edges* are "occupied" by organs.
+// A perimeter edge is occupied if the outside neighbor cell (N/E/S/W) is filled by a module cell.
+// This is much closer to the intuitive "organs cover X% of the body's outline" than a heuristic.
+const PERIMETER_EXCLUDE_TYPES = new Set([
+  "eye",
+  "core",
+  // face/mouth pieces are effectively "internal/front" and should not block perimeter spawning
+  "mouth",
+  "teeth"
+]);
 
 function perimeterUsage(state){
-  const total = calcBodyPerimeter(state?.body);
-  if (!total) return 0;
-  const used = calcUsedPerimeter(state);
-  return used / total;
+  const body = state?.body;
+  if (!body || !Array.isArray(body.cells) || body.cells.length === 0) return 0;
+
+  const bodySet = new Set(body.cells.map(([x,y]) => key(x,y)));
+  const moduleSet = new Set();
+  for (const m of (state.modules || [])){
+    const t = m?.type;
+    if (!m || !Array.isArray(m.cells) || m.cells.length === 0) continue;
+    if (PERIMETER_EXCLUDE_TYPES.has(t)) continue;
+    for (const [x,y] of m.cells) moduleSet.add(key(x,y));
+  }
+
+  let totalEdges = 0;
+  let usedEdges = 0;
+  for (const [x,y] of body.cells){
+    // 4-neighborhood perimeter edges
+    const n = [x, y-1];
+    const s = [x, y+1];
+    const w = [x-1, y];
+    const e = [x+1, y];
+    const neigh = [n,e,s,w];
+    for (const [nx,ny] of neigh){
+      const nk = key(nx,ny);
+      if (bodySet.has(nk)) continue;
+      totalEdges++;
+      if (moduleSet.has(nk)) usedEdges++;
+    }
+  }
+
+  if (!totalEdges) return 0;
+  return usedEdges / totalEdges;
 }
 
 function canSpawnNewOrgan(state){

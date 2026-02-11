@@ -1,4 +1,4 @@
-import { thicknessClaw } from "./thickness.js";
+import { thicknessClaw } from "./_thickness.js";
 
 export const CLAW = {
   label: "Клешня",
