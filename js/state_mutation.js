@@ -147,7 +147,7 @@ function weightedPick(rng, pairs){
 // If cap reached: do NOT spawn new organs. Instead either:
 //  - grow existing organs (lengthen appendages), OR
 //  - grow body to create new perimeter.
-const MAX_PERIMETER_USAGE = 0.35;
+const MAX_PERIMETER_USAGE = 0.52;
 const EARLY_FAST_BODY_BLOCKS = 180; // early stage grows faster
 
 // We count *occupied perimeter anchors* (body perimeter cells that have an attached organ).
