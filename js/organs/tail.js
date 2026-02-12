@@ -11,8 +11,8 @@ export const TAIL = {
   width: 1,
   anim: {
     growthSec: 0.7,
-    swayAmp: 1.1,
-    swaySec: 6
+    swayAmp: 3.1,
+    swaySec: 8
   },
   render: {
     // Visual-only thickness. Render may draw lateral "support" blocks when free.

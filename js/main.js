@@ -17,6 +17,7 @@ import {
 import {
   makeToast,
   renderLog,
+  renderDebugLog,
   attachSettings,
   attachActions,
   attachDragPan,
@@ -27,10 +28,16 @@ import {
   attachCarrotHudInput,
   attachLogFlash,
   attachDisableDoubleTapZoom,
-  attachSymbiosisUI
+  attachSymbiosisUI,
+  attachDebugPanel
 } from "./ui.js";
 
 const els = {
+  dbgPanel: document.getElementById("dbgPanel"),
+  dbgTail: document.getElementById("dbgTail"),
+  dbgBody: document.getElementById("dbgBody"),
+  dbgCount: document.getElementById("dbgCount"),
+
   startOverlay: document.getElementById("startOverlay"),
   playBtn: document.getElementById("playBtn"),
 
@@ -93,6 +100,12 @@ const els = {
   symConfirm: document.getElementById("symConfirm"),
   symConfirmYes: document.getElementById("symConfirmYes"),
   symConfirmNo: document.getElementById("symConfirmNo"),
+
+  // left screen log (debug)
+  dbgPanel: document.getElementById("dbgPanel"),
+  dbgTail: document.getElementById("dbgTail"),
+  dbgBody: document.getElementById("dbgBody"),
+  dbgCount: document.getElementById("dbgCount"),
 };
 
 const toast = makeToast();
@@ -167,6 +180,7 @@ function rerenderAll(deltaSec){
   renderRules(els.rulesBody);
   renderLegend(selectedOrg, els.legendBody);
   renderLog(view.state, els);
+  renderDebugLog(view, els);
   renderHud(root, selectedOrg, els, deltaSec, fmtAgeSeconds, view.zoom);
   // organism info tab
   if (els.orgInfo){
@@ -331,19 +345,30 @@ function tickCamera(view, dtSec){
 
 
 function startLoops(){
-  const targetFrameMs = 1000 / 60;
+  // Hard cap for INTERNAL animation/view calculations.
+  // Rendering stays on rAF for smoothness; we just don't advance
+  // these calculations more often than 30Hz.
+  const targetFrameMs = 1000 / 30;
   const frame = ()=>{
     if (!view.state) return;
     const now = performance.now();
     const perf = view.perf;
+
     const delta = perf.lastFrameAt ? Math.max(0, now - perf.lastFrameAt) : targetFrameMs;
     perf.lastFrameAt = now;
     perf.smoothedFrame = perf.smoothedFrame * 0.9 + delta * 0.1;
     perf.frameCount += 1;
 
-    // View-only animation ticks (60fps)
-    tickMoving(view, view.state, delta/1000);
-    tickCamera(view, delta/1000);
+    // View-only animation ticks (capped to 30Hz)
+    perf.accumMs = (perf.accumMs || 0) + delta;
+    // prevent spiral-of-death after tab-in
+    const maxCatchUp = targetFrameMs * 4;
+    if (perf.accumMs > maxCatchUp) perf.accumMs = maxCatchUp;
+    while (perf.accumMs >= targetFrameMs){
+      tickMoving(view, view.state, targetFrameMs/1000);
+      tickCamera(view, targetFrameMs/1000);
+      perf.accumMs -= targetFrameMs;
+    }
 
     const renderStart = performance.now();
     renderGrid(view.state, els.canvas, els.grid, view);
@@ -361,6 +386,7 @@ function startLoops(){
       perf.lastStatAt = now;
 
       const cpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedRender / Math.max(1, perf.smoothedFrame)) * 100)));
+      // GPU-like load: how much time a frame takes compared to our 30Hz internal tick budget.
       const gpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedFrame / targetFrameMs) * 100)));
 
       if (els.cpuStat) els.cpuStat.textContent = `CPU: ${cpuLoad}%`;
@@ -633,6 +659,7 @@ async function startGame(){
   els.startOverlay.style.display = "none";
 
   // hooks
+  attachDebugPanel(view, els);
   attachSettings(view, els, toast);
   attachActions(view, els, toast, rerenderAll);
   attachDragPan(view, els); // drag uses els.grid size + view.gridW/H

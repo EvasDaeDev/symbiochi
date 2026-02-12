@@ -71,6 +71,7 @@ org.seed = seed;
     org.version = 6;
     org.care = org.care || { feed:0, wash:0, heal:0, neglect:0 };
     org.bars = org.bars || { food:1, clean:1, hp:1, mood:1 };
+    org.visual = org.visual || { saturation: 1 };
     org.palette = org.palette || pick(mulberry32(seed), PALETTES);
     org.body = org.body || makeSmallConnectedBody(seed, 9);
     org.modules = org.modules || [];
@@ -192,6 +193,12 @@ org.seed = seed;
     }
   }
 
+  // Make sure visual-only derived fields are ready immediately after loading.
+  updateVisualSaturation(state);
+  if (Array.isArray(state.buds)){
+    for (const bud of state.buds) updateVisualSaturation(bud);
+  }
+
   state.log = state.log || [];
   state.lastMutationAt = state.lastMutationAt || (state.createdAt || nowSec());
   state.lastSeen = state.lastSeen || nowSec();
@@ -295,6 +302,48 @@ function updateHungerGate(org){
 function allBarsZero(org){
   const b = org?.bars || {};
   return (b.food ?? 0) <= 0 && (b.clean ?? 0) <= 0 && (b.hp ?? 0) <= 0 && (b.mood ?? 0) <= 0;
+}
+
+// =====================
+// Visual-only saturation
+// =====================
+// Requirement:
+// - When overall stats < 65%, creature loses colorfulness down to 25% at 0% stats.
+// - When stats recover, saturation rises back, but caps at 100% already at 65% stats.
+// - Step = 5% (quantized).
+// Purely visual, per organism.
+const VIS_SAT_FULL_AT = 0.65; // 65% (on 0..1 scale)
+const VIS_SAT_MIN = 0.25;     // 25%
+const VIS_SAT_STEP = 0.05;    // 5%
+
+function avgBars01(org){
+  const b = org?.bars || {};
+  // Bars can be up to 140% (BAR_MAX=1.4). For this visual effect we treat everything above 100% as 100%.
+  const f = clamp01(b.food ?? 0);
+  const c = clamp01(b.clean ?? 0);
+  const h = clamp01(b.hp ?? 0);
+  const m = clamp01(b.mood ?? 0);
+  return (f + c + h + m) / 4;
+}
+
+function quantizeStep(v, step){
+  if (!Number.isFinite(v) || !Number.isFinite(step) || step <= 0) return v;
+  return Math.round(v / step) * step;
+}
+
+function updateVisualSaturation(org){
+  if (!org) return;
+  const avg = avgBars01(org);
+  let sat = 1;
+  if (avg < VIS_SAT_FULL_AT){
+    const t = clamp01(avg / VIS_SAT_FULL_AT); // 0..1
+    sat = VIS_SAT_MIN + t * (1 - VIS_SAT_MIN);
+  }
+  sat = clamp(sat, VIS_SAT_MIN, 1);
+  sat = quantizeStep(sat, VIS_SAT_STEP);
+  sat = clamp(sat, VIS_SAT_MIN, 1);
+  org.visual = org.visual || {};
+  org.visual.saturation = sat;
 }
 
 export function simulate(state, deltaSec){
@@ -564,6 +613,10 @@ export function simulate(state, deltaSec){
 
   mergeTouchingOrganisms(state);
   state.lastSeen = now;
+
+  // Update visual-only derived fields once per simulate() step.
+  // (Render must not compute game logic.)
+  for (const org of orgs) updateVisualSaturation(org);
 
   // Block delta summary (parent + buds). Used in offline report.
   const blocksAfter = orgs.map(countBlocks);
@@ -936,6 +989,7 @@ function processCarrotsTick(state, org = state){
     }
   }
   state.carrots = remaining;
+  if (eaten > 0) updateVisualSaturation(org);
 
   if (!state.carrots.length){
     org.growthTarget = null;
@@ -1049,6 +1103,9 @@ export function act(state, kind){
     ""
   );
 
+  // Update visual-only derived fields immediately so UI reacts without waiting for the next simulate tick.
+  updateVisualSaturation(state);
+
   state.lastSeen = nowSec();
   saveGame(state);
 }
@@ -1074,6 +1131,9 @@ export function actOn(rootState, org, kind){
   };
 
   applyCareAction(target, kind, rng, withTargetLog, label);
+
+  // Update visual-only derived fields immediately.
+  updateVisualSaturation(target);
   const t = nowSec();
   rootState.lastSeen = t;
   if (target) target.lastSeen = t;

@@ -1,5 +1,5 @@
 import { fmtAgeSeconds, escapeHtml, barPct, mulberry32, hash32, clamp, nowSec } from "./util.js";
-import { pushLog } from "./log.js";
+import { pushLog, MAX_DEBUG_LOG } from "./log.js";
 import { saveGame, deleteSave, actOn } from "./state.js";
 import { extractGenome, encodeGenome } from "./mods/merge.js";
 import { applySymbiosisMerge } from "./state_mutation.js";
@@ -62,6 +62,62 @@ export function renderLog(state, els){
   ].sort((a,b)=>b[1]-a[1])[0];
 
   els.logFooter.textContent = `Стиль: ${top[0]} (${Math.round(top[1]*100)}%) • лог: ${log.length}/${180}`;
+}
+
+export function renderDebugLog(view, els){
+  if (!els.dbgBody || !els.dbgCount) return;
+  const root = (view.state && view.state.__logRoot) ? view.state.__logRoot : view.state;
+  const dbg = root?.debugLog || [];
+
+  // Avoid heavy DOM churn: update only when changed or when panel just opened.
+  const count = dbg.length;
+  els.dbgCount.textContent = `${count}/${MAX_DEBUG_LOG}`;
+
+  if (els.dbgPanel?.classList?.contains("collapsed")) return;
+  if (els.dbgBody._lastCount === count) return;
+  els.dbgBody._lastCount = count;
+
+  // Render newest at the bottom (natural scroll).
+  const html = dbg.map((e)=>{
+    const cls =
+      e.kind === "mut_ok" ? "dbgLine good" :
+      e.kind === "bud_ok" ? "dbgLine bud" :
+      e.kind === "mut_fail" ? "dbgLine warn" :
+      e.kind === "alert" ? "dbgLine alert" :
+      "dbgLine";
+    const when = new Date((e.t||0)*1000).toLocaleTimeString();
+    return `<div class="${cls}"><span class="when">${escapeHtml(when)}</span> <span class="kind">${escapeHtml(e.kind||"")}</span> <span class="msg">${escapeHtml(e.msg||"")}</span></div>`;
+  }).join("");
+
+  els.dbgBody.innerHTML = html;
+  // Stick to bottom
+  els.dbgBody.scrollTop = els.dbgBody.scrollHeight;
+}
+
+export function attachDebugPanel(view, els){
+  if (!els.dbgPanel || !els.dbgTail) return;
+
+  const setCollapsed = (collapsed)=>{
+    els.dbgPanel.classList.toggle("collapsed", !!collapsed);
+    els.dbgTail.title = collapsed ? "Показать лог" : "Скрыть лог";
+    els.dbgTail.textContent = collapsed ? "▶" : "◀";
+    // Force rerender on open
+    if (!collapsed && els.dbgBody) els.dbgBody._lastCount = -1;
+    try { localStorage.setItem("symbiochi_dbgCollapsed", collapsed ? "1" : "0"); } catch {}
+  };
+
+  // restore
+  try {
+    const v = localStorage.getItem("symbiochi_dbgCollapsed");
+    if (v === "0") setCollapsed(false);
+  } catch {}
+
+  els.dbgTail.addEventListener("click", (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    setCollapsed(!els.dbgPanel.classList.contains("collapsed"));
+    renderDebugLog(view, els);
+  });
 }
 
 export function attachSettings(view, els, toast){

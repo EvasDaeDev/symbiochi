@@ -4,6 +4,12 @@ import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT } from "./mods/carrots.js";
 import { ensureBodyWave, bodyWaveScore } from "./mods/body_wave.js";
+// Some module constructors still reference per-organ config objects directly.
+// Keep these imports explicit so addModule() never depends on globals.
+import { CLAW } from "./organs/claw.js";
+import { TEETH } from "./organs/teeth.js";
+import { MOUTH } from "./organs/mouth.js";
+import { FIN } from "./organs/fin.js";
 
 // ---------------------------------------------------------------------------
 // Back-compat shims for legacy code paths
@@ -289,7 +295,7 @@ export function newGame(){
 
  const plan = {
     // предпочитаемое направление роста (силуэт)
-    axisDir: pick(rng, DIR8),
+    axisDir: pick(rng, DIR16),
     // 0..1: стремление к симметрии (парные органы)
     symmetry: rng(),
     // 0..1: насколько "кривые" будут отростки (прямые/зигзаг/дуга)
@@ -772,7 +778,7 @@ export function addModule(state, type, rng, target=null){
     growStep: 0,
     zigzagSign: rng() < 0.5 ? 1 : -1,
     curveSign: rng() < 0.5 ? 1 : -1,
-    turnChance: 0.15 + 0.35 * wiggle // чем выше wiggle, тем чаще повороты
+    turnChance: 0.05 + 0.25 * wiggle // чем выше wiggle, тем чаще повороты
   };
   
   state.modules.push({
@@ -1087,7 +1093,9 @@ export function growPlannedModules(state, rng, options = {}){
       if (nearBody && m.cells.length >= 3) continue;
 
       if (bodySet.has(k)) continue;
-      if (occupiedByModules(state, nx, ny)) continue;
+      // Требование: коллизия органов с ДРУГИМИ органами при росте отключена.
+      // Во время удлинения отростки больше НЕ пытаются "объехать" другие модули.
+      // Коллизия с телом остаётся: в клетки тела расти нельзя.
 
       if (m.growStyle === "jointed" && segIndex !== null && jointedDir){
         if (dir[0] !== jointedDir[0] || dir[1] !== jointedDir[1]){
@@ -1161,12 +1169,96 @@ export function repairDetachedModules(state){
 
   let fixed = 0;
 
+  function removeAnimForCells(cells){
+    if (!state.anim || !cells || !cells.length) return;
+    for (const [x,y] of cells){
+      delete state.anim[`${x},${y}`];
+    }
+  }
+
+  // If a module is still "adjacent" to the body but has disconnected fragments
+  // (common after budding / eating / shrink), trim it so growth continues from
+  // the real stump attached to the body.
+  function pruneDisconnectedFromBody(m){
+    if (!m || !Array.isArray(m.cells) || m.cells.length === 0) return 0;
+    const cells = m.cells;
+    const modSet = new Set(cells.map(([x,y])=>key(x,y)));
+
+    // Seed cells: any module cell that is adjacent to the body.
+    const seeds = [];
+    for (const [x,y] of cells){
+      for (const [dx,dy] of DIR8){
+        if (bodySet.has(key(x+dx, y+dy))){
+          seeds.push([x,y]);
+          break;
+        }
+      }
+    }
+    if (seeds.length === 0) return 0; // fully detached: handled by reattach/drop logic below
+
+    // BFS over module cells starting from all seeds.
+    const q = [...seeds];
+    const keep = new Set(seeds.map(([x,y])=>key(x,y)));
+    while (q.length){
+      const [cx,cy] = q.pop();
+      for (const [dx,dy] of DIR8){
+        const nx = cx + dx, ny = cy + dy;
+        const k = key(nx,ny);
+        if (!modSet.has(k)) continue;
+        if (keep.has(k)) continue;
+        keep.add(k);
+        q.push([nx,ny]);
+      }
+    }
+
+    if (keep.size === cells.length) return 0;
+
+    const removed = [];
+    const newCells = [];
+    for (const [x,y] of cells){
+      const k = key(x,y);
+      if (keep.has(k)) newCells.push([x,y]);
+      else {
+        removed.push([x,y]);
+        // keep occ accurate so reattach overlap checks don't consider deleted fragments
+        occ.delete(k);
+      }
+    }
+
+    // Apply trim
+    m.cells = newCells;
+    if (Array.isArray(m.cells) && m.cells.length){
+      const last = m.cells[m.cells.length - 1];
+      m.growPos = [last[0], last[1]];
+    } else {
+      m.growPos = null;
+    }
+
+    // Jointed limbs store per-segment dirs; keep arrays valid even if cells were trimmed.
+    if (m.growStyle === "jointed" && Array.isArray(m.phalanxDirs)){
+      // nothing fancy: ensure dirs exist (growth code is defensive)
+      if (m.phalanxDirs.length === 0 && Array.isArray(m.baseDir)) m.phalanxDirs.push([m.baseDir[0], m.baseDir[1]]);
+    }
+
+    removeAnimForCells(removed);
+    fixed++;
+    return removed.length;
+  }
+
   // Precompute body cells for nearest search
   const bodyCells = state.body.cells;
 
   for (let mi = state.modules.length - 1; mi >= 0; mi--){
     const m = state.modules[mi];
     if (!m || !Array.isArray(m.cells) || m.cells.length === 0) continue;
+
+    // First, trim disconnected fragments even if the module is still adjacent to the body.
+    pruneDisconnectedFromBody(m);
+    if (!m || !Array.isArray(m.cells) || m.cells.length === 0){
+      state.modules.splice(mi, 1);
+      fixed++;
+      continue;
+    }
 
     if (isAdjacentToBody(m.cells)) continue;
 
@@ -1217,6 +1309,7 @@ export function repairDetachedModules(state){
 
     if (!placed){
       // If we cannot reattach safely, drop the module to keep invariant: no floating organs.
+      removeAnimForCells(m.cells);
       state.modules.splice(mi, 1);
       fixed++;
     } else {

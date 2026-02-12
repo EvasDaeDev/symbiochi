@@ -1,6 +1,9 @@
 import { nowSec } from "./util.js";
 import { MAX_LOG } from "./world.js";
 
+// Separate screen/debug log (requested): keeps more lines and is rendered in a left panel.
+export const MAX_DEBUG_LOG = 1000;
+
 /**
  * pushLog(stateOrOrg, msg, kind?, meta?)
  *
@@ -41,5 +44,14 @@ export function pushLog(state, msg, kind = "event", meta = null){
 
   if (root.log.length > MAX_LOG){
     root.log.splice(0, root.log.length - MAX_LOG);
+  }
+
+  // Mirror into an extended debug log (1000 lines) when present.
+  // This log is intended for *everything happening on screen*, including reasons of failures.
+  // Stored on the root state so parent + buds share one stream.
+  if (!root.debugLog) root.debugLog = [];
+  root.debugLog.push({ t: entry.t, kind: entry.kind, msg: entry.msg });
+  if (root.debugLog.length > MAX_DEBUG_LOG){
+    root.debugLog.splice(0, root.debugLog.length - MAX_DEBUG_LOG);
   }
 }

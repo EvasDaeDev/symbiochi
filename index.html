@@ -10,6 +10,18 @@
 </head>
 <body>
   <div id="wrap" class="wrap2">
+    <!-- Debug log (collapsible) -->
+    <div class="panel dbgPanel collapsed" id="dbgPanel" aria-label="Debug log">
+      <button class="dbgTail" id="dbgTail" title="Показать лог">◀</button>
+      <div class="dbgInner" id="dbgInner">
+        <div class="hdr">
+          <div class="t">ЛОГ ЭКРАНА</div>
+          <div class="s" id="dbgCount">0</div>
+        </div>
+        <div class="dbgBody" id="dbgBody"></div>
+      </div>
+    </div>
+
     <div id="centerCol">
       <div class="panel" id="statusPanel">
         <div class="hud">
@@ -94,9 +106,9 @@
             
           </div>
           <div class="field">
-            <label style="display:flex; align-items:center; gap:10px; user-select:none;">
+            <label class="fxRow">
               <input id="fxEnabled" type="checkbox" />
-              <span>Эффкты(дисторшн + хроматика)</span>
+              <span>Эффекты (дисторшн + хроматика)</span>
             </label>
             
           </div>

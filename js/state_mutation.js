@@ -143,48 +143,81 @@ function weightedPick(rng, pairs){
 }
 
 // === Perimeter cap for *new organs* ===
-// New organs may not "occupy" more than 85% of the body's perimeter.
-// If cap reached: strict ban on spawning new organs -> grow body instead.
-const MAX_PERIMETER_USAGE = 0.85;
-const EARLY_FAST_BODY_BLOCKS = 80; // early stage grows faster
+// New organs may not "occupy" more than 75% of the body's perimeter.
+// If cap reached: do NOT spawn new organs. Instead either:
+//  - grow existing organs (lengthen appendages), OR
+//  - grow body to create new perimeter.
+const MAX_PERIMETER_USAGE = 0.35;
+const EARLY_FAST_BODY_BLOCKS = 180; // early stage grows faster
 
-const ORGAN_BASE_COST = {
-  // internal/face: do not consume perimeter
-  eye: 0,
-  core: 0,
+// We count *occupied perimeter anchors* (body perimeter cells that have an attached organ).
+// This matches the requirement "free perimeter too low" much better than a heuristic cost sum.
+//
+// Implementation notes:
+// - Each organ module may touch the body at multiple perimeter cells.
+// - We store computed anchors on the module as `anchorKeys` (array of body-cell keys).
+// - For backward compatibility with old saves, anchors are computed lazily when needed.
 
-  // cheap bases
-  antenna: 1,
-  tentacle: 1,
-  spike: 1,
-  teeth: 1,
-
-  // thicker bases
-  limb: 2,
-  tail: 2,
-  worm: 2,
-  claw: 2,
-  fin: 2,
-  mouth: 2,
-
-  // heavy
-  shell: 3
-};
-
-function calcUsedPerimeter(state){
-  let used = 0;
-  for (const m of (state.modules || [])){
-    const t = m?.type;
-    used += (ORGAN_BASE_COST[t] ?? 1);
+function bodyPerimeterSet(body){
+  const set = new Set();
+  if (!body || !Array.isArray(body.cells)) return set;
+  const bodySet = new Set(body.cells.map(([x, y]) => key(x, y)));
+  for (const [x, y] of body.cells){
+    // A body cell is on the perimeter if it has at least one empty 4-neighbor.
+    if (!bodySet.has(key(x + 1, y)) || !bodySet.has(key(x - 1, y)) || !bodySet.has(key(x, y + 1)) || !bodySet.has(key(x, y - 1))){
+      set.add(key(x, y));
+    }
   }
-  // eyes are tracked as modules; face-anchor is not an organ module and should not count.
-  return used;
+  return set;
+}
+
+function computeModuleAnchorKeys(state, mod, bodySet, perimSet){
+  const anchors = new Set();
+  if (!state?.body || !Array.isArray(state.body.cells) || !mod || !Array.isArray(mod.cells) || !mod.cells.length) return anchors;
+  // Internal/face modules don't consume perimeter.
+  const t = mod.type;
+  if (t === "eye" || t === "core") return anchors;
+
+  // Any body perimeter cell adjacent (4-neigh) to any module cell is considered occupied.
+  for (const [x, y] of mod.cells){
+    const n1 = key(x + 1, y);
+    const n2 = key(x - 1, y);
+    const n3 = key(x, y + 1);
+    const n4 = key(x, y - 1);
+
+    if (bodySet.has(n1) && perimSet.has(n1)) anchors.add(n1);
+    if (bodySet.has(n2) && perimSet.has(n2)) anchors.add(n2);
+    if (bodySet.has(n3) && perimSet.has(n3)) anchors.add(n3);
+    if (bodySet.has(n4) && perimSet.has(n4)) anchors.add(n4);
+  }
+  return anchors;
+}
+
+function collectOccupiedPerimeterAnchors(state){
+  const occupied = new Set();
+  if (!state?.body || !Array.isArray(state.body.cells)) return occupied;
+  const bodySet = new Set(state.body.cells.map(([x, y]) => key(x, y)));
+  const perimSet = bodyPerimeterSet(state.body);
+
+  for (const m of (state.modules || [])){
+    if (!m) continue;
+    // recompute each time because the body perimeter changes as the body grows
+    // (cached anchors may become interior or new adjacency points may appear).
+    const anchors = computeModuleAnchorKeys(state, m, bodySet, perimSet);
+    const keys = Array.from(anchors);
+    // cache for debugging / UI / persistence
+    m.anchorKeys = keys;
+    for (const k of keys){
+      if (perimSet.has(k)) occupied.add(k);
+    }
+  }
+  return occupied;
 }
 
 function perimeterUsage(state){
   const total = calcBodyPerimeter(state?.body);
   if (!total) return 0;
-  const used = calcUsedPerimeter(state);
+  const used = collectOccupiedPerimeterAnchors(state).size;
   return used / total;
 }
 
@@ -278,27 +311,11 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
   const budSeg = cells.slice(cut);
   if (budSeg.length < 4) return false;
 
-  // в буд вставляем маленькое тело вокруг budSeg[0], чтобы было похоже на организм
+  // Дизайн-правило: отпрыск НЕ наследует органы и НЕ получает "мини-тело".
+  // Его тело — это только отделившийся сегмент отростка.
   const budSeed = (rng() * 2**31) | 0;
-  const baseBody = makeSmallConnectedBody(budSeed, 5);
-  // переносим baseBody так, чтобы его core совпал с budSeg[0]
-  const [bx0,by0] = baseBody.core;
-  const [tx,ty] = budSeg[0];
-  const dx0 = tx - bx0;
-  const dy0 = ty - by0;
-
-  let budBodyCells = translateCells(baseBody.cells, dx0, dy0);
-
-  // добавляем сегменты "почки" к телу (если не пересекается с телом)
-  const bodySet = new Set(budBodyCells.map(([x,y]) => key(x,y)));
-  for (const [x,y] of budSeg){
-    const k = key(x,y);
-    if (!bodySet.has(k)){
-      budBodyCells.push([x,y]);
-      bodySet.add(k);
-    }
-  }
-
+  let budBodyCells = budSeg.map(([x,y]) => [x,y]);
+  const [tx,ty] = budBodyCells[0];
   const budCore = [tx, ty];
 
   // направление, куда "сдвигать" почку, чтобы отделилась от родителя.
@@ -380,8 +397,19 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
     // Camera is view-only and should not be stored in organisms.
   };
 
-    state.buds.push(bud);
-  state.modules.splice(modIdx, 1);
+  state.buds.push(bud);
+
+  // У родителя "почка" реально отделилась: отрезаем хвост модуля,
+  // оставляя у родителя базовую часть.
+  const parentSeg = cells.slice(0, cut);
+  if (parentSeg.length >= 4){
+    m.cells = parentSeg;
+    const lastCell = parentSeg[parentSeg.length - 1];
+    m.growPos = [lastCell[0], lastCell[1]];
+  } else {
+    // если у родителя осталось слишком мало — удаляем модуль целиком
+    state.modules.splice(modIdx, 1);
+  }
   return true;
 }
 
@@ -495,8 +523,8 @@ export function applyMutation(state, momentSec){
   const k = 0.35 + 0.65 * power;
 
   // Late game thresholds
-  const isGiant = M.bodyBlocks >= 800;
-  const isBigForBud = M.bodyBlocks >= 500;
+  const isGiant = M.bodyBlocks >= 1800;
+  const isBigForBud = M.bodyBlocks >= 1500;
 
   const bodyGrowWeight = Number.isFinite(BODY.growWeight) ? BODY.growWeight : 0.32;
   const appendageGrowBase = Number.isFinite(BODY.appendageGrowWeight) ? BODY.appendageGrowWeight : 0.12;
@@ -707,6 +735,7 @@ export function applyMutation(state, momentSec){
   for (let step = 0; step < growthCount; step++){
     let forcedKind = null;
     let forcedByPerimeter = false;
+    let forcedPerimeterMode = null; // "appendage" | "body" | null
 
     // Early game guarantee: the first step of each mutation cycle always attempts body growth.
     if (earlyBody && step === 0){
@@ -723,8 +752,8 @@ export function applyMutation(state, momentSec){
       : null;
     const shouldThrottleAppendage = appendageBudget !== null && appendageBudget <= 0 && appendageKinds.has(kind);
 
-    // === Perimeter cap (strict): if new organs would exceed 85% perimeter usage,
-    // replace the organ spawn with body growth. No forced shell/defense fallback.
+    // === Perimeter cap (strict): if new organs would exceed MAX_PERIMETER_USAGE,
+    // do NOT spawn new organs. Prefer lengthening existing organs, otherwise grow body.
     if (
       kind !== "grow_body" &&
       kind !== "grow_appendage" &&
@@ -732,7 +761,14 @@ export function applyMutation(state, momentSec){
       !shouldThrottleAppendage
     ){
       if (!canSpawnNewOrgan(state)){
-        kind = "grow_body";
+        // Prefer extending existing modules if possible.
+        if ((state.modules?.length || 0) > 0 && !shouldThrottleAppendage){
+          kind = "grow_appendage";
+          forcedPerimeterMode = "appendage";
+        } else {
+          kind = "grow_body";
+          forcedPerimeterMode = "body";
+        }
         forcedByPerimeter = true;
       }
     }
@@ -831,15 +867,29 @@ export function applyMutation(state, momentSec){
           mutationContext.appendageBudget = Math.max(0, appendageBudget - grew);
         }
         const primaryMi = (grownModules.length === 1) ? grownModules[0] : null;
-        pushLog(state, `Мутация: отросток вырос.`, "mut_ok", {
-          part: "appendage",
-          mi: primaryMi,
-          grownModules
-        });
+        if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
+          pushLog(state, `Мутация: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → удлинили отростки.`, "mut_ok", {
+            part: "appendage",
+            mi: primaryMi,
+            grownModules
+          });
+        } else {
+          pushLog(state, `Мутация: отросток вырос.`, "mut_ok", {
+            part: "appendage",
+            mi: primaryMi,
+            grownModules
+          });
+        }
       } else {
         // Do not waste the mutation step: if appendage growth failed, expand body.
-        pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
-        growBodyWithEarlyBoost("фолбэк после неудачного роста отростка");
+        if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
+          pushLog(state, `Мутация: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → удлинение отростков не удалось.`, "mut_fail", { part: "appendage" });
+          // Requirement: if perimeter cap reached and we couldn't extend organs, grow body.
+          growBodyWithEarlyBoost("периметр занят — фолбэк на рост тела");
+        } else {
+          pushLog(state, `Мутация: рост отростков не удался.`, "mut_fail", { part: "appendage" });
+          growBodyWithEarlyBoost("фолбэк после неудачного роста отростка");
+        }
       }
       continue;
     }

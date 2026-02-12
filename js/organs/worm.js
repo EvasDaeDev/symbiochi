@@ -12,7 +12,7 @@ export const WORM = {
     growthSec: 0.7,
     // Visual-only animation (render-space). State/geometry are NOT modified.
     // Requested: 10–13 seconds per cycle (one direction), with a stronger curl at the tip.
-    wiggleSec: [10, 13],
+    wiggleSec: [0.5, 2],
 
     // Lateral offset (in *world cells*, not pixels). Amplitude grows to the tip.
     latMaxCells: 1.15,
@@ -31,7 +31,7 @@ export const WORM = {
   },
   initialColor: "#8b3a2b",
   shapeOptions: ["segmented", "ribbon", "coil"],
-  shapeWeights: [0.55, 0.3, 0.15]
+  shapeWeights: [0.25, 0.3, 0.35]
 };
 
 function clamp01(x){ return Math.max(0, Math.min(1, x)); }

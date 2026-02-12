@@ -14,14 +14,14 @@ export const TENTACLE = {
     // Visual-only animation (render-space). State/geometry are NOT modified.
     // Requested: like worm, but slower and with larger amplitude.
     // "One direction" cycle: 14–18 seconds.
-    wiggleSec: [14, 18],
+    wiggleSec: [5, 8],
 
     // Lateral offset (in *world cells*, not pixels). Amplitude grows to the tip.
-    latMaxCells: 1.85,
-    ampPow: 1.45,
+    latMaxCells: 2.85,
+    ampPow: 1.5,
 
     // More bends than worm: tentacles look more "liquid".
-    bendsMin: 2.1,
+    bendsMin: 1.5,
     bendsMax: 3.2,
 
     // Mild axial motion (peristalsis feel), as a fraction of lateral amplitude.
@@ -37,7 +37,7 @@ export const TENTACLE = {
   },
   initialColor: "#fb7185",
   shapeOptions: ["wave", "curve", "spiral"],
-  shapeWeights: [0.5, 0.3, 0.2]
+  shapeWeights: [0.5, 0.2, 0.4]
 };
 
 function clamp01(x){ return Math.max(0, Math.min(1, x)); }
