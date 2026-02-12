@@ -523,8 +523,8 @@ export function applyMutation(state, momentSec){
   const k = 0.35 + 0.65 * power;
 
   // Late game thresholds
-  const isGiant = M.bodyBlocks >= 1800;
-  const isBigForBud = M.bodyBlocks >= 1500;
+  const isGiant = M.bodyBlocks >= 800;
+  const isBigForBud = M.bodyBlocks >= 500;
 
   const bodyGrowWeight = Number.isFinite(BODY.growWeight) ? BODY.growWeight : 0.32;
   const appendageGrowBase = Number.isFinite(BODY.appendageGrowWeight) ? BODY.appendageGrowWeight : 0.12;

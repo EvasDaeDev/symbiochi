@@ -14,16 +14,7 @@ export const PALETTES = [
   { body: "#fde68a", accent: "#93c5fd", eye: "#f472b6", core: "#34d399" },
 ];
 
-// dir8 vectors in world grid coordinates (screen-like Y grows downward)
-// Index convention used across the project:
-// 0:E, 1:NE, 2:N, 3:NW, 4:W, 5:SW, 6:S, 7:SE
 export const DIR8 = [
-  [ 1, 0],
-  [ 1,-1],
-  [ 0,-1],
-  [-1,-1],
-  [-1, 0],
-  [-1, 1],
-  [ 0, 1],
-  [ 1, 1],
+  [1,0],[-1,0],[0,1],[0,-1],
+  [1,1],[1,-1],[-1,1],[-1,-1]
 ];
