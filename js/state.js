@@ -403,12 +403,12 @@ export function simulate(state, deltaSec){
     updateHungerGate(org);
 
     // Shrink (usykhanie): if ANY bar reaches 0 and stays critical long enough,
-    // shrink every 20 minutes.
+    // shrink every 60 minutes.
     // Works both offline and during active play. Shrink is applied AFTER catch-up so it never
     // changes mutation timing/placement.
     if (minBarValue(org) <= 0){
       org._offlineZeroAccSec = (org._offlineZeroAccSec || 0) + deltaSec;
-      const stepSec = 20 * 60;
+      const stepSec = 60 * 60;
       const steps = Math.floor(org._offlineZeroAccSec / stepSec);
       if (steps > 0){
         org._offlineZeroAccSec -= steps * stepSec;
