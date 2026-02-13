@@ -201,13 +201,22 @@ export function ensureMoving(view){
   if (!view) return;
   if (!view.moving){
     view.moving = {
-      params: { speedPxS: 14, turnDegS: 5 },
+      // speedBlocksS — главный (физика в блоках/сек)
+      // speedPxS     — только для совместимости с render.js (деформация/гейт)
+      params: { speedBlocksS: 3, speedPxS: 12, turnDegS: 5 },
       org: Object.create(null),
     };
   }
-  if (!view.moving.params) view.moving.params = { speedPxS: 14, turnDegS: 5 };
+  if (!view.moving.params){
+    view.moving.params = { speedBlocksS: 3, speedPxS: 12, turnDegS: 5 };
+  } else {
+    if (!Number.isFinite(view.moving.params.speedBlocksS)) view.moving.params.speedBlocksS = 3;
+    if (!Number.isFinite(view.moving.params.speedPxS)) view.moving.params.speedPxS = 12;
+    if (!Number.isFinite(view.moving.params.turnDegS)) view.moving.params.turnDegS = 5;
+  }
   if (!view.moving.org) view.moving.org = Object.create(null);
 }
+
 
 export function getOrgMotion(view, orgId){
   ensureMoving(view);
@@ -264,7 +273,7 @@ function getCore(org){
   return [0, 0];
 }
 
-export function setMoveTarget(view, state, orgId, wx, wy){
+export function setMoveTarget(view, state, orgId, wx, wy, opts = null){
   const m = getOrgMotion(view, orgId);
   if (!Number.isFinite(wx) || !Number.isFinite(wy)) return;
 
@@ -289,11 +298,34 @@ export function setMoveTarget(view, state, orgId, wx, wy){
   m._lastTargetX = sx;
   m._lastTargetY = sy;
 
+  // Optional movement tuning
+  m.stopTolBlocks = (opts && Number.isFinite(opts.stopTolBlocks)) ? Math.max(0, opts.stopTolBlocks) : 10;
+
+  // Optional "intent" jitter: bias the movement direction but keep the same destination.
+  // This is used for coins ("move with an error up to N blocks").
+  if (opts && Number.isFinite(opts.intentJitter) && opts.intentJitter > 0){
+    const j = Math.floor(opts.intentJitter);
+    const ox = (opts.intentOffsetX != null) ? (opts.intentOffsetX|0) : 0;
+    const oy = (opts.intentOffsetY != null) ? (opts.intentOffsetY|0) : 0;
+    m.intentOffX = clampInt(ox, -j, j);
+    m.intentOffY = clampInt(oy, -j, j);
+  } else {
+    m.intentOffX = 0;
+    m.intentOffY = 0;
+  }
+
   // NEW: capture starting distance (Chebyshev) for "turn only in first half".
   const core = getCore(org);
   const cx = (core[0] || 0);
   const cy = (core[1] || 0);
   m.startDist = Math.max(Math.abs(sx - cx), Math.abs(sy - cy));
+}
+
+function clampInt(v, a, b){
+  v = v|0;
+  if (v < a) return a;
+  if (v > b) return b;
+  return v;
 }
 
 export function clearMove(view, orgId){
@@ -314,12 +346,20 @@ export function tickMoving(view, state, dtSec){
   const dt = Math.max(0, dtSec || 0);
   if (dt <= 0) return;
 
-  const blockPx = Math.max(1, view.blockPx || 1);
-  const speedCellsS = Math.max(0.25, (view.moving.params.speedPxS || 5) / blockPx);
-  const turnDegS = Math.max(30, view.moving.params.turnDegS || 120);
-  const baseStepDur = 1 / speedCellsS;
+const blockPx = Math.max(1, view.blockPx || 1);
 
-  const STOP_POS_TOL_BLOCKS = 10;
+// ✅ скорость в блоках/сек — источник истины
+const speedBlocksS = Math.max(0.25, view.moving.params.speedBlocksS || 3);
+const speedCellsS = speedBlocksS;
+
+// ✅ совместимость: render.js может ожидать speedPxS
+view.moving.params.speedPxS = speedBlocksS * blockPx;
+
+const turnDegS = Math.max(30, view.moving.params.turnDegS || 120);
+const baseStepDur = 1 / speedCellsS;
+
+
+  const STOP_POS_TOL_BLOCKS_DEFAULT = 10;
   const STOP_ANG_TOL_DEG = 20;
 
   // NEW: turning is allowed only while we are in the first half of the initial distance.
@@ -451,7 +491,8 @@ export function tickMoving(view, state, dtSec){
 
     const curDist = Math.max(Math.abs(ddx), Math.abs(ddy));
 
-    if (curDist <= STOP_POS_TOL_BLOCKS){
+    const stopTol = Number.isFinite(m.stopTolBlocks) ? m.stopTolBlocks : STOP_POS_TOL_BLOCKS_DEFAULT;
+    if (curDist <= stopTol){
       // IMPORTANT: do NOT do any final alignment turns here.
       m.moving = false;
       m.breathMul = 1;
@@ -462,7 +503,12 @@ export function tickMoving(view, state, dtSec){
     }
 
     // dir16 intention with hysteresis
-    let want16 = vecToDir16(ddx, ddy);
+    // Apply optional "intent" bias (coin lure): the organism tries to go *towards* the target
+    // with a small offset, but still ultimately reaches the real target.
+    const bdx = ddx + (m.intentOffX || 0);
+    const bdy = ddy + (m.intentOffY || 0);
+
+    let want16 = vecToDir16(bdx, bdy);
     if (want16 !== null){
       if (m._want16 === null || m._want16 === undefined){
         m._want16 = want16;
@@ -476,7 +522,7 @@ export function tickMoving(view, state, dtSec){
       }
     }
 
-    const want = chooseMoveDir8FromDir16(ddx, ddy, m.headingDir8, want16);
+    const want = chooseMoveDir8FromDir16(bdx, bdy, m.headingDir8, want16);
     if (want === null){
       m.moving = false;
       m.breathMul = 1;
@@ -502,7 +548,12 @@ export function tickMoving(view, state, dtSec){
     } else if (sy !== 0){
       if (ady >= 2) dist = 2;
     }
-    const stepDur = baseStepDur * dist;
+    let stepDur = baseStepDur * dist;
+
+    // Ensure gait has enough time to render intermediate stretch frames.
+    // Without this, if dt is large or speed is high, gait may complete in one tick,
+    // causing a visible "tear" instead of smooth stretch.
+    stepDur = Math.max(stepDur, 0.12);
 
     m._stepsThisTick = (m._stepsThisTick|0) + 1;
     if (m._stepsThisTick > MAX_STEPS_PER_TICK) continue;

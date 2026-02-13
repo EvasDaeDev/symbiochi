@@ -3,6 +3,7 @@ import { BAR_MAX } from "./world.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
+import { COIN, coinCellOffsets } from "./mods/coins.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor, repairDetachedModules, getOrganMaxLen } from "./creature.js";
 import { ensureBodyWave } from "./mods/body_wave.js";
@@ -205,8 +206,12 @@ org.seed = seed;
 
   // Feeding / shaping system (carrots)
   if (!Array.isArray(state.carrots)) state.carrots = [];
-  state.inv = state.inv || { carrots: CARROT.startInventory };
+  state.coins = Array.isArray(state.coins) ? state.coins : [];
+  state.inv = state.inv || { carrots: CARROT.startInventory, coins: COIN.startInventory };
+  if (!Number.isFinite(state.inv.carrots)) state.inv.carrots = CARROT.startInventory;
+  if (!Number.isFinite(state.inv.coins)) state.inv.coins = COIN.startInventory;
   state.carrotTick = state.carrotTick || { id: 0, used: 0 };
+  state.coinTick = state.coinTick || { id: 0, used: 0 };
   if (state.growthTarget === undefined) state.growthTarget = null;
   if (state.growthTargetMode === undefined) state.growthTargetMode = null;
   if (!Number.isFinite(state.growthTargetPower)) state.growthTargetPower = 0;
@@ -351,6 +356,7 @@ export function simulate(state, deltaSec){
 
   const now = (state.lastSeen || nowSec()) + deltaSec;
   pruneExpiredCarrots(state, now);
+  pruneExpiredCoins(state, now);
   const isOffline = deltaSec >= 15; // same threshold as UI offline summary
 
   if (Array.isArray(state.buds)){
@@ -426,6 +432,11 @@ export function simulate(state, deltaSec){
   if (state.carrotTick.id !== tickId){
     state.carrotTick.id = tickId;
     state.carrotTick.used = 0;
+  }
+  if (!state.coinTick) state.coinTick = { id: tickId, used: 0 };
+  if (state.coinTick.id !== tickId){
+    state.coinTick.id = tickId;
+    state.coinTick.used = 0;
   }
 
   let mutations = 0;
@@ -513,6 +524,7 @@ export function simulate(state, deltaSec){
   {
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
+      processCoins(state);
       // Mutate only while standing; while moving we accumulate debt.
       mutations += runMutationTick(state, state.lastMutationAt);
       eatBudAppendage(state);
@@ -612,6 +624,13 @@ export function simulate(state, deltaSec){
   }
 
   mergeTouchingOrganisms(state);
+
+  // Coins: check collisions with placed coins and apply mood bonus.
+  processCoins(state);
+
+  // Reward: +1 coin when any organism reaches perfect (140%) food+clean+hp.
+  rewardCoinForMaxedBars(state);
+
   state.lastSeen = now;
 
   // Update visual-only derived fields once per simulate() step.
@@ -863,7 +882,7 @@ function eatBudAppendage(state){
 // ===== Carrots (interactive feeding / shaping) =====
 function pruneExpiredCarrots(state, now){
   if (!Array.isArray(state.carrots) || !state.carrots.length) return;
-  const ttlSec = 60 * 60;
+  const ttlSec = 30 * 60;
   const kept = [];
   for (const car of state.carrots){
     if (!Number.isFinite(car.t)){
@@ -884,6 +903,129 @@ function pruneExpiredCarrots(state, now){
       org.growthTargetPower = 0;
     }
   }
+}
+
+// ===== Coins (interactive lure) =====
+function pruneExpiredCoins(state, now){
+  if (!Array.isArray(state.coins) || !state.coins.length) return;
+  const ttlSec = 3 * 60;
+  const kept = [];
+  for (const c of state.coins){
+    if (!Number.isFinite(c.t)){
+      c.t = now;
+      kept.push(c);
+      continue;
+    }
+    if ((now - c.t) <= ttlSec) kept.push(c);
+  }
+  state.coins = kept;
+}
+
+function coinCells(coin){
+  const out = [];
+  const w = (coin.w ?? COIN.w ?? 3);
+  const h = (coin.h ?? COIN.h ?? 3);
+  const offsets = coinCellOffsets(w, h);
+  for (const [dx, dy] of offsets){
+    out.push([coin.x + dx, coin.y + dy]);
+  }
+  return out;
+}
+
+function coreHitsCoin(org, coin){
+  // Новое правило: монетка считается "съеденной",
+  // если ЛЮБАЯ клетка ТЕЛА (body) подошла к монетке на <= 4 блока.
+  // (модули не учитываем — по твоей формулировке "телом")
+
+  const body = org?.body?.cells;
+  if (!Array.isArray(body) || body.length === 0) return false;
+
+  const w = ((coin.w ?? COIN.w ?? 3) | 0);
+  const h = ((coin.h ?? COIN.h ?? 3) | 0);
+
+  const x0 = (coin.x | 0);
+  const y0 = (coin.y | 0);
+  const x1 = x0 + w - 1;
+  const y1 = y0 + h - 1;
+
+  const R = 1; // радиус в блоках
+
+  // Быстрая проверка: если клетка тела попадает в расширенный AABB (прямоугольник монетки + R)
+  // — считаем, что "пересечение телом" произошло.
+  const ex0 = x0 - R, ey0 = y0 - R, ex1 = x1 + R, ey1 = y1 + R;
+
+  for (let i = 0; i < body.length; i++){
+    const c = body[i];
+    if (!c) continue;
+    const cx = c[0] | 0;
+    const cy = c[1] | 0;
+    if (cx >= ex0 && cx <= ex1 && cy >= ey0 && cy <= ey1) return true;
+  }
+
+  return false;
+}
+
+
+function addMoodFromCoin(state, org, coin){
+  const baseSeed = (state.seed || 1) >>> 0;
+  const prng = mulberry32(hash32(baseSeed, 7777, (coin.id || 0) >>> 0, (coin.x|0), (coin.y|0), (org.__orgTag ?? -1) + 10));
+  const add = COIN.moodMin + prng() * (COIN.moodMax - COIN.moodMin);
+  org.bars.mood = clamp(org.bars.mood + add, 0, BAR_MAX);
+  pushLog(org, `Монетка: +${Math.round(add*100)}% к настроению.`, "care");
+}
+
+function processCoins(state){
+  if (!Array.isArray(state.coins) || !state.coins.length) return 0;
+  const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+
+  let eaten = 0;
+  const remaining = [];
+  for (const coin of state.coins){
+    let hitOrg = null;
+    for (let i = 0; i < orgs.length; i++){
+      const org = orgs[i];
+      if (!org) continue;
+      if (coreHitsCoin(org, coin)){
+        hitOrg = org;
+        break;
+      }
+    }
+    if (hitOrg){
+      addMoodFromCoin(state, hitOrg, coin);
+      eaten++;
+    } else {
+      remaining.push(coin);
+    }
+  }
+  state.coins = remaining;
+  return eaten;
+}
+
+// Player gets +1 coin each time ANY organism reaches 140% for (food, clean, hp).
+// Reward triggers only on the transition into the "all max" state.
+function rewardCoinForMaxedBars(rootState){
+  if (!rootState) return 0;
+  const orgs = [rootState, ...(Array.isArray(rootState.buds) ? rootState.buds : [])];
+  let gained = 0;
+  for (let i = 0; i < orgs.length; i++){
+    const org = orgs[i];
+    if (!org?.bars) continue;
+    const allMax = (org.bars.food >= BAR_MAX - 1e-6) && (org.bars.clean >= BAR_MAX - 1e-6) && (org.bars.hp >= BAR_MAX - 1e-6);
+    if (allMax){
+      if (!org._coinRewardedMax){
+        org._coinRewardedMax = true;
+        rootState.inv = rootState.inv || { carrots: CARROT.startInventory, coins: COIN.startInventory };
+        rootState.inv.coins = Math.max(0, (rootState.inv.coins|0) + 1);
+        gained += 1;
+
+        const who = (i === 0) ? (rootState.name || "родитель") : (org.name || `почка ${i}`);
+        pushLog(rootState, `Монетка: +1 (идеальное состояние: ${who}). Теперь: ${rootState.inv.coins|0}.`, "coin");
+      }
+    } else {
+      org._coinRewardedMax = false;
+    }
+  }
+  return gained;
 }
 
 function carrotCells(car){
@@ -1131,6 +1273,9 @@ export function actOn(rootState, org, kind){
   };
 
   applyCareAction(target, kind, rng, withTargetLog, label);
+
+  // Immediate reward check (so UI actions can grant coins without waiting for the next simulate tick).
+  rewardCoinForMaxedBars(rootState);
 
   // Update visual-only derived fields immediately.
   updateVisualSaturation(target);

@@ -1,6 +1,7 @@
 // js/main.js
-import { fmtAgeSeconds, nowSec, barPct } from "./util.js";
+import { fmtAgeSeconds, nowSec, barPct, mulberry32, hash32 } from "./util.js";
 import { CARROT } from "./mods/carrots.js";
+import { COIN } from "./mods/coins.js";
 import { migrateOrNew, saveGame, simulate } from "./state.js";
 import { pushLog } from "./log.js";
 import { ensureMoving, tickMoving, setMoveTarget, getOrgMotion } from "./moving.js";
@@ -26,6 +27,7 @@ import {
   attachPinchZoom,
   attachLegendHuePicker,
   attachCarrotHudInput,
+  attachCoinHudInput,
   attachLogFlash,
   attachDisableDoubleTapZoom,
   attachSymbiosisUI,
@@ -56,6 +58,7 @@ const els = {
   cpuStat: document.getElementById("cpuStat"),
   fpsStat: document.getElementById("fpsStat"),
   carrotHudInput: document.getElementById("carrotHudInput"),
+  coinHudInput: document.getElementById("coinHudInput"),
   footerInfo: document.getElementById("footerInfo"),
 
   mainPanel: document.getElementById("mainPanel"),
@@ -79,6 +82,7 @@ const els = {
   orgInfo: document.getElementById("orgInfo"),
 
   feed: document.getElementById("feed"),
+  coin: document.getElementById("coin"),
   wash: document.getElementById("wash"),
   heal: document.getElementById("heal"),
   // settings modal extra fields
@@ -86,6 +90,7 @@ const els = {
   planInfo: document.getElementById("planInfo"),
   lenPrio: document.getElementById("lenPrio"),
   carrotsInput: document.getElementById("carrotsInput"),
+  coinsInput: document.getElementById("coinsInput"),
   fxEnabled: document.getElementById("fxEnabled"),
   newCreature: document.getElementById("newCreature"),
   symbiosisBtn: document.getElementById("symbiosisBtn"),
@@ -512,6 +517,68 @@ function attachPickOrganism(){
       return; // do not change selection
     }
 
+    // Coin placement mode (lure the nearest organism by its core)
+    if (view.mode === "coin"){
+      const inv = s.inv || (s.inv = { carrots: 0, coins: 0 });
+      if ((inv.coins|0) <= 0){
+        toast("Нет монеток.");
+        return;
+      }
+
+      // max coins per mutation tick
+      const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
+      const tickId = Math.floor(nowSec() / intervalSec);
+      s.coinTick = s.coinTick || { id: tickId, used: 0 };
+      if (s.coinTick.id !== tickId){ s.coinTick.id = tickId; s.coinTick.used = 0; }
+      if (s.coinTick.used >= COIN.maxPerTick){
+        toast(`Лимит: ${COIN.maxPerTick} монетки за тик.`);
+        return;
+      }
+
+      // place coin (3x3) starting at click cell
+      s.coins = Array.isArray(s.coins) ? s.coins : [];
+      const t = nowSec();
+      const id = ((t & 0xffff) << 16) ^ ((wx & 0xff) << 8) ^ (wy & 0xff);
+      s.coins.push({ x: wx, y: wy, w: COIN.w, h: COIN.h, t, id });
+      s.coinTick.used++;
+      inv.coins--;
+
+      // choose nearest organism by distance from coin to core
+      const orgs = [s, ...(Array.isArray(s.buds) ? s.buds : [])];
+      let bestId = 0;
+      let bestD = Infinity;
+      const tx = wx + 1; // center of 3x3
+      const ty = wy + 1;
+      for (let i = 0; i < orgs.length; i++){
+        const org = orgs[i];
+        if (!org) continue;
+        const core = org?.body?.core || org?.body?.cells?.[0] || [0, 0];
+        const cx = (core[0] || 0);
+        const cy = (core[1] || 0);
+        const d = Math.abs(tx - cx) + Math.abs(ty - cy);
+        if (d < bestD){ bestD = d; bestId = i; }
+      }
+
+      // Add "aim error" up to 3 blocks: bias direction, keep destination at the coin center.
+      const prng = mulberry32(hash32(s.seed || 1, 60606, t, wx, wy, inv.coins|0));
+      const j = COIN.aimJitter|0;
+      const offX = Math.round((prng()*2 - 1) * j);
+      const offY = Math.round((prng()*2 - 1) * j);
+
+      setMoveTarget(view, s, bestId, tx, ty, {
+        stopTolBlocks: 0,
+        intentJitter: j,
+        intentOffsetX: offX,
+        intentOffsetY: offY,
+      });
+
+      pushLog(s, `Монетка: поставлена. Осталось: ${Math.max(0, inv.coins|0)}.`, "coin");
+      toast(`Монетка: (${wx},${wy}) → цель: ${bestId === 0 ? "родитель" : `почка ${bestId}`}.`);
+      saveGame(s);
+      rerenderAll(0);
+      return; // do not change selection
+    }
+
     // Clicking on empty field should allow clearing selection.
     // But single click is also the first half of a double-click; delay clearing a bit.
     cancelPendingClear();
@@ -527,7 +594,7 @@ function attachPickOrganism(){
   // Double-click / double-tap: move selected organism to clicked point ("swim")
 els.grid.addEventListener("dblclick", (e)=>{
     if (!view.state) return;
-    if (view.mode === "carrot") return;
+    if (view.mode === "carrot" || view.mode === "coin") return;
 
     cancelPendingClear();
 
@@ -669,6 +736,7 @@ async function startGame(){
   attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);
   attachCarrotHudInput(view, els, rerenderAll);
+  attachCoinHudInput(view, els, rerenderAll);
   attachZoomWheel(view, els, rerenderAll);
   attachSymbiosisUI(view, els, toast);
   attachPickOrganism();

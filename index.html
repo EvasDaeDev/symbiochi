@@ -33,6 +33,7 @@
             <div class="hudBars" id="hudMeta"></div>
             <div class="hudBars" id="hudMeta2">
               <span class="pill">морк: <input id="carrotHudInput" class="miniInput" type="number" min="0" step="1" value="0" /></span>
+              <span class="pill">мон: <input id="coinHudInput" class="miniInput" type="number" min="0" step="1" value="0" /></span>
             </div>
           </div>
           <div class="hudRight">
@@ -59,6 +60,7 @@
         <div class="controlsOverlay">
           <div class="actions">
             <button class="smallbtn" id="feed">КОРМИТЬ</button>
+            <button class="smallbtn" id="coin">МОНЕТКА</button>
             <button class="smallbtn" id="wash">ПОМЫТЬ</button>
             <button class="smallbtn" id="heal">ЛЕЧЕНИЕ</button>
           </div>
@@ -101,9 +103,16 @@
             <input id="lenPrio" type="range" min="0" max="100" step="1" />
           </div>
           <div class="field">
-            <div>Морковок в запасе</div>
-            <input id="carrotsInput" type="number" min="0" step="1" />
-            
+            <div style="display:flex; gap:10px; align-items:flex-end;">
+              <div style="flex:1;">
+                <div>Морковок в запасе</div>
+                <input id="carrotsInput" type="number" min="0" step="1" />
+              </div>
+              <div style="flex:1;">
+                <div>Монеток в запасе</div>
+                <input id="coinsInput" type="number" min="0" step="1" />
+              </div>
+            </div>
           </div>
           <div class="field">
             <label class="fxRow">

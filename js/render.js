@@ -2,6 +2,7 @@
 import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { getOrgMotion } from "./moving.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
+import { COIN, coinCellOffsets } from "./mods/coins.js";
 import { getFxPipeline } from "./FX/pipeline.js";
 import { getOrganDef, organLabel } from "./organs/index.js";
 import { wormOffset as wormOffsetAnim } from "./organs/worm.js";
@@ -587,7 +588,7 @@ function drawBlock(ctx, x, y, s, colorHex, breathK, neighMask){
 
   // Corner smoothing: if an outer corner is free (no neighbors on the two touching sides)
   // cut a *single pixel* (per project rules). For tiny blocks (<=2px), skip smoothing.
-  const cut = (s >= 2) ? 1 : 0;
+  const cut = (s >= 2) ? 0 : 0;
   if (cut){
     if (!(neighMask & 1) && !(neighMask & 8)) ctx.clearRect(x,         y,         cut, cut); // TL
     if (!(neighMask & 1) && !(neighMask & 2)) ctx.clearRect(x + s-cut, y,         cut, cut); // TR
@@ -1577,6 +1578,33 @@ if (Array.isArray(state.carrots)){
   }
 }
 
+// Coins (3x3 blocks, golden)
+if (Array.isArray(state.coins)){
+  const sPx = view.blockPx;
+  const cw = (COIN.w|0) || 3;
+  const ch = (COIN.h|0) || 3;
+  for (const coin of state.coins){
+    const offsets = coinCellOffsets(cw, ch);
+    const offsetSet = new Set(offsets.map(([dx, dy]) => `${dx},${dy}`));
+    for (const [dx, dy] of offsets){
+      const wx = (coin.x|0) + dx;
+      const wy = (coin.y|0) + dy;
+      const p = worldToScreenPx(view.cam, wx, wy, view);
+
+      let m = 0;
+      if (offsetSet.has(`${dx},${dy - 1}`)) m |= 1; // N
+      if (offsetSet.has(`${dx + 1},${dy}`)) m |= 2; // E
+      if (offsetSet.has(`${dx},${dy + 1}`)) m |= 4; // S
+      if (offsetSet.has(`${dx - 1},${dy}`)) m |= 8; // W
+
+      // slightly different highlight in the center cell so it feels more "spherical"
+      const isCenter = (dx === 1 && dy === 1);
+      const color = isCenter ? "#fcd34d" : "#f59e0b";
+      drawBlock(ctx, p.x, p.y, sPx, color, false, m);
+    }
+  }
+}
+
   const baseSeed = state.seed || 12345;
 
   // Determine selection
@@ -1825,6 +1853,12 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     els.carrotHudInput.value = String(Math.max(0, v|0));
   }
 
+  if (els.coinHudInput && document.activeElement !== els.coinHudInput){
+    const v = state.inv?.coins ?? 0;
+    els.coinHudInput.value = String(Math.max(0, v|0));
+  }
+
+
   // Third row: carrot feedback (target + mode + strength) and field count.
   if (els.hudMeta2){
     const fieldCount = Array.isArray(state.carrots) ? state.carrots.length : 0;
@@ -1844,7 +1878,8 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const pTxt = t ? `${Math.round(power*100)}%` : "";
 
     els.hudMeta2.innerHTML = `
-      <span class="pill">морковки: ${Math.max(0, inv|0)}</span>
+      <span class="pill">морковки: ${Math.max(0, (state.inv?.carrots ?? 0)|0)}</span>
+      <span class="pill">монетки: ${Math.max(0, (state.inv?.coins ?? 0)|0)}</span>
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
   }

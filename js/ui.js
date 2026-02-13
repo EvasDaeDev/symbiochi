@@ -157,6 +157,11 @@ export function attachSettings(view, els, toast){
       els.carrotsInput.value = String(isFinite(invC) ? (invC|0) : 0);
     }
 
+    if (els.coinsInput){
+      const invK = state?.inv?.coins;
+      els.coinsInput.value = String(isFinite(invK) ? (invK|0) : 0);
+    }
+
     if (els.lenPrio){
       const lp = state.settings?.lengthPriority ?? 0.65;
       els.lenPrio.value = String(Math.round(clamp(lp, 0, 1) * 100));
@@ -203,8 +208,14 @@ export function attachSettings(view, els, toast){
     // seed is informational (readonly) — do not apply changes
     if (els.carrotsInput){
       const c = parseInt(els.carrotsInput.value, 10);
-      if (!view.state.inv) view.state.inv = { carrots: 0 };
+      if (!view.state.inv) view.state.inv = { carrots: 0, coins: 0 };
       view.state.inv.carrots = Math.max(0, isFinite(c) ? c : 0);
+    }
+
+    if (els.coinsInput){
+      const k = parseInt(els.coinsInput.value, 10);
+      if (!view.state.inv) view.state.inv = { carrots: 0, coins: 0 };
+      view.state.inv.coins = Math.max(0, isFinite(k) ? k : 0);
     }
 
     pushLog(view.state, `Настройки: интервал мутации = ${view.state.evoIntervalMin} мин.`, "system");
@@ -431,8 +442,21 @@ export function attachCarrotHudInput(view, els, rerenderAll){
   els.carrotHudInput.addEventListener("input", ()=>{
     if (!view.state) return;
     const v = parseInt(els.carrotHudInput.value, 10);
-    if (!view.state.inv) view.state.inv = { carrots: 0 };
+    if (!view.state.inv) view.state.inv = { carrots: 0, coins: 0 };
     view.state.inv.carrots = Math.max(0, isFinite(v) ? v : 0);
+    view.state.lastSeen = nowSec();
+    saveGame(view.state);
+    rerenderAll(0);
+  });
+}
+
+export function attachCoinHudInput(view, els, rerenderAll){
+  if (!els.coinHudInput) return;
+  els.coinHudInput.addEventListener("input", ()=>{
+    if (!view.state) return;
+    const v = parseInt(els.coinHudInput.value, 10);
+    if (!view.state.inv) view.state.inv = { carrots: 0, coins: 0 };
+    view.state.inv.coins = Math.max(0, isFinite(v) ? v : 0);
     view.state.lastSeen = nowSec();
     saveGame(view.state);
     rerenderAll(0);
@@ -445,10 +469,27 @@ export function attachActions(view, els, toast, rerenderAll){
     // Feeding is now interactive: click "КОРМ" to enter carrot-throw mode,
     // then click in the field to place an orange "carrot" (3x7 blocks).
     view.mode = (view.mode === "carrot") ? null : "carrot";
+    // mutual exclusivity with coin mode
+    if (view.mode === "carrot"){
+      if (els.coin) els.coin.classList.remove("isActive");
+    }
     els.feed.classList.toggle("isActive", view.mode === "carrot");
     toast(view.mode === "carrot" ? "Брось морковку в поле." : "Кормление: выкл.");
     rerenderAll(0);
   });
+  if (els.coin){
+    els.coin.addEventListener("click", ()=>{
+      if (!view.state) return;
+      view.mode = (view.mode === "coin") ? null : "coin";
+      // mutual exclusivity with carrot mode
+      if (view.mode === "coin"){
+        els.feed.classList.remove("isActive");
+      }
+      els.coin.classList.toggle("isActive", view.mode === "coin");
+      toast(view.mode === "coin" ? "Поставь монетку в поле." : "Монетка: выкл.");
+      rerenderAll(0);
+    });
+  }
   els.wash.addEventListener("click", ()=>{
     if (!view.state) return;
     actOn(view.state, getActiveOrg(view.state), "wash");
@@ -492,8 +533,8 @@ export function attachDragPan(view, els){
   const onDown = (e)=>{
     if (!view.state) return;
 
-    // В режиме кормления тап должен ставить морковку — pan выключаем
-    if (view.mode === "carrot") return;
+    // В режимах броска тап должен ставить объект — pan выключаем
+    if (view.mode === "carrot" || view.mode === "coin") return;
 
     // Если активен pinch (2 пальца) — пан не стартуем
     if (view._pinchActive) return;
