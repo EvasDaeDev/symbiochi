@@ -8,7 +8,7 @@
 // View-only: does not modify game state.
 
 import { WebGLPass } from "./webgl_pass.js";
-import { buildRippleUniforms, addRipple, RIPPLE_KIND, getRippleColorEnergy } from "./ripples.js";
+import { buildRippleUniforms, addRipple, RIPPLE_KIND } from "./ripples.js";
 import { computeGhostAlpha, GHOST_DEFAULTS } from "./ghosting.js";
 import { computeGlowStrength, GLOW_DEFAULTS } from "./glow.js";
 import { computeWarpPx, WARP_DEFAULTS } from "./background_warp.js";
@@ -26,35 +26,40 @@ class FxPipeline {
     // Whether to apply screen effects. Presentation may still use WebGL for perf.
     this.enabled = true;
 
-    // Mild defaults (subtle, CRT-ish)
-    this.barrelK = 0.060;       // 0.02..0.10
-    this.barrelExp = 2.25;      // 1.5..3.0 (non-linear: less in center, more at edges)
-    this.chromaticPx = 1.35;    // 0.25..1.2
-    this.vignette = 0.35;       // 0..0.25
-    this.smooth = 1.0;          // 0..1 (shader neighbor blend)
+    // Дефолты делаем ЗАМЕТНЕЕ (по запросу).
+    // Если захочешь обратно «тонко» — уменьши через view.fx.* (см. ниже в getFxPipeline).
+    this.barrelK = 0.090;       // 0.02..0.14
+    this.barrelExp = 2.10;      // 1.5..3.0 (больше => сильнее по краям)
+    this.chromaticPx = 2.80;    // 0.25..4.0 (сила в пикселях)
+    this.vignette = 0.18;       // 0..0.35
+    this.smooth = 0.65;         // 0..1 (shader neighbor blend)
 
     // ---------- Новые эффекты (всё WebGL) ----------
     // Ghosting / afterimage
-    this.ghostAlpha = GHOST_DEFAULTS.ghostAlpha;
+    // Ghosting по умолчанию делаем чуть сильнее, чтобы был очевиден.
+    this.ghostAlpha = Math.max(GHOST_DEFAULTS.ghostAlpha, 0.14);
     this.ghostAlphaMovingExtra = GHOST_DEFAULTS.ghostAlphaMovingExtra;
 
     // Glow
-    this.glowStrength = GLOW_DEFAULTS.strength;
-    this.glowThreshold = GLOW_DEFAULTS.threshold;
+    // Glow усиливаем и делаем порог ниже (в сцене много «пастельных» цветов).
+    this.glowStrength = Math.max(GLOW_DEFAULTS.strength, 1.55);
+    this.glowThreshold = Math.min(GLOW_DEFAULTS.threshold, 0.18);
     this.glowCurve = GLOW_DEFAULTS.curve;
-    this.glowRadiusPx = GLOW_DEFAULTS.radiusPx;
+    this.glowRadiusPx = Math.max(GLOW_DEFAULTS.radiusPx, 6.0);
     this.glowFoodSoftening = GLOW_DEFAULTS.foodSoftening;
 
     // Warp background
-    this.warpPx = WARP_DEFAULTS.warpPx;
-    this.warpSpeed = WARP_DEFAULTS.speed;
+    // Warp делаем заметнее.
+    this.warpPx = Math.max(WARP_DEFAULTS.warpPx, 5.0);
+    this.warpSpeed = Math.max(WARP_DEFAULTS.speed, 0.08);
     this.warpScale = WARP_DEFAULTS.scale;
     this.warpHpExtra = WARP_DEFAULTS.hpExtra;
 
     // Overlay/grain
-    this.grain = NOISE_DEFAULTS.grain;
-    this.grainSpeed = NOISE_DEFAULTS.grainSpeed;
-    this.overlay = NOISE_DEFAULTS.overlay;
+    // Grain/overlay чуть поднимаем.
+//    this.grain = Math.max(NOISE_DEFAULTS.grain, 0.01);
+//    this.grainSpeed = NOISE_DEFAULTS.grainSpeed;
+//    this.overlay = Math.max(NOISE_DEFAULTS.overlay, 0.060);
 
     // Динамический буст хроматики (флэш от событий)
     this._chromaFlash = 0.0;
@@ -142,36 +147,15 @@ class FxPipeline {
 
         const ripples = buildRippleUniforms(this._view || {});
 
-        // ------------------------------
-        // ПСИХОДЕЛИЧНАЯ "РАСКАЧКА" ОТ ЧАСТЫХ КЛИКОВ
-        //
-        // В ripples.js мы копим scalar rippleColorEnergy:
-        // - каждый клик добавляет энергию
-        // - энергия плавно затухает по времени
-        //
-        // Здесь мы используем эту энергию как *дополнительный* множитель
-        // для цветовых пост-эффектов. Это даёт ощущение:
-        // "чем чаще кликаешь — тем сильнее уезжает тон/цветность".
-        //
-        // Важно: это усиление сейчас глобальное (на весь кадр), потому что
-        // шейдер webgl_pass.js пока не умеет локально крутить hue именно
-        // в зоне волны. Зато эффект заметен сразу и настраивается одним числом.
-        const clickEnergy = getRippleColorEnergy(this._view || {}); // 0..~2.2
-        const clickK = Math.max(0, Math.min(1, clickEnergy / 1.2)); // нормируем в 0..1
-
-        // Превращаем "clickK" в реальные параметры эффектов.
-        // Тюнить можно безопасно: это всё view-only.
-        const chromaMultFx = chromaMult * (1.0 + clickK * 0.45);
-        const chromaticPxFx = this.chromaticPx + clickK * 1.40;
-        const glowStrengthFx = glowStrength * (1.0 + clickK * 0.18);
-        const overlayFx = computeOverlay({ overlay: this.overlay }) + clickK * 0.070;
-        const grainFx = computeGrain({ grain: this.grain }) + clickK * 0.004;
+        // Оценка «движения» для ghosting (0..1).
+        // Если хоть один организм сейчас в режиме движения — усиливаем afterimage.
+        const movingK = anyOrgMoving(this._view) ? 1.0 : 0.0;
 
         const ok = this._glPass.render(this._scene, {
           barrelK: fxOn ? this.barrelK : 0.0,
           barrelExp: this.barrelExp,
-          chromaticPx: fxOn ? chromaticPxFx : 0.0,
-          chromaMult: fxOn ? chromaMultFx : 1.0,
+          chromaticPx: fxOn ? this.chromaticPx : 0.0,
+          chromaMult: fxOn ? chromaMult : 1.0,
           vignette: fxOn ? this.vignette : 0.0,
           smooth: fxOn ? this.smooth : 0.0,
           centerX: this.centerX,
@@ -181,10 +165,10 @@ class FxPipeline {
           ghostAlpha: fxOn ? computeGhostAlpha({
             ghostAlpha: this.ghostAlpha,
             ghostAlphaMovingExtra: this.ghostAlphaMovingExtra,
-          }, 0) : 0.0,
+          }, movingK) : 0.0,
 
           // Ripples / blasts
-          ripples: fxOn ? ripples : new Float32Array(6*4),
+          ripples: fxOn ? ripples : new Float32Array(2*4),
 
           // Warp
           warpPx: fxOn ? warpPx : 0.0,
@@ -192,15 +176,15 @@ class FxPipeline {
           warpSpeed: this.warpSpeed,
 
           // Glow
-          glowStrength: fxOn ? glowStrengthFx : 0.0,
+          glowStrength: fxOn ? glowStrength : 0.0,
           glowThreshold: this.glowThreshold,
           glowCurve: this.glowCurve,
           glowRadiusPx: this.glowRadiusPx,
 
           // Overlay / grain
-          grain: fxOn ? grainFx : 0.0,
+          grain: fxOn ? computeGrain({ grain: this.grain }) : 0.0,
           grainSpeed: computeGrainSpeed({ grainSpeed: this.grainSpeed }),
-          overlay: fxOn ? overlayFx : 0.0,
+          overlay: fxOn ? computeOverlay({ overlay: this.overlay }) : 0.0,
 
           // Time
           time: (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000,
@@ -277,6 +261,19 @@ function getActiveOrg(state){
   if (a === -1 || a === undefined || a === null) return state;
   if (Array.isArray(state.buds)) return state.buds[a] || state;
   return state;
+}
+
+// Возвращает true, если в view.moving хоть один организм сейчас движется.
+// Нужен только для визуального усиления ghosting.
+function anyOrgMoving(view){
+  const mv = view?.moving;
+  const orgMap = mv?.org;
+  if (!orgMap) return false;
+  for (const k of Object.keys(orgMap)){
+    const m = orgMap[k];
+    if (m && m.moving) return true;
+  }
+  return false;
 }
 
 // View-side: считываем свежие лог-сообщения и рождаем FX-события (shock/blast).

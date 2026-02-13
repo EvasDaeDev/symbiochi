@@ -3,7 +3,7 @@ import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { getOrgMotion } from "./moving.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { COIN, coinCellOffsets } from "./mods/coins.js";
-import { getFxPipeline } from "./FX/pipeline.js";
+import { getFxPipeline, consumeLogFx } from "./FX/pipeline.js";
 import { getOrganDef, organLabel } from "./organs/index.js";
 import { wormOffset as wormOffsetAnim } from "./organs/worm.js";
 import { tentacleOffset as tentacleOffsetAnim } from "./organs/tentacle.js";
@@ -588,7 +588,7 @@ function drawBlock(ctx, x, y, s, colorHex, breathK, neighMask){
 
   // Corner smoothing: if an outer corner is free (no neighbors on the two touching sides)
   // cut a *single pixel* (per project rules). For tiny blocks (<=2px), skip smoothing.
-  const cut = (s >= 2) ? 1 : 0;
+  const cut = (s >= 2) ? 0 : 0;
   if (cut){
     if (!(neighMask & 1) && !(neighMask & 8)) ctx.clearRect(x,         y,         cut, cut); // TL
     if (!(neighMask & 1) && !(neighMask & 2)) ctx.clearRect(x + s-cut, y,         cut, cut); // TR
@@ -984,58 +984,16 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
     fillPacked(staticInner, bodyColor);
     fillPacked(staticSkin, bodySkinColor);
   } else {
-    // Gait render (smooth stretch, no "bridge union"):
-    // We draw each cell at its integer position but STRETCH it toward the movement direction.
-    // This avoids visible tears even if gait completes in a single tick.
-    const gaitTint = (col)=> (breathK ? brighten(col, 0.04) : col);
-
+    // Gait render: draw per cell (and a render-only bridge) so motion is smooth.
     for (const [wx0, wy0] of bodyCells){
       const isSkin = isBoundary(bodyOcc, wx0, wy0);
       const col = isSkin ? bodySkinColor : bodyColor;
       const kGrow = animProgress(org, wx0, wy0);
-
-      // 0..gaitDist
-      const o = gaitOffsetFromIntCell(wx0, wy0, null);
-
-      // Stretch in screen pixels (integer) towards gait direction.
-      const extPx = Math.max(0, Math.round(clamp(o, 0, gaitDist) * s));
-
-      const p = worldToScreenPx(cam, wx0, wy0, view);
-      let x = p.x;
-      let y = p.y + breathY;
-
-      // Apply growth scale first (still centered in the original cell),
-      // then stretch the grown block in the movement direction.
-      let ss = s;
-      let dxC = 0;
-      let dyC = 0;
-      if (kGrow < 0.999){
-        ss = Math.max(1, Math.round(s * kGrow));
-        dxC = Math.floor((s - ss) / 2);
-        dyC = Math.floor((s - ss) / 2);
-        x += dxC;
-        y += dyC;
-      }
-
-      const ext = (kGrow < 0.999) ? Math.round(extPx * (ss / s)) : extPx;
-
-      ctx.fillStyle = gaitTint(col);
-
-      if (gaitDx !== 0){
-        // Horizontal stretch
-        if (gaitDx > 0) ctx.fillRect(x, y, ss + ext, ss);
-        else ctx.fillRect(x - ext, y, ss + ext, ss);
-      } else if (gaitDy !== 0){
-        // Vertical stretch
-        if (gaitDy > 0) ctx.fillRect(x, y, ss, ss + ext);
-        else ctx.fillRect(x, y - ext, ss, ss + ext);
-      } else {
-        // No direction: fallback
-        ctx.fillRect(x, y, ss, ss);
-      }
-
-      if (isSelected && isBoundary(occ, wx0, wy0)){
-        boundaryCells.push([wx0, wy0]);
+      const nm = neighMaskAt(occ, wx0, wy0);
+      for (const [wx, wy] of gaitPositions(wx0, wy0, wx0, wy0)){
+        const p = worldToScreenPx(cam, wx, wy, view);
+        drawBlockAnim(ctx, p.x, p.y + breathY, s, col, breathK, nm, kGrow);
+        if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
       }
     }
   }
@@ -1550,6 +1508,9 @@ function drawGridOverlay(ctx, view, cam){
 // Main render entry
 // =====================
 export function renderGrid(state, canvas, gridEl, view){
+  // View-only: превращаем свежие записи журнала в FX-события (shock/blast).
+  // Это не влияет на state, только на картинку.
+  consumeLogFx(view);
   syncCanvas(canvas, gridEl, view);
 
   // Camera is view-only (not saved). If missing, init from parent core.
@@ -1920,7 +1881,8 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const pTxt = t ? `${Math.round(power*100)}%` : "";
 
     els.hudMeta2.innerHTML = `
-      <span class="pill">морковки: ${Math.max(0, inv|0)}</span>
+      <span class="pill">морковки: ${Math.max(0, (state.inv?.carrots ?? 0)|0)}</span>
+      <span class="pill">монетки: ${Math.max(0, (state.inv?.coins ?? 0)|0)}</span>
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
   }

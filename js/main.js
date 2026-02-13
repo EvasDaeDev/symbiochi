@@ -6,6 +6,7 @@ import { migrateOrNew, saveGame, simulate } from "./state.js";
 import { pushLog } from "./log.js";
 import { ensureMoving, tickMoving, setMoveTarget, getOrgMotion } from "./moving.js";
 import { BAR_MAX } from "./world.js";
+import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
 
 import {
   syncCanvas,
@@ -477,8 +478,17 @@ function attachPickOrganism(){
     }
   };
 
-  els.grid.addEventListener("click", (e)=>{
+  els.grid.addEventListener("pointerdown", (e)=>{
     if (!view.state) return;
+
+    // View-only FX: "желе"-волна по тапу/клику (всегда, даже в режимах морковки/монетки).
+    // Координаты нормализованы (0..1) по видимому grid-элементу.
+    try {
+      const rect = els.grid.getBoundingClientRect();
+      const nx = (e.clientX - rect.left) / Math.max(1, rect.width);
+      const ny = (e.clientY - rect.top) / Math.max(1, rect.height);
+      addRipple(view, nx, ny, RIPPLE_KIND.TAP);
+    } catch (_e){}
 
     const [wx, wy] = screenToWorld(e);
     const s = view.state;
@@ -592,28 +602,28 @@ function attachPickOrganism(){
     }, 260);
   });
   // Double-click / double-tap: move selected organism to clicked point ("swim")
-els.grid.addEventListener("dblclick", (e)=>{
-    if (!view.state) return;
-    if (view.mode === "carrot" || view.mode === "coin") return;
+//els.grid.addEventListener("dblclick", (e)=>{
+//    if (!view.state) return;
+//    if (view.mode === "carrot" || view.mode === "coin") return;
 
-    cancelPendingClear();
+//    cancelPendingClear();
 
-    const a = view.state.active;
+//    const a = view.state.active;
 
     // Важно: плавание — только если реально выбран организм (рамка через ячейку)
-    if (a === null || a === undefined) return;
+//    if (a === null || a === undefined) return;
 
-    const [wx, wy] = screenToWorld(e);
+//    const [wx, wy] = screenToWorld(e);
 
     // which: -1 (родитель) или 0..n-1 (почки)
-    const which = Number.isFinite(a) ? (a|0) : null;
-    if (which === null) return;
+//const which = Number.isFinite(a) ? (a|0) : null;
+//if (which === null) return;
 
     // orgId: 0 = родитель, 1.. = почки
-    const orgId = (which === -1) ? 0 : (which + 1);
+//    const orgId = (which === -1) ? 0 : (which + 1);
 
-    setMoveTarget(view, view.state, orgId, wx, wy);
-  });
+//    setMoveTarget(view, view.state, orgId, wx, wy);
+//  });
 
   // touch double-tap (mobile)
   const DT_MS = 280;
@@ -663,7 +673,7 @@ function attachOrgListClicks(){
   let clickTimer = null;
   let pendingWhich = null;
 
-  els.orgInfo.addEventListener("click", (ev)=>{
+  els.orgInfo.addEventListener("pointerdown", (ev)=>{
     const cell = ev.target?.closest?.(".orgCell");
     if (!cell) return;
     if (!view.state) return;
