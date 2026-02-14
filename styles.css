@@ -743,22 +743,16 @@ html, body {
   justify-self: start;
 }
 
-/* Effects checkbox row: left aligned, centered vertically */
+/* Effects checkbox row: left aligned*/
 .fxRow{
   display: flex;
-  align-items: center;
   gap: 10px;
   user-select: none;
+  white-space: nowrap;
   justify-content: flex-start;
-  flex-wrap: wrap;
 }
 
-/* Prevent long label text from pushing outside the settings modal */
-.fxRow span{
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
+
 .field input:focus{ border-color: #345073; }
 .modalBtns{
   display: grid;
@@ -916,12 +910,9 @@ html, body { overscroll-behavior: none; }
 }
 .seedRow {
   display: flex;
-  gap: 16px;
+  gap: 6px;
 }
 
-#seedInput {
-  width: 160px;
-}
 
 .seedCol {
   display: flex;
@@ -930,11 +921,13 @@ html, body { overscroll-behavior: none; }
 }
 
 .seedTitle {
-    opacity: 0.7;
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 4px
 }
 
 .seedInfo {
-  font-size: 13px;
+  font-size: 10px;
   color: #ccc;
 }
 .planCol {
