@@ -742,36 +742,45 @@ function buildEyeOffsets(radius, shape){
 // =====================
 // Selection glow
 // =====================
-function drawSelectionGlow(ctx, rects, strength=1){
+// =====================
+// Selection glow
+// =====================
+
+// Strong outer glow around selection rectangles (usually 1 rect = bounding box)
+function drawSelectionGlow(ctx, rects){
+  ctx.save();
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(90,255,140,1)";
+  ctx.lineWidth = 1;
+
+  for (const r of rects){
+    ctx.strokeRect(
+      Math.round(r.x) + 0.5,
+      Math.round(r.y) + 0.5,
+      Math.round(r.w),
+      Math.round(r.h)
+    );
+  }
+
+  ctx.restore();
+}
+
+// Optional crisp outline (no blur). Useful for debugging.
+function drawSelectionRect(ctx, rects, alpha=1){
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = 0.85 * strength;
+  ctx.globalAlpha = alpha;
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(90,255,140,0.9)";
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
   ctx.lineWidth = 1;
   for (const r of rects){
-    ctx.strokeRect(r.x - 0.5, r.y - 0.5, r.w + 1, r.h + 1);
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
   }
   ctx.restore();
 }
-/* DUPLICATE REMOVED:
-function drawSelectionGlow(ctx, rects, strength=1){
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  for (let i = GLOW_PX; i >= 1; i--){
-    const alpha = (0.08 + (i / GLOW_PX) * 0.14) * strength;
-    ctx.globalAlpha = alpha;
-    ctx.shadowColor = "rgba(90,255,140,0.70)";
-    ctx.shadowBlur = i * 2.2;
-    ctx.strokeStyle = "rgba(90,255,140,0.55)";
-    ctx.lineWidth = 1;
-    for (const r of rects){
-      ctx.strokeRect(r.x - i, r.y - i, r.w + i*2, r.h + i*2);
-    }
-  }
-  ctx.restore();
-}
-*/
 
 function drawFlashGlow(ctx, rects){
   ctx.save();
@@ -780,7 +789,7 @@ function drawFlashGlow(ctx, rects){
     const alpha = 0.10 + (i / GLOW_PX) * 0.18;
     ctx.globalAlpha = alpha;
     ctx.shadowColor = "rgba(255,255,255,0.85)";
-    ctx.shadowBlur = i * 2.6;
+    ctx.shadowBlur = i * 0;
     ctx.strokeStyle = "rgba(255,255,255,0.75)";
     ctx.lineWidth = 1;
     for (const r of rects){
@@ -1727,13 +1736,28 @@ if (Array.isArray(state.coins)){
     }
   }
 
-  // Selection glow drawn after blocks, using the same transform
-  if (sel && Array.isArray(sel.rects) && sel.rects.length){
-    const uniq = new Map();
-    for (const r of sel.rects){
-      const k = `${r.x},${r.y},${r.w},${r.h}`;
-      if (!uniq.has(k)) uniq.set(k, r);
-    }
+  // Selection glow drawn after blocks, using the same transform (BODY ONLY)
+if (sel && sel.org && sel.org.body && Array.isArray(sel.org.body.cells) && sel.org.body.cells.length){
+
+  const sPx = Number.isFinite(view.blockPx) ? view.blockPx : 4;
+  const breathY = breathYOffsetPx(sel.org, sel.orgId, baseSeed, sel.breathMul);
+
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+
+  for (const [x, y] of sel.org.body.cells){
+    const p = worldToScreenPx(sel.cam2, x, y, view);
+    const px = p.x;
+    const py = p.y + breathY;
+
+    if (px < minX) minX = px;
+    if (py < minY) minY = py;
+    if (px + sPx > maxX) maxX = px + sPx;
+    if (py + sPx > maxY) maxY = py + sPx;
+  }
+
+  if (Number.isFinite(minX) && Number.isFinite(minY) && Number.isFinite(maxX) && Number.isFinite(maxY)){
+    const bbox = [{ x: minX, y: minY, w: (maxX - minX), h: (maxY - minY) }];
 
     ctx.save();
     if (sel.angRad !== 0){
@@ -1741,9 +1765,12 @@ if (Array.isArray(state.coins)){
       ctx.rotate(sel.angRad);
       ctx.translate(-sel.pivot.x, -sel.pivot.y);
     }
-    drawSelectionGlow(ctx, [...uniq.values()], 1);
+
+    drawSelectionGlow(ctx, bbox, 1);
+
     ctx.restore();
   }
+}
 
   // Flash highlight from log click (white glow, 0.2s)
   const fl = view.flash;
