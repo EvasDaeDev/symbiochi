@@ -388,11 +388,11 @@ html, body {
   border: 1px solid rgba(36,52,74,.9);
   background: transparent; /* убрать подложку у кнопок */
   color: var(--text);
-  font-weight: 900;
+  font-weight: 500;
   font-size: 10px;
   cursor: pointer;
   user-select: none;
-  min-width: 88px;
+  min-width: 75px;
 }
 .smallbtn:hover{ border-color: #345073; }
 .smallbtn:active{ transform: translateY(1px); }
@@ -402,10 +402,62 @@ html, body {
   border-color: rgba(36,52,74,.5);
 }
 
-.smallbtn.isActive{
-  border-color: rgba(251,146,60,0.7);
-  box-shadow: 0 0 0 2px rgba(251,146,60,0.15) inset;
+/* Action buttons: icons + colored borders */
+.actBtn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  line-height: 1;
 }
+.actBtn .actIco{
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-position: center;
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,.35));
+}
+.actBtn .actLbl{ display:inline-block; }
+
+.actFeed{ border-color: rgba(251,146,60,.9); }
+.actCoin{ border-color: rgba(234,179,8,.9); }
+.actWash{ border-color: rgba(34,211,238,.85); }
+.actHeal{ border-color: rgba(239,68,68,.9); }
+
+.actFeed:hover{ border-color: rgba(251,146,60,1); }
+.actCoin:hover{ border-color: rgba(234,179,8,1); }
+.actWash:hover{ border-color: rgba(34,211,238,1); }
+.actHeal:hover{ border-color: rgba(239,68,68,1); }
+
+/* Active/pressed background (15% of border color). Also supports JS active state via .isActive */
+.smallbtn.actFeed:active,
+.smallbtn.actFeed.isActive{ background: rgba(251,146,60,.15); }
+
+.smallbtn.actCoin:active,
+.smallbtn.actCoin.isActive{ background: rgba(234,179,8,.15); }
+
+.smallbtn.actWash:active,
+.smallbtn.actWash.isActive{ background: rgba(34,211,238,.15); }
+
+.smallbtn.actHeal:active,
+.smallbtn.actHeal.isActive{ background: rgba(239,68,68,.15); }
+
+
+/* Icons as tiny inline SVGs */
+.actFeed .actIco{ background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M5 2c.9 1.2 2.2 1.6 3.6 1.5C7.7 4.4 6.8 5.1 6.2 5.8c-1.6 1.8-2.3 3.7-1.7 4.7.7 1.1 2.8.8 4.7-.8 1.9-1.6 3-3.9 2.4-5.2-.4-1-1.5-1.6-2.9-1.6.2-.6.3-1.1.2-1.8-.9.7-1.9.9-3.1.9C5.5 1.8 5.2 1.9 5 2z' fill='%23f59e0b'/%3E%3Cpath d='M4.2 1.8c.7 1 1.6 1.6 2.8 1.8-.9.5-1.7.9-2.4 1.6-.2-.9-.3-2.2-.4-3.4z' fill='%2322c55e'/%3E%3C/svg%3E"); }
+.actCoin .actIco{ background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Ccircle cx='7' cy='7' r='5.5' fill='%23fbbf24' stroke='%23a16207' stroke-width='1'/%3E%3Ccircle cx='7' cy='7' r='3.3' fill='none' stroke='%23fde68a' stroke-width='1'/%3E%3C/svg%3E"); }
+.actWash .actIco{ background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M7 1.5c2.3 3.1 4.2 5.3 4.2 7.3A4.2 4.2 0 1 1 2.8 8.8C2.8 6.8 4.7 4.6 7 1.5z' fill='%2322d3ee' stroke='%230ea5b7' stroke-width='1'/%3E%3C/svg%3E"); }
+.actHeal .actIco{ background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Crect x='5.6' y='2.2' width='2.8' height='9.6' rx='0.6' fill='%23ef4444'/%3E%3Crect x='2.2' y='5.6' width='9.6' height='2.8' rx='0.6' fill='%23ef4444'/%3E%3C/svg%3E"); }
+
+/* Legacy: keep generic active state, but don't force "feed" colors for every button */
+.smallbtn.isActive{ box-shadow: 0 0 0 2px rgba(255,255,255,0.10) inset; }
+
+.smallbtn.actFeed.isActive{ border-color: rgba(251,146,60,0.7); box-shadow: 0 0 0 2px rgba(251,146,60,0.15) inset; }
+.smallbtn.actCoin.isActive{ border-color: rgba(234,179,8,0.7); box-shadow: 0 0 0 2px rgba(234,179,8,0.15) inset; }
+.smallbtn.actWash.isActive{ border-color: rgba(34,211,238,0.7); box-shadow: 0 0 0 2px rgba(34,211,238,0.15) inset; }
+.smallbtn.actHeal.isActive{ border-color: rgba(239,68,68,0.7); box-shadow: 0 0 0 2px rgba(239,68,68,0.15) inset; }
 
 .footerNote {
   font-size: 10px;
@@ -698,6 +750,14 @@ html, body {
   gap: 10px;
   user-select: none;
   justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+/* Prevent long label text from pushing outside the settings modal */
+.fxRow span{
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .field input:focus{ border-color: #345073; }
 .modalBtns{
@@ -870,8 +930,7 @@ html, body { overscroll-behavior: none; }
 }
 
 .seedTitle {
-  font-size: 12px;
-  opacity: 0.7;
+    opacity: 0.7;
 }
 
 .seedInfo {

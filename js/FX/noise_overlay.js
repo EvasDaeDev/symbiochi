@@ -12,11 +12,11 @@ function clamp01(v){
 
 export const NOISE_DEFAULTS = {
   // Сила зерна (0..1). Рекомендуется 0.02..0.08.
-  grain: 0.045,
+  grain: 0.145,
   // Скорость анимации зерна.
-  grainSpeed: 1.2,
+  grainSpeed: 0.2,
   // Мягкий цветовой overlay (0..1). Это не "плашка", а очень лёгкая модуляция.
-  overlay: 0.035,
+  overlay: 1.0,
 };
 
 export function computeGrain(cfg){

@@ -1575,15 +1575,18 @@ export function renderGrid(state, canvas, gridEl, view){
   ctx.setTransform(view.dpr || 1, 0, 0, view.dpr || 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
 
-  // background
+  // background (cached gradient to avoid per-frame allocations / GC spikes)
   ctx.clearRect(0, 0, view.rectW, view.rectH);
-  const g = ctx.createRadialGradient(
-    view.rectW/2, view.rectH/2, Math.min(view.rectW,view.rectH)*0.15,
-    view.rectW/2, view.rectH/2, Math.max(view.rectW,view.rectH)*0.85
-  );
-  g.addColorStop(0, "rgb(49, 62, 51)");
-  g.addColorStop(1, "rgb(5, 8, 5)");
-  ctx.fillStyle = g;
+  if (!view._bgGrad || view._bgGrad.w !== view.rectW || view._bgGrad.h !== view.rectH){
+    const gg = ctx.createRadialGradient(
+      view.rectW/2, view.rectH/2, Math.min(view.rectW,view.rectH)*0.15,
+      view.rectW/2, view.rectH/2, Math.max(view.rectW,view.rectH)*0.85
+    );
+    gg.addColorStop(0, "rgb(38, 49, 30)");
+    gg.addColorStop(1, "rgb(1, 2, 1)");
+    view._bgGrad = { w: view.rectW, h: view.rectH, g: gg };
+  }
+  ctx.fillStyle = view._bgGrad.g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
 
     // Grid parallax: grid follows camera slightly slower than world objects
@@ -1600,9 +1603,19 @@ if (Array.isArray(state.carrots)){
   const cw = (CARROT.w|0) || 3;
   const ch = (CARROT.h|0) || 7;
 
-  for (const car of state.carrots){
+  // Cache the carrot shape (offsets + neighbor set) to avoid per-frame allocations.
+  view._shapeCache = view._shapeCache || {};
+  const cKey = `carrot:${cw}x${ch}`;
+  let cShape = view._shapeCache[cKey];
+  if (!cShape){
     const offsets = carrotCellOffsets(cw, ch);
     const offsetSet = new Set(offsets.map(([dx, dy]) => `${dx},${dy}`));
+    cShape = view._shapeCache[cKey] = { offsets, offsetSet };
+  }
+  const offsets = cShape.offsets;
+  const offsetSet = cShape.offsetSet;
+
+  for (const car of state.carrots){
     for (const [dx, dy] of offsets){
       const wx = (car.x|0) + dx;
       const wy = (car.y|0) + dy;
@@ -1625,9 +1638,20 @@ if (Array.isArray(state.coins)){
   const sPx = view.blockPx;
   const cw = (COIN.w|0) || 3;
   const ch = (COIN.h|0) || 3;
-  for (const coin of state.coins){
+
+  // Cache the coin shape (offsets + neighbor set) to avoid per-frame allocations.
+  view._shapeCache = view._shapeCache || {};
+  const kKey = `coin:${cw}x${ch}`;
+  let kShape = view._shapeCache[kKey];
+  if (!kShape){
     const offsets = coinCellOffsets(cw, ch);
     const offsetSet = new Set(offsets.map(([dx, dy]) => `${dx},${dy}`));
+    kShape = view._shapeCache[kKey] = { offsets, offsetSet };
+  }
+  const offsets = kShape.offsets;
+  const offsetSet = kShape.offsetSet;
+
+  for (const coin of state.coins){
     for (const [dx, dy] of offsets){
       const wx = (coin.x|0) + dx;
       const wy = (coin.y|0) + dy;
@@ -1905,6 +1929,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   if (els.hudMeta2){
     const fieldCount = Array.isArray(state.carrots) ? state.carrots.length : 0;
     const inv = state.inv?.carrots ?? 0;
+    const coins = state.inv?.coins ?? 0;
 
     const t = Array.isArray(target.growthTarget) ? target.growthTarget : null;
     const mode = target.growthTargetMode;
@@ -1921,6 +1946,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
 
     els.hudMeta2.innerHTML = `
       <span class="pill">морковки: ${Math.max(0, inv|0)}</span>
+      <span class="pill">монетки: ${Math.max(0, coins|0)}</span>
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
   }

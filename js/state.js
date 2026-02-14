@@ -594,6 +594,10 @@ export function simulate(state, deltaSec){
     }
   }
 
+  // Offline report: фиксируем количество блоков ПОСЛЕ роста/мутаций, но ДО усыхания.
+  // Это нужно, чтобы рост не «обнулялся» в отчёте, если затем началось усыхание.
+  const blocksAfterMutations = orgs.map(countBlocks);
+
   // Apply accumulated shrink steps (every 20 min at all-zero bars).
   // Done AFTER time fast-forward, so shrink does not interfere with per-tick mutation placement.
   for (const org of orgs){
@@ -637,15 +641,26 @@ export function simulate(state, deltaSec){
   // (Render must not compute game logic.)
   for (const org of orgs) updateVisualSaturation(org);
 
+
   // Block delta summary (parent + buds). Used in offline report.
-  const blocksAfter = orgs.map(countBlocks);
+  // Важно: рост и усыхание считаем РАЗДЕЛЬНО:
+  //  - grownBlocks  = что успело вырасти ДО начала усыхания
+  //  - shrunkBlocks = что потеряно ИМЕННО усыханием (после роста)
+  const blocksAfterFinal = orgs.map(countBlocks);
   let grownBlocks = 0;
   let shrunkBlocks = 0;
   for (let i=0;i<blocksBefore.length;i++){
-    const d = (blocksAfter[i] || 0) - (blocksBefore[i] || 0);
-    if (d > 0) grownBlocks += d;
-    else if (d < 0) shrunkBlocks += -d;
+    const before = (blocksBefore[i] || 0);
+    const mid    = (blocksAfterMutations[i] || 0);
+    const after  = (blocksAfterFinal[i] || 0);
+
+    const g = mid - before;
+    if (g > 0) grownBlocks += g;
+
+    const s = mid - after;
+    if (s > 0) shrunkBlocks += s;
   }
+
 
   return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps, shrinks: simShrinks, grownBlocks, shrunkBlocks };
 }
@@ -1169,6 +1184,12 @@ function processCarrotsTick(state, org = state){
     let activeDist = Infinity;
     if (nearestModuleD < bodyD && nearestModuleD <= maxRange){
       mode = "appendage";
+      activeDist = nearestModuleD;
+    } else if (nearestModuleD <= bodyRange && nearestModuleD <= maxRange){
+      // If the carrot is close enough to *any* appendage, prefer a mixed target.
+      // Otherwise a large body would constantly classify close carrots as "body" targets,
+      // preventing appendages from being biased towards the carrot.
+      mode = "mixed";
       activeDist = nearestModuleD;
     } else if (bodyD <= bodyRange && !hasSeeingBetween){
       mode = hasSeeingModule ? "body" : "mixed";

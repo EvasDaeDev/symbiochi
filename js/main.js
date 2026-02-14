@@ -7,6 +7,7 @@ import { pushLog } from "./log.js";
 import { ensureMoving, tickMoving, setMoveTarget, getOrgMotion } from "./moving.js";
 import { BAR_MAX } from "./world.js";
 import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
+import { getFxPipeline } from "./FX/pipeline.js";
 
 import {
   syncCanvas,
@@ -246,7 +247,7 @@ function rerenderAll(deltaSec){
 
     els.orgInfo.innerHTML = `
       <div class="orgList">${listHtml}</div>
-      <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре. Дабл-клик по полю — отправить путь.</div>
+      <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре.</div>
     `;
   }
   renderGrid(view.state, els.canvas, els.grid, view);
@@ -484,10 +485,10 @@ function attachPickOrganism(){
     // View-only FX: "желе"-волна по тапу/клику (всегда, даже в режимах морковки/монетки).
     // Координаты нормализованы (0..1) по видимому grid-элементу.
     try {
-      const rect = els.grid.getBoundingClientRect();
-      const nx = (e.clientX - rect.left) / Math.max(1, rect.width);
-      const ny = (e.clientY - rect.top) / Math.max(1, rect.height);
-      addRipple(view, nx, ny, RIPPLE_KIND.TAP);
+    const rect = canvas.getBoundingClientRect();
+	const nx = (e.clientX - rect.left) / rect.width;
+	const ny = 1.0 - (e.clientY - rect.top) / rect.height; // инверсия Y
+	addRipple(view, nx, ny, RIPPLE_KIND.TAP);
     } catch (_e){}
 
     const [wx, wy] = screenToWorld(e);
@@ -720,12 +721,18 @@ function attachOrgListClicks(){
 
 
 async function startGame(){
+
   view.state = migrateOrNew();
   view.lastActive = view.state?.active ?? null;
-  // View-only FX toggle from settings (defaults to ON)
-  view.fx = view.fx || {};
-  view.fx.enabled = (view.state?.settings?.fxEnabled !== false);
+
   ensureMoving(view);
+
+  // Получаем pipeline
+  view.canvas = els.canvas;  
+  const fx = getFxPipeline(view, els.canvas);
+
+  // Загружаем настройку
+  fx.enabled = (view.state?.settings?.fxEnabled !== false);
 
   // Always center camera to the parent organism on game start (view-only, not persisted).
   // (Selection may be restored to a bud, but the initial framing should show the parent.)

@@ -5,7 +5,7 @@
 // - Это *view-only* слой: хранит события и формирует uniform-ы для WebGL.
 // - Не трогаем state, не меняем симуляцию.
 
-export const MAX_RIPPLES = 6;
+export const MAX_RIPPLES = 4;
 
 // Типы волн для шейдера.
 // TAP   — обычный тап (короткая, мягкая рябь)
@@ -127,7 +127,10 @@ export function buildRippleUniforms(view){
     return age < 2.2; // BLAST
   });
 
-  const out = new Float32Array(MAX_RIPPLES * 4);
+  // Reuse a single uniform buffer to avoid GC spikes.
+  rt._rippleUniforms = rt._rippleUniforms || new Float32Array(MAX_RIPPLES * 4);
+  const out = rt._rippleUniforms;
+  out.fill(0);
   for (let i = 0; i < MAX_RIPPLES; i++){
     const r = rt.ripples[i];
     if (!r) continue;

@@ -13,13 +13,13 @@ function clamp01(v){
 
 export const WARP_DEFAULTS = {
   // Сила warp в пикселях (очень маленькая, чтобы не ломать пиксель-арт)
-  warpPx: 1.25,
+  warpPx: 5.25,
   // Скорость течения (в shader time)
   speed: 0.12,
   // Масштаб шума: чем больше — тем мельче "волокна".
   scale: 1.35,
   // Сколько добавлять warp при стрессе (низком HP)
-  hpExtra: 0.9,
+  hpExtra: 0.0,
 };
 
 export function computeWarpPx(cfg, hp01){

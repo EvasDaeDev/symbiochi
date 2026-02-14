@@ -1,14 +1,8 @@
 // js/FX/pipeline.js
-// FX pipeline:
-// - Render the world into an offscreen Canvas2D buffer.
-// - Present that buffer onto the visible canvas.
-//   * If FX enabled and WebGL is available: GPU post-process (barrel + chromatic).
-//   * Otherwise: direct blit (no quality loss).
-//
-// View-only: does not modify game state.
+// View-only FX pipeline. Не изменяет state.
 
 import { WebGLPass } from "./webgl_pass.js";
-import { buildRippleUniforms, addRipple, RIPPLE_KIND, getRippleColorEnergy } from "./ripples.js";
+import { buildRippleUniforms, addRipple, RIPPLE_KIND } from "./ripples.js";
 import { computeGhostAlpha, GHOST_DEFAULTS } from "./ghosting.js";
 import { computeGlowStrength, GLOW_DEFAULTS } from "./glow.js";
 import { computeWarpPx, WARP_DEFAULTS } from "./background_warp.js";
@@ -22,44 +16,79 @@ function makeCanvas(w, h){
 }
 
 class FxPipeline {
+
   constructor(){
-    // Whether to apply screen effects. Presentation may still use WebGL for perf.
+
+    // ------------------------------------------------------------
+    // MASTER SWITCH (отключает ВСЁ)
+    // ------------------------------------------------------------
     this.enabled = true;
 
-    // Mild defaults (subtle, CRT-ish)
-    this.barrelK = 0.060;       // 0.02..0.10
-    this.barrelExp = 2.25;      // 1.5..3.0 (non-linear: less in center, more at edges)
-    this.chromaticPx = 1.35;    // 0.25..1.2
-    this.vignette = 0.35;       // 0..0.25
-    this.smooth = 1.0;          // 0..1 (shader neighbor blend)
+    // ------------------------------------------------------------
+    // Тонкая настройка включения эффектов (в одном месте)
+    // ------------------------------------------------------------
+    this.fxEnabled = {
+      barrel: true,
+      chroma: true,
+      ghosting: false,
+      ripples: true,
+      rippleColor: true, // локальная подсветка по кольцу (можно выключить отдельно)
 
-    // ---------- Новые эффекты (всё WebGL) ----------
-    // Ghosting / afterimage
+      warp: true,
+      glow: false,
+      grain: false,
+      overlay: false,
+    };
+
+    // ---------------- Базовые параметры ----------------
+    this.barrelK = 0.060;
+    this.barrelExp = 2.25;
+    this.chromaticPx = 3.35;
+    this.vignette = 0.65;
+    this.smooth = 0.0;
+
+    // Ripple ring (локальная подсветка по кольцу)
+    this.ringWidth = 0.15;          // толщина кольца (UV 0..1)
+    this.ringBrightness = 0.20;   // +10% яркости в кольце
+    this.rippleFade = 1.90;       // затухание волны: больше = быстрее
+
+// Ghosting
     this.ghostAlpha = GHOST_DEFAULTS.ghostAlpha;
     this.ghostAlphaMovingExtra = GHOST_DEFAULTS.ghostAlphaMovingExtra;
 
-    // Glow
+    // Glow (периметральный, цвет наследует пиксели организма)
     this.glowStrength = GLOW_DEFAULTS.strength;
-    this.glowThreshold = GLOW_DEFAULTS.threshold;
-    this.glowCurve = GLOW_DEFAULTS.curve;
     this.glowRadiusPx = GLOW_DEFAULTS.radiusPx;
+
+    // Порог яркости фона (ниже — фон, выше — организм)
+    this.glowBgLumaCut = GLOW_DEFAULTS.bgLumaCut;
+
+    // 3 градации по длине свечения (доли от radiusPx)
+    this.glowBand1 = GLOW_DEFAULTS.band1;
+    this.glowBand2 = GLOW_DEFAULTS.band2;
+
+    // Интенсивность по зонам
+    this.glowW1 = GLOW_DEFAULTS.w1;
+    this.glowW2 = GLOW_DEFAULTS.w2;
+    this.glowW3 = GLOW_DEFAULTS.w3;
+
+    // Мягкость края
+    this.glowSoft = GLOW_DEFAULTS.soft;
+
+    // Влияние сытости (softening силы)
     this.glowFoodSoftening = GLOW_DEFAULTS.foodSoftening;
 
-    // Warp background
+    // Warp
     this.warpPx = WARP_DEFAULTS.warpPx;
     this.warpSpeed = WARP_DEFAULTS.speed;
     this.warpScale = WARP_DEFAULTS.scale;
     this.warpHpExtra = WARP_DEFAULTS.hpExtra;
 
-    // Overlay/grain
+    // Noise
     this.grain = NOISE_DEFAULTS.grain;
     this.grainSpeed = NOISE_DEFAULTS.grainSpeed;
     this.overlay = NOISE_DEFAULTS.overlay;
 
-    // Динамический буст хроматики (флэш от событий)
-    this._chromaFlash = 0.0;
-
-    // Center of distortion in normalized UV (0..1)
     this.centerX = 0.5;
     this.centerY = 0.5;
 
@@ -68,242 +97,146 @@ class FxPipeline {
     this._w = 0;
     this._h = 0;
 
-    // WebGL presenter (created lazily, may fail)
     this._glPass = null;
     this._glFailed = false;
   }
 
   ensureSize(w, h){
-    w = w | 0;
-    h = h | 0;
-    if (w <= 0 || h <= 0) return;
-    if (this._scene && this._w === w && this._h === h) return;
+    w |= 0; h |= 0;
+    if (w<=0 || h<=0) return;
+    if (this._scene && this._w===w && this._h===h) return;
 
     this._w = w;
     this._h = h;
-    this._scene = makeCanvas(w, h);
-    this._sceneCtx = this._scene.getContext("2d", { willReadFrequently: false });
-    // Keep the world render crisp (blocks are pixel-art).
+    this._scene = makeCanvas(w,h);
+    this._sceneCtx = this._scene.getContext("2d");
     this._sceneCtx.imageSmoothingEnabled = false;
   }
 
-  begin(visibleCanvas){
-    // Always draw the world into the offscreen buffer.
-    // This avoids locking the visible canvas into a 2D context,
-    // so FX can be toggled on later and still use WebGL.
-    this.ensureSize(visibleCanvas.width, visibleCanvas.height);
+  begin(canvas){
+    this.ensureSize(canvas.width, canvas.height);
     return this._sceneCtx;
   }
 
-  end(visibleCanvas){
-    if (!this._scene || !this._sceneCtx) return;
+  end(canvas){
+    if (!this._scene) return;
 
-    const w = this._w;
-    const h = this._h;
-    if (w !== (visibleCanvas.width|0) || h !== (visibleCanvas.height|0)){
-      // size changed mid-frame
-      return;
-    }
+    // ------------------------------------------------------------
+    // MASTER SWITCH (physically disables ALL FX)
+    // IMPORTANT: if the main canvas already owns a WebGL context,
+    // canvas.getContext('2d') returns null. In that case we do a
+    // cheap WebGL blit (no FX) instead of crashing.
+    // ------------------------------------------------------------
+    if (!this.enabled){
+      const ctx2d = canvas.getContext("2d");
+      if (ctx2d){
+        ctx2d.imageSmoothingEnabled = false;
+        ctx2d.clearRect(0,0,this._w,this._h);
+        ctx2d.drawImage(this._scene,0,0);
+        return;
+      }
 
-    // Try WebGL presenter first (even if FX disabled: we can do a clean blit).
-    if (!this._glFailed){
-      if (!this._glPass){
+      if (!this._glPass && !this._glFailed){
         try {
-          this._glPass = new WebGLPass(visibleCanvas);
-        } catch (e){
-          this._glPass = null;
+          this._glPass = new WebGLPass(canvas);
+        } catch(e){
           this._glFailed = true;
         }
       }
-
-      if (this._glPass){
-        const fxOn = !!this.enabled;
-
-        // --- Динамика от состояния (low HP / сытость / события) ---
-        const st = (this._view && this._view.state) ? this._view.state : null;
-        const org = getActiveOrg(st);
-        const hp01 = normBar(org?.bars?.hp);
-        const food01 = normBar(org?.bars?.food);
-
-        // Хроматика растёт при низком HP + от флэша событий.
-        const baseMult = 1.0 + (1.0 - hp01) * 1.25;
-        // флэш затухает
-        this._chromaFlash = Math.max(0, this._chromaFlash - 0.05);
-        const chromaMult = baseMult * (1.0 + this._chromaFlash);
-
-        // glow мягче при высокой сытости
-        const glowStrength = computeGlowStrength({
-          strength: this.glowStrength,
-          foodSoftening: this.glowFoodSoftening,
-        }, food01);
-
-        // warp усиливается при низком HP
-        const warpPx = computeWarpPx({ warpPx: this.warpPx, hpExtra: this.warpHpExtra }, hp01);
-
-        const ripples = buildRippleUniforms(this._view || {});
-
-        // ------------------------------
-        // ПСИХОДЕЛИЧНАЯ "РАСКАЧКА" ОТ ЧАСТЫХ КЛИКОВ
-        //
-        // В ripples.js мы копим scalar rippleColorEnergy:
-        // - каждый клик добавляет энергию
-        // - энергия плавно затухает по времени
-        //
-        // Здесь мы используем эту энергию как *дополнительный* множитель
-        // для цветовых пост-эффектов. Это даёт ощущение:
-        // "чем чаще кликаешь — тем сильнее уезжает тон/цветность".
-        //
-        // Важно: это усиление сейчас глобальное (на весь кадр), потому что
-        // шейдер webgl_pass.js пока не умеет локально крутить hue именно
-        // в зоне волны. Зато эффект заметен сразу и настраивается одним числом.
-        const clickEnergy = getRippleColorEnergy(this._view || {}); // 0..~2.2
-        const clickK = Math.max(0, Math.min(1, clickEnergy / 1.2)); // нормируем в 0..1
-
-        // Превращаем "clickK" в реальные параметры эффектов.
-        // Тюнить можно безопасно: это всё view-only.
-        const chromaMultFx = chromaMult * (1.0 + clickK * 0.45);
-        const chromaticPxFx = this.chromaticPx + clickK * 1.40;
-        const glowStrengthFx = glowStrength * (1.0 + clickK * 0.18);
-        const overlayFx = computeOverlay({ overlay: this.overlay }) + clickK * 0.070;
-        const grainFx = computeGrain({ grain: this.grain }) + clickK * 0.004;
-
-        const ok = this._glPass.render(this._scene, {
-          barrelK: fxOn ? this.barrelK : 0.0,
-          barrelExp: this.barrelExp,
-          chromaticPx: fxOn ? chromaticPxFx : 0.0,
-          chromaMult: fxOn ? chromaMultFx : 1.0,
-          vignette: fxOn ? this.vignette : 0.0,
-          smooth: fxOn ? this.smooth : 0.0,
-          centerX: this.centerX,
-          centerY: this.centerY,
-
-          // Ghosting
-          ghostAlpha: fxOn ? computeGhostAlpha({
-            ghostAlpha: this.ghostAlpha,
-            ghostAlphaMovingExtra: this.ghostAlphaMovingExtra,
-          }, 0) : 0.0,
-
-          // Ripples / blasts
-          ripples: fxOn ? ripples : new Float32Array(6*4),
-
-          // Warp
-          warpPx: fxOn ? warpPx : 0.0,
-          warpScale: this.warpScale,
-          warpSpeed: this.warpSpeed,
-
-          // Glow
-          glowStrength: fxOn ? glowStrengthFx : 0.0,
-          glowThreshold: this.glowThreshold,
-          glowCurve: this.glowCurve,
-          glowRadiusPx: this.glowRadiusPx,
-
-          // Overlay / grain
-          grain: fxOn ? grainFx : 0.0,
-          grainSpeed: computeGrainSpeed({ grainSpeed: this.grainSpeed }),
-          overlay: fxOn ? overlayFx : 0.0,
-
-          // Time
-          time: (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000,
-        });
+      if (this._glPass && !this._glFailed && typeof this._glPass.blit === "function"){
+        const ok = this._glPass.blit(this._scene);
         if (ok) return;
-        // If it failed at runtime (context lost etc) fall back.
+        this._glFailed = true;
+      }
+      return;
+    }
+
+    if (!this._glPass && !this._glFailed){
+      try {
+        this._glPass = new WebGLPass(canvas);
+      } catch(e){
         this._glFailed = true;
       }
     }
 
-    // Fallback: 2D blit, full-quality.
-    const ctx = visibleCanvas.getContext("2d");
+    if (this._glPass && !this._glFailed){
+
+      const fxOn = !!this.enabled;
+      const f = this.fxEnabled || {};
+      const on = (k)=> (fxOn && f[k] !== false);
+
+      const ripples = buildRippleUniforms(this._view || {});
+
+      const ok = this._glPass.render(this._scene, {
+
+        barrelK: on("barrel") ? this.barrelK : 0.0,
+        barrelExp: this.barrelExp,
+
+        chromaticPx: on("chroma") ? this.chromaticPx : 0.0,
+        chromaMult: on("chroma") ? 1.0 : 1.0,
+
+        vignette: fxOn ? this.vignette : 0.0,
+        smooth: fxOn ? this.smooth : 0.0,
+        centerX: this.centerX,
+        centerY: this.centerY,
+
+        ghostAlpha: on("ghosting")
+          ? computeGhostAlpha({
+              ghostAlpha: this.ghostAlpha,
+              ghostAlphaMovingExtra: this.ghostAlphaMovingExtra
+            }, 0)
+          : 0.0,
+
+        ripples: on("ripples")
+          ? ripples
+          : (FxPipeline.ZERO_RIPPLES || (FxPipeline.ZERO_RIPPLES = new Float32Array(6*4))),
+
+        ringWidth: this.ringWidth,
+
+        // Локальная подсветка в кольце ripple (вместо hue-shift)
+        ringBrightness: (on("ripples") && on("rippleColor")) ? this.ringBrightness : 0.0,
+        rippleFade: this.rippleFade,
+
+
+        warpPx: on("warp") ? this.warpPx : 0.0,
+        warpScale: this.warpScale,
+        warpSpeed: this.warpSpeed,
+
+        glowStrength: on("glow") ? this.glowStrength : 0.0,
+        glowRadiusPx: this.glowRadiusPx,
+        glowBgLumaCut: this.glowBgLumaCut,
+        glowBand1: this.glowBand1,
+        glowBand2: this.glowBand2,
+        glowW1: this.glowW1,
+        glowW2: this.glowW2,
+        glowW3: this.glowW3,
+        glowSoft: this.glowSoft,
+
+        grain: on("grain") ? computeGrain({grain:this.grain}) : 0.0,
+        grainSpeed: computeGrainSpeed({grainSpeed:this.grainSpeed}),
+        overlay: on("overlay") ? computeOverlay({overlay:this.overlay}) : 0.0,
+
+        time: performance.now()/1000
+      });
+
+      if (ok) return;
+      this._glFailed = true;
+    }
+
+    // fallback
+    const ctx = canvas.getContext("2d");
     ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(this._scene, 0, 0);
+    ctx.clearRect(0,0,this._w,this._h);
+    ctx.drawImage(this._scene,0,0);
   }
 }
 
-// Singleton per view (so each play session keeps its buffers).
 export function getFxPipeline(view, canvas){
-  if (!view) return new FxPipeline();
-  if (!view._fxPipeline) view._fxPipeline = new FxPipeline();
+  if (!view._fxPipeline)
+    view._fxPipeline = new FxPipeline();
 
-  const fxCfg = view.fx;
   const fx = view._fxPipeline;
   fx._view = view;
-
-  if (fxCfg && typeof fxCfg === "object"){
-    if (typeof fxCfg.enabled === "boolean") fx.enabled = fxCfg.enabled;
-    if (Number.isFinite(fxCfg.barrelK)) fx.barrelK = fxCfg.barrelK;
-    if (Number.isFinite(fxCfg.barrelExp)) fx.barrelExp = fxCfg.barrelExp;
-    if (Number.isFinite(fxCfg.chromaticPx)) fx.chromaticPx = fxCfg.chromaticPx;
-    if (Number.isFinite(fxCfg.vignette)) fx.vignette = fxCfg.vignette;
-    if (Number.isFinite(fxCfg.smooth)) fx.smooth = fxCfg.smooth;
-    if (Number.isFinite(fxCfg.centerX)) fx.centerX = fxCfg.centerX;
-    if (Number.isFinite(fxCfg.centerY)) fx.centerY = fxCfg.centerY;
-
-    // Доп. настройки: можно задавать в view.fx.*
-    if (Number.isFinite(fxCfg.ghostAlpha)) fx.ghostAlpha = fxCfg.ghostAlpha;
-    if (Number.isFinite(fxCfg.ghostAlphaMovingExtra)) fx.ghostAlphaMovingExtra = fxCfg.ghostAlphaMovingExtra;
-
-    if (Number.isFinite(fxCfg.glowStrength)) fx.glowStrength = fxCfg.glowStrength;
-    if (Number.isFinite(fxCfg.glowThreshold)) fx.glowThreshold = fxCfg.glowThreshold;
-    if (Number.isFinite(fxCfg.glowCurve)) fx.glowCurve = fxCfg.glowCurve;
-    if (Number.isFinite(fxCfg.glowRadiusPx)) fx.glowRadiusPx = fxCfg.glowRadiusPx;
-    if (Number.isFinite(fxCfg.glowFoodSoftening)) fx.glowFoodSoftening = fxCfg.glowFoodSoftening;
-
-    if (Number.isFinite(fxCfg.warpPx)) fx.warpPx = fxCfg.warpPx;
-    if (Number.isFinite(fxCfg.warpSpeed)) fx.warpSpeed = fxCfg.warpSpeed;
-    if (Number.isFinite(fxCfg.warpScale)) fx.warpScale = fxCfg.warpScale;
-    if (Number.isFinite(fxCfg.warpHpExtra)) fx.warpHpExtra = fxCfg.warpHpExtra;
-
-    if (Number.isFinite(fxCfg.grain)) fx.grain = fxCfg.grain;
-    if (Number.isFinite(fxCfg.grainSpeed)) fx.grainSpeed = fxCfg.grainSpeed;
-    if (Number.isFinite(fxCfg.overlay)) fx.overlay = fxCfg.overlay;
-  }
-
   fx.ensureSize(canvas.width, canvas.height);
   return fx;
-}
-
-// -------------------- helpers --------------------
-
-function normBar(v){
-  // BAR_MAX = 1.4, но сюда не тащим импорт: нормируем примерно.
-  if (!Number.isFinite(v)) return 1;
-  const x = Math.max(0, Math.min(1.4, v));
-  return x / 1.4;
-}
-
-function getActiveOrg(state){
-  if (!state) return null;
-  const a = state.active;
-  if (a === -1 || a === undefined || a === null) return state;
-  if (Array.isArray(state.buds)) return state.buds[a] || state;
-  return state;
-}
-
-// View-side: считываем свежие лог-сообщения и рождаем FX-события (shock/blast).
-// Вызывается из main/render через getFxPipeline(...) (мы уже сохранили ссылку на view в fx._view).
-export function consumeLogFx(view){
-  if (!view || !view.state) return;
-  view._fxRuntime = view._fxRuntime || {};
-  const rt = view._fxRuntime;
-  const log = Array.isArray(view.state.log) ? view.state.log : [];
-  const last = Number.isFinite(rt._lastLogLen) ? rt._lastLogLen : 0;
-  if (log.length <= last){ rt._lastLogLen = log.length; return; }
-  for (let i = last; i < log.length; i++){
-    const e = log[i];
-    const kind = e?.kind;
-    if (kind === "mut_ok"){
-      // Мутация/рост: короткий shockwave + чуть усилить хроматику
-      addRipple(view, 0.5, 0.5, RIPPLE_KIND.SHOCK);
-      if (view._fxPipeline) view._fxPipeline._chromaFlash = Math.min(1.25, (view._fxPipeline._chromaFlash||0) + 0.35);
-    } else if (kind === "care"){
-      // Поднятие статов: маленький shockwave
-      addRipple(view, 0.5, 0.5, RIPPLE_KIND.SHOCK);
-      if (view._fxPipeline) view._fxPipeline._chromaFlash = Math.min(1.0, (view._fxPipeline._chromaFlash||0) + 0.18);
-    } else if (kind === "bud_ok"){
-      // Почкование: radial blast
-      addRipple(view, 0.5, 0.5, RIPPLE_KIND.BLAST);
-      if (view._fxPipeline) view._fxPipeline._chromaFlash = Math.min(1.35, (view._fxPipeline._chromaFlash||0) + 0.45);
-    }
-  }
-  rt._lastLogLen = log.length;
 }

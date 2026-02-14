@@ -3,6 +3,7 @@ import { pushLog, MAX_DEBUG_LOG } from "./log.js";
 import { saveGame, deleteSave, actOn } from "./state.js";
 import { extractGenome, encodeGenome } from "./mods/merge.js";
 import { applySymbiosisMerge } from "./state_mutation.js";
+import { getFxPipeline } from "./FX/pipeline.js";
 
 function getActiveOrg(state){
   // Selection model:
@@ -167,9 +168,11 @@ export function attachSettings(view, els, toast){
       els.lenPrio.value = String(Math.round(clamp(lp, 0, 1) * 100));
     }
 
+    // FX toggle: when opening settings we only reflect current state into UI.
+    // Do NOT apply anything here; actual apply happens on Save.
     if (els.fxEnabled){
-      const en = state.settings?.fxEnabled;
-      els.fxEnabled.checked = (en !== false);
+      const cur = (state.settings?.fxEnabled !== false);
+      els.fxEnabled.checked = !!cur;
     }
 
     if (els.planInfo){
@@ -201,9 +204,9 @@ export function attachSettings(view, els, toast){
     if (els.fxEnabled){
       const en = !!els.fxEnabled.checked;
       view.state.settings.fxEnabled = en;
-      // Apply immediately (view-only)
-      view.fx = view.fx || {};
-      view.fx.enabled = en;
+      // Apply immediately (real master switch)
+      const fx = getFxPipeline(view, view.canvas);
+      fx.enabled = en;
     }
     // seed is informational (readonly) — do not apply changes
     if (els.carrotsInput){

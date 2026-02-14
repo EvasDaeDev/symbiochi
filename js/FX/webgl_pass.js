@@ -1,16 +1,20 @@
 // js/FX/webgl_pass.js
 // WebGL fullscreen post-process pipeline (single shader pass into an offscreen FBO + blit).
 //
-// Эффекты (всё в WebGL, view-only):
+// ОСТАВЛЕНО (view-only):
 //  - Barrel distortion (CRT-ish)
-//  - Chromatic aberration (динамическая: low HP / флэш от мутаций)
-//  - Ghosting/afterimage (mix с предыдущим финальным кадром)
-//  - Jelly distortion: ripples + shockwave + radial blast (клик / мутация / почкование)
-//  - Нелинейный glow (дешёвый pseudo-bloom)
+//  - Chromatic aberration
+//  - Jelly distortion: ripples + shockwave + radial blast
+//  - Ripple ring brightness (локальная подсветка по кольцу)
 //  - Perlin/FBM warp (лёгкое "плавание" фона)
-//  - Аккуратный overlay + grain
+//  - Vignette
 //
-// Важно: этот слой НЕ изменяет state. Он получает параметры извне.
+// УБРАНО ИЗ ШЕЙДЕРА И ИЗ РАСЧЁТА:
+//  - Ghosting/afterimage
+//  - Glow
+//  - Grain
+//  - Overlay
+//  - Smooth/AA
 
 function compileShader(gl, type, src){
   const sh = gl.createShader(type);
@@ -72,14 +76,13 @@ const VS_SRC = `
 // Fragment shader:
 // - barrel distortion (with aspect compensation)
 // - chromatic aberration (radial RGB sampling)
-// - subtle vignette
-// - simple AA: tiny neighbor blend (helps smooth distortion edges)
+// - ripples + ring brightness
+// - warp + vignette
 const FS_SRC = `
   precision mediump float;
   varying vec2 vUV;
 
   uniform sampler2D uScene;   // текущий Canvas2D кадр
-  uniform sampler2D uPrev;    // предыдущий финальный кадр (для ghosting)
   uniform vec2 uRes;
   uniform vec2 uCenter;
   uniform float uAspect;
@@ -91,38 +94,33 @@ const FS_SRC = `
   uniform float uChromaPx;     // базовая сила (в пикселях)
   uniform float uChromaMult;   // динамический множитель (low HP + всплески)
 
-  // Виньетка + лёгкое сглаживание
+  // Виньетка
   uniform float uVignette;
-  uniform float uSmooth;
-
-  // Ghosting
-  uniform float uGhostAlpha;
 
   // Jelly distortion / волны
   #define MAX_RIPPLES 6
   uniform vec4 uRipples[MAX_RIPPLES];
+
+  // -------------------------------------------------
+  // ЛОКАЛЬНАЯ ПОДСВЕТКА ОТ RIPPLE (по кольцу)
+  // uRingWidth: толщина кольца (UV 0..1). Чем больше — тем шире.
+  // uRingBrightness: +яркость в кольце (0.10 = +10%).
+  // uRippleFade: множитель затухания всей волны (1.0 = как было; 1.5 быстрее; 0.7 медленнее).
+  // -------------------------------------------------
+  uniform float uRingWidth;
+  uniform float uRingBrightness;
+  uniform float uRingSaturation;
+  uniform float uRippleFade;
 
   // Warp ("плывущий" фон)
   uniform float uWarpPx;
   uniform float uWarpScale;
   uniform float uWarpSpeed;
 
-  // Glow
-  uniform float uGlowStrength;
-  uniform float uGlowThreshold;
-  uniform float uGlowCurve;
-  uniform float uGlowRadiusPx;
-
-  // Overlay + grain
-  uniform float uGrain;
-  uniform float uGrainSpeed;
-  uniform float uOverlay;
-
   uniform float uTime; // секунды
 
   // ---------- Noise helpers ----------
   float hash12(vec2 p){
-    // дешёвый хэш (без texture noise)
     vec3 p3  = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
@@ -131,7 +129,6 @@ const FS_SRC = `
   float noise2(vec2 p){
     vec2 i = floor(p);
     vec2 f = fract(p);
-    // smoothstep
     f = f*f*(3.0 - 2.0*f);
     float a = hash12(i + vec2(0.0,0.0));
     float b = hash12(i + vec2(1.0,0.0));
@@ -149,6 +146,13 @@ const FS_SRC = `
       a *= 0.5;
     }
     return v;
+  }
+
+  // Hue-preserving highlight compression:
+  // If any channel goes above 1.0, normalize by max channel.
+  vec3 compressHighlights(vec3 c){
+    float m = max(max(c.r, c.g), c.b);
+    return (m > 1.0) ? (c / m) : c;
   }
 
   // ---------- Barrel (как раньше) ----------
@@ -192,10 +196,14 @@ const FS_SRC = `
       float dist = length(d);
       vec2 dir = (dist > 1e-4) ? (d / dist) : vec2(0.0);
 
+      // Ограничение влияния по радиусу (чтобы волна не работала на весь экран)
+      float maxRadius = 0.45;
+      float radialFade = 1.0 - smoothstep(maxRadius * 0.8, maxRadius, dist);
+
       // Параметры по типу (всё эмпирически, правится легко):
       float ampPx = 3.0;
       float freq = 26.0;
-      float speed = 6.0;
+      float speed = 16.0;
       float decay = 2.2;
       if (kind > 1.5){
         // BLAST
@@ -211,21 +219,21 @@ const FS_SRC = `
         decay = 2.8;
       }
 
-      float env = exp(-age * decay);
+      // Общее затухание волны: decay (по типу) * uRippleFade (глобальный множитель)
+      float env = exp(-age * decay * max(0.001, uRippleFade));
 
       // Для SHOCK/BLAST делаем "кольцо" (ударная волна), для TAP — обычную синусоиду.
       float wave;
       if (kind > 0.5){
         float ringR = age * 0.35;      // радиус кольца в UV (примерно)
-        float band = 0.06;            // толщина кольца
+        float band = max(0.001, uRingWidth); // толщина кольца (настраиваемая)
         float ring = 1.0 - smoothstep(0.0, band, abs(dist - ringR));
         wave = ring * sin(dist * freq - age * speed);
       } else {
         wave = sin(dist * freq - age * speed);
       }
 
-      vec2 px = (ampPx * env * wave) / uRes;
-      // dir сейчас в aspect-space: x уже *aspect. Возвращаем в UV-space.
+      vec2 px = (ampPx * env * wave * radialFade) / uRes;
       vec2 dirUV = vec2(dir.x / uAspect, dir.y);
       off += dirUV * px;
     }
@@ -251,51 +259,9 @@ const FS_SRC = `
     return vec3(rC, gC, bC);
   }
 
-  // ---------- Glow (pseudo-bloom) ----------
-  float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
-
-  vec3 glowAround(vec2 uv){
-    if (uGlowStrength <= 0.001) return vec3(0.0);
-    vec2 tpx = 1.0 / uRes;
-    vec2 rpx = (uGlowRadiusPx) * tpx;
-
-    // 8 соседей + центр
-    vec3 c0 = texture2D(uScene, uv).rgb;
-    vec3 c1 = texture2D(uScene, uv + vec2( rpx.x, 0.0)).rgb;
-    vec3 c2 = texture2D(uScene, uv + vec2(-rpx.x, 0.0)).rgb;
-    vec3 c3 = texture2D(uScene, uv + vec2(0.0,  rpx.y)).rgb;
-    vec3 c4 = texture2D(uScene, uv + vec2(0.0, -rpx.y)).rgb;
-    vec3 c5 = texture2D(uScene, uv + vec2( rpx.x,  rpx.y)).rgb;
-    vec3 c6 = texture2D(uScene, uv + vec2(-rpx.x,  rpx.y)).rgb;
-    vec3 c7 = texture2D(uScene, uv + vec2( rpx.x, -rpx.y)).rgb;
-    vec3 c8 = texture2D(uScene, uv + vec2(-rpx.x, -rpx.y)).rgb;
-
-    vec3 avg = (c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8) / 9.0;
-
-    // нелинейная маска по яркости
-    float m = smoothstep(uGlowThreshold, 1.0, luma(c0));
-    m = pow(m, uGlowCurve);
-    return avg * (uGlowStrength * m);
-  }
-
-  // ---------- Overlay / grain ----------
-  vec3 applyOverlay(vec2 uv, vec3 col){
-    if (uGrain > 0.001){
-      float g = (hash12(uv * uRes + uTime * uGrainSpeed) - 0.5) * 2.0;
-      col += g * uGrain;
-    }
-    if (uOverlay > 0.001){
-      // мягкий "цветной" overlay на основе шума
-      float n = fbm((uv - uCenter) * 2.0 + vec2(uTime*0.08, -uTime*0.06));
-      vec3 tint = vec3(0.6 + 0.4*n, 0.55, 0.7 - 0.4*n);
-      col = mix(col, col * tint, uOverlay);
-    }
-    return col;
-  }
-
   void main(){
     // Порядок:
-    // 1) barrel -> 2) warp -> 3) ripples -> 4) sampleRGB -> 5) glow -> 6) AA/vignette -> 7) ghost -> 8) overlay/grain
+    // 1) barrel -> 2) warp -> 3) ripples -> 4) sampleRGB -> 5) ring brightness -> 6) vignette
 
     vec2 uv = barrel(vUV);
     uv = applyWarp(uv);
@@ -307,21 +273,39 @@ const FS_SRC = `
     }
 
     vec3 col = sampleRGB(uv);
-    col += glowAround(uv);
 
-    // лёгкое сглаживание по краям
-    if (uSmooth > 0.001){
-      vec2 tpx = 1.0 / uRes;
-      vec3 n1 = sampleRGB(uv + vec2(tpx.x, 0.0));
-      vec3 n2 = sampleRGB(uv - vec2(tpx.x, 0.0));
-      vec3 n3 = sampleRGB(uv + vec2(0.0, tpx.y));
-      vec3 n4 = sampleRGB(uv - vec2(0.0, tpx.y));
-      vec3 avg = (n1 + n2 + n3 + n4) * 0.25;
-      vec2 dd = vUV - uCenter;
-      dd.x *= uAspect;
-      float rn = clamp(length(dd) / max(1e-4, uCornerR), 0.0, 1.0);
-      float edge = smoothstep(0.15, 1.0, pow(rn, 1.4));
-      col = mix(col, avg, uSmooth * edge);
+    // -------------------------------------------------
+    // ЛОКАЛЬНАЯ ПОДСВЕТКА В КОЛЬЦЕ RIPPLE
+    // -------------------------------------------------
+    float ringMask = 0.0;
+    for (int i=0; i<MAX_RIPPLES; i++){
+      vec4 r = uRipples[i];
+      float age = r.z;
+      if (age <= 0.0001) continue;
+      vec2 d = vUV - r.xy;
+      d.x *= uAspect;
+      float dist = length(d);
+      float ringR = age * 0.35;
+      float band = max(0.001, uRingWidth);
+      float m = 1.0 - smoothstep(0.0, band, abs(dist - ringR));
+      float fade = exp(-age * max(0.001, uRippleFade));
+      ringMask = max(ringMask, m * fade);
+    }
+
+    if (ringMask > 0.001){
+      float b = (uRingBrightness > 0.00001) ? (uRingBrightness * ringMask) : 0.0;
+      float s = (uRingSaturation > 0.00001) ? (uRingSaturation * ringMask) : 0.0;
+
+      if (b > 0.0){
+        col *= (1.0 + b);
+      }
+      if (s > 0.0){
+        // Saturation boost without whitening: scale chroma around luminance
+        float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+        vec3 gray = vec3(lum);
+        col = gray + (col - gray) * (1.0 + s);
+      }
+      col = compressHighlights(col);
     }
 
     // виньетка
@@ -333,13 +317,7 @@ const FS_SRC = `
       col *= v;
     }
 
-    // ghosting: смешиваем с предыдущим финальным кадром
-    if (uGhostAlpha > 0.001){
-      vec3 prev = texture2D(uPrev, vUV).rgb;
-      col = mix(col, prev, uGhostAlpha);
-    }
-
-    col = applyOverlay(vUV, col);
+    col = compressHighlights(col);
     gl_FragColor = vec4(col, 1.0);
   }
 `;
@@ -361,8 +339,6 @@ export class WebGLPass {
     this.prog = null;
     this.buf = null;
     this.tex = null; // uScene
-    this.prevTex = null; // uPrev
-    this._prevFbo = null; // FBO для prevTex (обновляем через рендер, без glCopyTexSubImage2D)
     this._fboA = null;
     this._fboB = null;
     this._texA = null;
@@ -382,9 +358,7 @@ export class WebGLPass {
     if (!gl) return false;
     this.gl = gl;
 
-    // Canvas2D has a top-left origin, but WebGL texture coordinates use (0,0)
-    // at the bottom-left. Flip Y on upload so the final image isn't upside-down.
-    // (Safe to set once; applies to subsequent texImage2D calls.)
+    // Flip Y on upload so the final image isn't upside-down.
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
 
     try {
@@ -412,28 +386,13 @@ export class WebGLPass {
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    // LINEAR makes distortion look smooth.
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    // Предыдущий финальный кадр (ghosting)
-    this.prevTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.prevTex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    // FBO под prevTex: так мы можем копировать финальный кадр через обычный рендер-проход.
-    // Это надёжнее, чем glCopyTexSubImage2D: на некоторых платформах default framebuffer может быть RGB (без альфы)
-    // и тогда copyTexSubImage2D в RGBA текстуру даёт GL_INVALID_OPERATION.
-    this._prevFbo = gl.createFramebuffer();
 
     // Uniform/attrib locations
     this._loc = {
       aPos: gl.getAttribLocation(this.prog, "aPos"),
       uScene: gl.getUniformLocation(this.prog, "uScene"),
-      uPrev: gl.getUniformLocation(this.prog, "uPrev"),
       uRes: gl.getUniformLocation(this.prog, "uRes"),
       uCenter: gl.getUniformLocation(this.prog, "uCenter"),
       uAspect: gl.getUniformLocation(this.prog, "uAspect"),
@@ -443,19 +402,14 @@ export class WebGLPass {
       uChromaPx: gl.getUniformLocation(this.prog, "uChromaPx"),
       uChromaMult: gl.getUniformLocation(this.prog, "uChromaMult"),
       uVignette: gl.getUniformLocation(this.prog, "uVignette"),
-      uSmooth: gl.getUniformLocation(this.prog, "uSmooth"),
-      uGhostAlpha: gl.getUniformLocation(this.prog, "uGhostAlpha"),
       uRipples: gl.getUniformLocation(this.prog, "uRipples"),
+      uRingWidth: gl.getUniformLocation(this.prog, "uRingWidth"),
+      uRingBrightness: gl.getUniformLocation(this.prog, "uRingBrightness"),
+      uRingSaturation: gl.getUniformLocation(this.prog, "uRingSaturation"),
+      uRippleFade: gl.getUniformLocation(this.prog, "uRippleFade"),
       uWarpPx: gl.getUniformLocation(this.prog, "uWarpPx"),
       uWarpScale: gl.getUniformLocation(this.prog, "uWarpScale"),
       uWarpSpeed: gl.getUniformLocation(this.prog, "uWarpSpeed"),
-      uGlowStrength: gl.getUniformLocation(this.prog, "uGlowStrength"),
-      uGlowThreshold: gl.getUniformLocation(this.prog, "uGlowThreshold"),
-      uGlowCurve: gl.getUniformLocation(this.prog, "uGlowCurve"),
-      uGlowRadiusPx: gl.getUniformLocation(this.prog, "uGlowRadiusPx"),
-      uGrain: gl.getUniformLocation(this.prog, "uGrain"),
-      uGrainSpeed: gl.getUniformLocation(this.prog, "uGrainSpeed"),
-      uOverlay: gl.getUniformLocation(this.prog, "uOverlay"),
       uTime: gl.getUniformLocation(this.prog, "uTime"),
     };
 
@@ -477,8 +431,6 @@ export class WebGLPass {
     this._h = h;
     if (this.gl){
       this.gl.viewport(0, 0, w, h);
-
-      // (Пере)создаём ping-pong текстуры для вывода
       this._allocPingPong(w, h);
     }
   }
@@ -505,7 +457,6 @@ export class WebGLPass {
       return f;
     };
 
-    // Удаляем старые
     const delTex = (t)=>{ try{ if (t) gl.deleteTexture(t); }catch(_e){} };
     const delFbo = (f)=>{ try{ if (f) gl.deleteFramebuffer(f); }catch(_e){} };
     delFbo(this._fboA); delFbo(this._fboB);
@@ -516,19 +467,6 @@ export class WebGLPass {
     this._fboA = makeFbo(this._texA);
     this._fboB = makeFbo(this._texB);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-    // И prevTex тоже выделяем, чтобы ghosting не читал "пустоту"
-    gl.bindTexture(gl.TEXTURE_2D, this.prevTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-
-    // Привязываем prevTex к отдельному framebuffer.
-    // Дальше, в конце render(), мы будем рендерить outTex -> prevTex через blit-программу.
-    // Это кросс-платформенно и не зависит от формата default framebuffer.
-    if (this._prevFbo){
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this._prevFbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.prevTex, 0);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
   }
 
   render(srcCanvas, params){
@@ -563,20 +501,13 @@ export class WebGLPass {
 
     // 3) Основной FX шейдер (в FBO)
     gl.useProgram(this.prog);
-
     gl.uniform1i(this._loc.uScene, 0);
 
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.prevTex);
-    gl.uniform1i(this._loc.uPrev, 1);
-
-    // Uniforms
     const k = params.barrelK;
     const exp = params.barrelExp;
     const chroma = params.chromaticPx;
     const chromaMult = params.chromaMult;
     const vignette = params.vignette;
-    const smooth = params.smooth;
     const cx = params.centerX;
     const cy = params.centerY;
     const aspect = w / Math.max(1, h);
@@ -591,27 +522,22 @@ export class WebGLPass {
     gl.uniform1f(this._loc.uChromaPx, chroma);
     gl.uniform1f(this._loc.uChromaMult, chromaMult);
     gl.uniform1f(this._loc.uVignette, vignette);
-    gl.uniform1f(this._loc.uSmooth, smooth);
-
-    gl.uniform1f(this._loc.uGhostAlpha, params.ghostAlpha || 0.0);
 
     // Ripples array
     if (this._loc.uRipples && params.ripples instanceof Float32Array){
       gl.uniform4fv(this._loc.uRipples, params.ripples);
     }
 
+    // Ring brightness + fade
+    if (this._loc.uRingWidth)       gl.uniform1f(this._loc.uRingWidth, (params.ringWidth ?? 0.06));
+    if (this._loc.uRingBrightness)  gl.uniform1f(this._loc.uRingBrightness, (params.ringBrightness ?? 0.10));
+    if (this._loc.uRingSaturation)  gl.uniform1f(this._loc.uRingSaturation, (params.ringSaturation ?? 0.20));
+    if (this._loc.uRippleFade)      gl.uniform1f(this._loc.uRippleFade, (params.rippleFade ?? 1.0));
+
     gl.uniform1f(this._loc.uWarpPx, params.warpPx || 0.0);
     gl.uniform1f(this._loc.uWarpScale, params.warpScale || 1.0);
     gl.uniform1f(this._loc.uWarpSpeed, params.warpSpeed || 0.0);
 
-    gl.uniform1f(this._loc.uGlowStrength, params.glowStrength || 0.0);
-    gl.uniform1f(this._loc.uGlowThreshold, params.glowThreshold || 0.0);
-    gl.uniform1f(this._loc.uGlowCurve, params.glowCurve || 1.0);
-    gl.uniform1f(this._loc.uGlowRadiusPx, params.glowRadiusPx || 1.0);
-
-    gl.uniform1f(this._loc.uGrain, params.grain || 0.0);
-    gl.uniform1f(this._loc.uGrainSpeed, params.grainSpeed || 1.0);
-    gl.uniform1f(this._loc.uOverlay, params.overlay || 0.0);
     gl.uniform1f(this._loc.uTime, params.time || 0.0);
 
     // Draw quad
@@ -633,28 +559,39 @@ export class WebGLPass {
     gl.vertexAttribPointer(this._locBlit.aPos, 2, gl.FLOAT, false, 0, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // 5) Кладём outTex в prevTex (для ghosting в следующем кадре)
-    // ВАЖНО: НЕ используем glCopyTexSubImage2D.
-    // На некоторых платформах default framebuffer создаётся в RGB565 (без альфы),
-    // и копирование в RGBA-текстуру приводит к GL_INVALID_OPERATION.
-    // Поэтому делаем обычный blit в отдельный FBO, привязанный к prevTex.
-    if (this._prevFbo){
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this._prevFbo);
-      gl.viewport(0, 0, w, h);
-      gl.useProgram(this._progBlit);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, outTex);
-      gl.uniform1i(this._locBlit.uTex, 0);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
-      gl.enableVertexAttribArray(this._locBlit.aPos);
-      gl.vertexAttribPointer(this._locBlit.aPos, 2, gl.FLOAT, false, 0, 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
-
     // swap ping-pong
     this._useA = !this._useA;
+    return true;
+  }
+
+  // Fast path: just blit srcCanvas to the screen with WebGL.
+  blit(srcCanvas){
+    if (!this.isOk){
+      if (!this.init()) return false;
+    }
+    const gl = this.gl;
+    if (!gl) return false;
+
+    const w = (this.canvas.width|0);
+    const h = (this.canvas.height|0);
+    this.ensureSize(w, h);
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCanvas);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(this._progBlit);
+    gl.uniform1i(this._locBlit.uTex, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
+    gl.enableVertexAttribArray(this._locBlit.aPos);
+    gl.vertexAttribPointer(this._locBlit.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
     return true;
   }
 }
