@@ -238,113 +238,11 @@ export function getOrgMotion(view, orgId){
     gait: null,
     breathMul: 1,
 
-    // Tilt/gyro drift runtime fields
-    driftVx: 0,
-    driftVy: 0,
-    driftAccX: 0,
-    driftAccY: 0,
-
     // NEW: start distance of this move (Chebyshev), used to freeze turning in the final half.
     startDist: 0,
   };
   view.moving.org[k] = init;
   return init;
-}
-
-// "Field tilt" drift for ALL organisms.
-// - Applies via normal gait steps (shiftOrgCells at gait end),
-//   so carrots/coins/collisions stay consistent AND position persists in save.
-// - Direction is quantized to dir16.
-// - Speed depends on tilt magnitude AND organism size.
-export function tickTiltDrift(view, state, dtSec){
-  ensureMoving(view);
-  if (!view || !state) return;
-  const dt = Math.max(0, dtSec || 0);
-  if (dt <= 0) return;
-
-  const tilt = view.tilt || null;
-  const tx = tilt && Number.isFinite(tilt.x) ? tilt.x : 0;
-  const ty = tilt && Number.isFinite(tilt.y) ? tilt.y : 0;
-
-  const mag = Math.min(1, Math.hypot(tx, ty));
-  // Smooth, non-linear response (soft start/stop)
-  const ease = mag * mag * (3 - 2 * mag); // smoothstep
-  const wantDir16 = (mag > 1e-6) ? vecToDir16(tx, ty) : null;
-
-  // Global speed limits (blocks/sec)
-  const MIN_S = 0.5; // 1 block / 2 sec
-  const MAX_S = 5.0; // 5 blocks / sec
-
-  // Size mapping: small => faster, big => slower (log-scale)
-  const SIZE_FAST = 12;
-  const SIZE_SLOW = 1000;
-  const logA = Math.log(Math.max(2, SIZE_FAST));
-  const logB = Math.log(Math.max(3, SIZE_SLOW));
-  const inv = 1 / Math.max(1e-6, (logB - logA));
-
-  const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
-
-  // Velocity smoothing: time constant in seconds.
-  const TAU = 0.18;
-  const a = 1 - Math.exp(-dt / Math.max(1e-6, TAU));
-
-  for (let i = 0; i < orgs.length; i++){
-    const org = orgs[i];
-    if (!org) continue;
-    const orgId = (i === 0) ? 0 : i;
-    const m = getOrgMotion(view, orgId);
-
-    // If this organism is currently doing a "real" move (coin / tap target)
-    // or already in a step gait, don't apply tilt drift.
-    if (m.moving || m.gait || m.targetX != null || m.targetY != null) continue;
-
-    const size = Math.max(1, (org?.body?.cells?.length || 0));
-    const t = Math.min(1, Math.max(0, (Math.log(size) - logA) * inv));
-    const sizeSpeed = MAX_S + (MIN_S - MAX_S) * t; // big => MIN
-    const wantSpeed = sizeSpeed * ease;
-
-    let wantVx = 0;
-    let wantVy = 0;
-    if (wantDir16 !== null){
-      const ang = dir16ToDeg(wantDir16) * Math.PI / 180;
-      wantVx = Math.cos(ang) * wantSpeed;
-      // y grows downward in world coordinates
-      wantVy = -Math.sin(ang) * wantSpeed;
-    }
-
-    m.driftVx = (Number.isFinite(m.driftVx) ? m.driftVx : 0) + (wantVx - (m.driftVx || 0)) * a;
-    m.driftVy = (Number.isFinite(m.driftVy) ? m.driftVy : 0) + (wantVy - (m.driftVy || 0)) * a;
-
-    // Integrate drift in *world* space and apply in whole-block steps.
-    // (Still smooth because render shows the gait as continuous stretching.)
-    m.driftAccX = (Number.isFinite(m.driftAccX) ? m.driftAccX : 0) + m.driftVx * dt;
-    m.driftAccY = (Number.isFinite(m.driftAccY) ? m.driftAccY : 0) + m.driftVy * dt;
-
-    // Apply at most one step per frame per organism.
-    const ax = m.driftAccX;
-    const ay = m.driftAccY;
-    if (Math.abs(ax) < 1 && Math.abs(ay) < 1) continue;
-
-    const d16 = vecToDir16(ax, ay);
-    if (d16 === null) continue;
-    const want8 = chooseMoveDir8FromDir16(ax, ay, (m.headingDir8|0) || 0, d16);
-    if (want8 === null) continue;
-
-    const v = DIR8[want8];
-    const sx = v[0];
-    const sy = v[1];
-
-    // Consume one block from accumulator in the step direction.
-    m.driftAccX -= sx;
-    m.driftAccY -= sy;
-
-    // Step duration from speed (blocks/sec). Clamp to keep stretch visible.
-    const spd = Math.max(0.01, Math.hypot(m.driftVx, m.driftVy));
-    let dur = 1 / spd;
-    dur = Math.max(0.12, Math.min(0.60, dur));
-
-    m.gait = { dx: sx, dy: sy, dist: 1, t: 0, dur, dir8: want8 };
-  }
 }
 
 function getPersistedHeadingDeg(state, orgId){
@@ -560,23 +458,6 @@ const baseStepDur = 1 / speedCellsS;
     const org = getOrgById(state, orgId);
     if (!org) continue;
 
-    // IMPORTANT: gait animation may be used both for "real" moves (to targets)
-    // and for tilt drift (no target, m.moving=false). So we advance gait first.
-    if (m.gait){
-      m.gait.t += dt;
-      if (m.gait.t >= m.gait.dur - 1e-6){
-        const dist = Math.max(1, m.gait.dist || 1);
-        shiftOrgCells(org, m.gait.dx * dist, m.gait.dy * dist);
-        m.gait = null;
-      }
-      // When drifting, we still want to keep persisted heading up to date.
-      if (!m.moving){
-        org.headingDir8 = ((((m.headingDir8|0)%8+8)%8) & 3);
-        org.headingDeg = dir8ToDeg(org.headingDir8);
-      }
-      continue;
-    }
-
     if (!m.moving){
       org.headingDir8 = ((((m.headingDir8|0)%8+8)%8) & 3);
       org.headingDeg = dir8ToDeg(org.headingDir8);
@@ -589,6 +470,16 @@ const baseStepDur = 1 / speedCellsS;
       m.moving = false;
       m.breathMul = 1;
       m.gait = null;
+      continue;
+    }
+
+    if (m.gait){
+      m.gait.t += dt;
+      if (m.gait.t >= m.gait.dur - 1e-6){
+        const dist = Math.max(1, m.gait.dist || 1);
+        shiftOrgCells(org, m.gait.dx * dist, m.gait.dy * dist);
+        m.gait = null;
+      }
       continue;
     }
 

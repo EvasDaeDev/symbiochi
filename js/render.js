@@ -1627,96 +1627,21 @@ function drawGridOverlay(ctx, view, cam){
   ctx.strokeStyle = lineHex;
   ctx.lineWidth = 1;
 
-
-  // Tilt (visual) – use the SAME smoothed values for both:
-  // 1) grid parallax offset and 2) perspective warp,
-  // so they return to neutral synchronously (no snapping).
-  const t = view.tilt || null;
-  const rawVisX = t && Number.isFinite(t.visX) ? t.visX : 0; // -1..+1 (visual)
-  const rawVisY = t && Number.isFinite(t.visY) ? t.visY : 0;
-
-  // Target parallax in *cells* (screen-limited, separate from motion speed).
-  const PAR_STRENGTH = 0.20; // matches earlier behavior
-  const gridW = (view.gridW || 36);
-  const gridH = (view.gridH || 18);
-  const targetParX = -rawVisX * gridW * PAR_STRENGTH;
-  const targetParY = -rawVisY * gridH * PAR_STRENGTH;
-
-  // Smooth parallax/warp state (view-only).
-  // Tau can be controlled externally if you set view.parallaxTauSec.
-  // Otherwise we use a sensible default.
-  const dtSec = Math.min(0.05, Math.max(0.001, ((view.perf && view.perf.smoothedFrame) ? view.perf.smoothedFrame : 16.7) / 1000));
-  const tau = (Number.isFinite(view.parallaxTauSec) ? view.parallaxTauSec : 0.18); // bigger => slower
-  const k = 1 - Math.exp(-dtSec / Math.max(0.001, tau));
-  const gp = (view.__gridPar ||= { x: 0, y: 0 });
-  gp.x += (targetParX - gp.x) * k;
-  gp.y += (targetParY - gp.y) * k;
-
-  // Convert smoothed parallax back into a smoothed tilt (for warp).
-  let visX = -(gp.x / (gridW * PAR_STRENGTH || 1));
-  let visY = -(gp.y / (gridH * PAR_STRENGTH || 1));
-
-  // Deadzone so the grid truly returns to flat and doesn't shimmer on tiny inputs.
-  const DEAD = 0.02;
-  if (Math.abs(visX) < DEAD) visX = 0;
-  if (Math.abs(visY) < DEAD) visY = 0;
-
-  // Clamp to the intended visual max (20%).
-  visX = Math.max(-0.20, Math.min(0.20, visX));
-  visY = Math.max(-0.20, Math.min(0.20, visY));
-
-  // 2D perspective-like warp from *smoothed* tilt (visual only).
-  // Works for ALL directions (left/right/diagonals), not only up/down.
-  // The "far" side (towards the tilt direction) squeezes up to ~10%.
-  const tx = visX;
-  const ty = visY;
-  const kMax = 0.03; // 10% max squeeze
-  const cx = view.rectW * 0.5;
-  const cy = view.rectH * 0.5;
-  const warp = (xPx, yPx)=>{
-    const len = Math.hypot(tx, ty);
-    if (len < 1e-4) return { x: xPx, y: yPx };
-    const nx = tx / len;
-    const ny = ty / len;
-    // across axis (perpendicular)
-    const ax = -ny;
-    const ay =  nx;
-    // normalize point to [-1..1]
-    const px = (xPx - cx) / (view.rectW * 0.5);
-    const py = (yPx - cy) / (view.rectH * 0.5);
-    const along = px * nx + py * ny;
-    const across = px * ax + py * ay;
-    // дальняя сторона (along>0) сужается
-    const depth = Math.max(-1, Math.min(1, along));
-    const factor = 1 - kMax * depth;
-    const across2 = across * factor;
-    const px2 = along * nx + across2 * ax;
-    const py2 = along * ny + across2 * ay;
-    return {
-      x: cx + px2 * (view.rectW * 0.5),
-      y: cy + py2 * (view.rectH * 0.5),
-    };
-  };
-
   for (let wx = startX; wx <= right; wx += step){
-    // Use constant world-y just to get screen-x; apply warp for top/bottom.
     const p = worldToScreenPx(cam, wx, 0, view);
-    const pTop = warp(p.x + 0.5, 0);
-    const pBot = warp(p.x + 0.5, view.rectH);
+    const x = p.x + 0.5;
     ctx.beginPath();
-    ctx.moveTo(pTop.x, pTop.y);
-    ctx.lineTo(pBot.x, pBot.y);
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, view.rectH);
     ctx.stroke();
   }
 
   for (let wy = startY; wy <= bottom; wy += step){
     const p = worldToScreenPx(cam, 0, wy, view);
     const y = p.y + 0.5;
-    const pL = warp(0, y);
-    const pR = warp(view.rectW, y);
     ctx.beginPath();
-    ctx.moveTo(pL.x, pL.y);
-    ctx.lineTo(pR.x, pR.y);
+    ctx.moveTo(0, y);
+    ctx.lineTo(view.rectW, y);
     ctx.stroke();
   }
   ctx.restore();
@@ -1765,17 +1690,10 @@ export function renderGrid(state, canvas, gridEl, view){
   ctx.fillStyle = view._bgGrad.g;
   ctx.fillRect(0, 0, view.rectW, view.rectH);
 
-  // Extra parallax from tilt/gyro (view-only): max ~20% of the visible grid.
-  // This affects ONLY background/grid layers, not organism speed.
-
-  // Use the SAME smoothed tilt values used by warp above (via view.__gridPar).
-  // gp.x/gp.y are in cells; use them directly as the tilt parallax in cam-space.
-  const gp2 = view.__gridPar || { x: 0, y: 0 };
-  const tiltParX = gp2.x;
-  const tiltParY = gp2.y;
+    // Grid parallax: grid follows camera slightly slower than world objects
   const camBg = {
-    ox: (cam.ox || 0) * GRID_PARALLAX + tiltParX,
-    oy: (cam.oy || 0) * GRID_PARALLAX + tiltParY,
+    ox: (cam.ox || 0) * GRID_PARALLAX,
+    oy: (cam.oy || 0) * GRID_PARALLAX,
   };
 
   drawGridOverlay(ctx, view, camBg);
@@ -1871,6 +1789,10 @@ if (Array.isArray(state.coins)){
   const drawOne = (org, orgId, isSel)=>{
     const m = getOrgMotion(view, orgId);
 
+    // Base (persistent) translation in world blocks (used e.g. for buds separation).
+    const dx = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
+    const dy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+
     // Smooth step translation (render-only): while logic moves in whole blocks,
     // gait makes the visual position slide continuously between them.
     const gait = m?.gait || null;
@@ -1881,8 +1803,8 @@ if (Array.isArray(state.coins)){
 
     // Translate in world units (blocks)
     const stepK = gait ? (gaitPhase * gaitDist) : 0; // 0..1 (or 0..2 for dist=2)
-    const tdx = gaitDx * stepK;
-    const tdy = gaitDy * stepK;
+    const tdx = dx + gaitDx * stepK;
+    const tdy = dy + gaitDy * stepK;
 
     const breathMul = Number.isFinite(m?.breathMul) ? m.breathMul : 1;
     const angRad = (Number.isFinite(m?.angleDeg) ? m.angleDeg : 0) * Math.PI / 180;
@@ -1986,14 +1908,17 @@ if (sel && sel.org){
 
     const m = getOrgMotion(view, orgId);
 
+    const dx = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
+    const dy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+
     const gait = m?.gait || null;
     const gaitPhase = gait ? clamp((gait.t || 0) / Math.max(1e-6, (gait.dur || 0.25)), 0, 1) : 0;
     const gaitDx = gait ? (gait.dx || 0) : 0;
     const gaitDy = gait ? (gait.dy || 0) : 0;
     const gaitDist = gait ? Math.max(1, (gait.dist || 1)) : 1;
     const stepK = gait ? (gaitPhase * gaitDist) : 0;
-    const tdx = gaitDx * stepK;
-    const tdy = gaitDy * stepK;
+    const tdx = dx + gaitDx * stepK;
+    const tdy = dy + gaitDy * stepK;
 
     const breathMul = Number.isFinite(m?.breathMul) ? m.breathMul : 1;
     const angRad = (Number.isFinite(m?.angleDeg) ? m.angleDeg : 0) * Math.PI / 180;

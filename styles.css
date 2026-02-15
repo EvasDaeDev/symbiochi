@@ -33,12 +33,9 @@ html, body {
 
 #wrap.wrap2{
   display: grid;
-  /* 2-column layout: game + info. (Debug panel is currently disabled)
-     Using 1fr here makes the wrapper stretch and visually "shift" content. */
-  grid-template-columns: auto 340px;
+  grid-template-columns: auto 1fr 340px;
   gap: 10px;
   align-items: stretch;
-  justify-content: center;
 }
 
 /* Left debug panel */
@@ -320,10 +317,6 @@ html, body {
   place-items: center;
 }
 .iconBtn:hover{ border-color: #345073; }
-.iconBtn.isActive{
-  border-color: #5e86b6;
-  box-shadow: 0 0 0 2px rgba(94,134,182,0.18);
-}
 .iconBtn:active{ transform: translateY(1px); }
 
 .viewportFull{

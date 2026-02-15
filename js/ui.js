@@ -122,26 +122,6 @@ export function attachDebugPanel(view, els){
 }
 
 export function attachSettings(view, els, toast){
-
-  // --- Parallax speed toggle (visual only) ---
-  // Slows down how fast the grid/background reacts to tilt.
-  const PAR_TAU_NORMAL = 0.10;
-  const PAR_TAU_SLOW   = 0.45;
-  function applyParallaxMode(isSlow){
-    if (!view?.tilt) return;
-    view.tilt.parTau = isSlow ? PAR_TAU_SLOW : PAR_TAU_NORMAL;
-    if (view.state){
-      if (!view.state.settings) view.state.settings = {};
-      view.state.settings.parallaxSlow = !!isSlow;
-      // Persist immediately so reload keeps the choice.
-      saveGame(view.state);
-    }
-    if (els.parallaxBtn){
-      els.parallaxBtn.classList.toggle("isActive", !!isSlow);
-      els.parallaxBtn.title = isSlow ? "Параллакс: медленно" : "Параллакс: обычно";
-    }
-  }
-
  function getActiveOrg(state){
     // Selection model:
     // - state.active === -1 OR null/undefined -> parent
@@ -262,17 +242,6 @@ export function attachSettings(view, els, toast){
   els.settingsOverlay.addEventListener("click", (e)=>{
     if (e.target === els.settingsOverlay) closeSettings();
   });
-
-  // Init from saved settings
-  applyParallaxMode(!!view?.state?.settings?.parallaxSlow);
-
-  if (els.parallaxBtn){
-    els.parallaxBtn.addEventListener("click", ()=>{
-      const cur = !!view?.state?.settings?.parallaxSlow;
-      applyParallaxMode(!cur);
-      if (typeof toast === "function") toast(!cur ? "Параллакс: медленно" : "Параллакс: обычно");
-    });
-  }
 }
 
 export function attachSymbiosisUI(view, els, toast){
