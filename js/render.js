@@ -612,35 +612,109 @@ function drawBlockAnim(ctx, x, y, s, baseHex, breathK, neighMask, k){
 // =====================
 // Neighbor mask utilities (for shading + smoothing + boundary)
 // =====================
-function buildOccupancy(org){
-  const occ = new Set();
-  if (org?.body?.cells){
-    for (const [x,y] of org.body.cells) occ.add(`${x},${y}`);
-  }
-  if (org?.modules){
-    for (const m of org.modules){
-      for (const [x,y] of (m.cells || [])) occ.add(`${x},${y}`);
-    }
-  }
-  return occ;
+// NOTE: using numeric keys is much faster (avoids string allocs + GC churn).
+// We pack x,y into a signed 32-bit int. This assumes world coords stay in ~16-bit range.
+// If you ever expect huge coords, switch to BigInt packing.
+function packXY(x, y){
+  return ((x & 0xffff) << 16) | (y & 0xffff);
 }
 
-// Body-only occupancy (used for "skin" / perimeter tint of body blocks).
-// IMPORTANT: This ignores modules so organs touching the body do not "erase" the body perimeter.
-function buildBodyOccupancy(org){
-  const occ = new Set();
-  if (org?.body?.cells){
-    for (const [x,y] of org.body.cells) occ.add(`${x},${y}`);
+function geomSig(org){
+  const bc = org?.body?.cells;
+  const mc = org?.modules;
+  const bLen = Array.isArray(bc) ? bc.length : 0;
+  const mLen = Array.isArray(mc) ? mc.length : 0;
+  let mCells = 0;
+  let lastMx = 0, lastMy = 0;
+  if (mLen){
+    for (const m of mc){
+      const cells = m?.cells;
+      if (!Array.isArray(cells) || !cells.length) continue;
+      mCells += cells.length;
+      const last = cells[cells.length - 1];
+      lastMx = last?.[0] || 0;
+      lastMy = last?.[1] || 0;
+    }
   }
-  return occ;
+  const lastB = (bLen && bc) ? bc[bLen - 1] : null;
+  const lastBx = lastB?.[0] || 0;
+  const lastBy = lastB?.[1] || 0;
+  return `${bLen}|${mLen}|${mCells}|${lastBx},${lastBy}|${lastMx},${lastMy}`;
+}
+
+function getOccCached(org){
+  if (!org) return { all: new Set(), body: new Set(), sig: "" };
+  const sig = geomSig(org);
+  // IMPORTANT: caches must never survive save/load (Sets serialize to plain objects).
+  // So we validate types here and rebuild if needed.
+  if (org.__occSig === sig && (org.__occAll instanceof Set) && (org.__occBody instanceof Set)){
+    return { all: org.__occAll, body: org.__occBody, sig };
+  }
+
+  const all = new Set();
+  const body = new Set();
+  const bc = org?.body?.cells;
+  if (Array.isArray(bc)){
+    for (const c of bc){
+      const x = c?.[0] || 0;
+      const y = c?.[1] || 0;
+      const k = packXY(x, y);
+      all.add(k);
+      body.add(k);
+    }
+  }
+  const mc = org?.modules;
+  if (Array.isArray(mc)){
+    for (const m of mc){
+      const cells = m?.cells;
+      if (!Array.isArray(cells)) continue;
+      for (const c of cells){
+        const x = c?.[0] || 0;
+        const y = c?.[1] || 0;
+        all.add(packXY(x, y));
+      }
+    }
+  }
+
+  org.__occSig = sig;
+  org.__occAll = all;
+  org.__occBody = body;
+  return { all, body, sig };
+}
+
+function getBodyBoundsCached(org){
+  if (!org?.body?.cells || !Array.isArray(org.body.cells) || !org.body.cells.length){
+    return { minX:0, minY:0, maxX:0, maxY:0, empty:true };
+  }
+  const sig = geomSig(org);
+  // cache must not persist through save/load
+  if (org.__boundsSig === sig && org.__bodyBounds && !org.__bodyBounds.empty) return org.__bodyBounds;
+
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+  for (const c of org.body.cells){
+    const x = c?.[0] || 0;
+    const y = c?.[1] || 0;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  const bounds = {
+    minX, minY, maxX, maxY,
+    empty: !(Number.isFinite(minX) && Number.isFinite(minY) && Number.isFinite(maxX) && Number.isFinite(maxY))
+  };
+  org.__boundsSig = sig;
+  org.__bodyBounds = bounds;
+  return bounds;
 }
 
 function neighMaskAt(occ, x, y){
   let m = 0;
-  if (occ.has(`${x},${y-1}`)) m |= 1;
-  if (occ.has(`${x+1},${y}`)) m |= 2;
-  if (occ.has(`${x},${y+1}`)) m |= 4;
-  if (occ.has(`${x-1},${y}`)) m |= 8;
+  if (occ.has(packXY(x, y-1))) m |= 1;
+  if (occ.has(packXY(x+1, y))) m |= 2;
+  if (occ.has(packXY(x, y+1))) m |= 4;
+  if (occ.has(packXY(x-1, y))) m |= 8;
   return m;
 }
 
@@ -699,6 +773,19 @@ function buildPackedRects(cells){
   return rects;
 }
 
+// Cached packed rects for big bodies/organs.
+// obj can be an organism (org) or a module object.
+function packedRectsCached(obj, cells, extraSig=""){
+  if (!obj || !Array.isArray(cells) || cells.length === 0) return [];
+  const last = cells[cells.length - 1] || [0,0];
+  const sig = `${cells.length}|${last[0]||0},${last[1]||0}|${extraSig}`;
+  if (obj._packedSig === sig && Array.isArray(obj._packedRects)) return obj._packedRects;
+  const rects = buildPackedRects(cells);
+  obj._packedSig = sig;
+  obj._packedRects = rects;
+  return rects;
+}
+
 // =====================
 // Core + Eyes scaling rules
 // =====================
@@ -747,11 +834,11 @@ function buildEyeOffsets(radius, shape){
 // =====================
 
 // Strong outer glow around selection rectangles (usually 1 rect = bounding box)
-function drawSelectionGlow(ctx, rects){
+function drawSelectionGlow(ctx, rects, strength=1){
   ctx.save();
 
   ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = clamp(strength, 0, 1);
   ctx.shadowBlur = 0;
   ctx.strokeStyle = "rgba(90,255,140,1)";
   ctx.lineWidth = 1;
@@ -804,7 +891,8 @@ function drawFlashGlow(ctx, rects){
 // =====================
 function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1){
   const s = view.blockPx;
-  const occ = buildOccupancy(org);
+  const occPack = getOccCached(org);
+  const occ = occPack.all;
 
   // Visual-only effect: desaturate creature colors based on its own average stats.
   // Computed in state.js (render must not do game logic).
@@ -951,7 +1039,7 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
   const bodyColor = SH(getPartColor(org, "body", 0));
   const bodySkinColor = scaleBrightness(bodyColor, 1.15); // подсветка периметра
   const bodyCells = org?.body?.cells || [];
-  const bodyOcc = buildBodyOccupancy(org); // body-only occupancy for perimeter detection
+  const bodyOcc = occPack.body; // body-only occupancy for perimeter detection
 
   if (!gaitActive){
     const staticInner = [];
@@ -977,9 +1065,12 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
       }
     }
 
-    const fillPacked = (cells, col)=>{
+    const packInner = org.__packBodyInner || (org.__packBodyInner = {});
+    const packSkin  = org.__packBodySkin  || (org.__packBodySkin  = {});
+
+    const fillPacked = (cells, col, packObj)=>{
       if (!cells.length) return;
-      const rects = buildPackedRects(cells);
+      const rects = packedRectsCached(packObj, cells);
       ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
       for (const r of rects){
         const p = worldToScreenPx(cam, r.x, r.y, view);
@@ -990,8 +1081,8 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
     };
 
     // Draw bulk static cells in two passes (inner + perimeter skin), so the body outline stays 1-block thick.
-    fillPacked(staticInner, bodyColor);
-    fillPacked(staticSkin, bodySkinColor);
+    fillPacked(staticInner, bodyColor, packInner);
+    fillPacked(staticSkin, bodySkinColor, packSkin);
   } else {
     // Gait render (smooth stretch, no "bridge union"):
     // We draw each cell at its integer position but STRETCH it toward the movement direction.
@@ -1358,7 +1449,8 @@ function limbPhalanxIndex(lengths, idx){
   }
 
   if (isSelected && boundaryCells.length){
-    const packed = buildPackedRects(boundaryCells);
+    // Cache on the organism: boundaryCells change only when geometry changes.
+    const packed = packedRectsCached(org, boundaryCells, `bnd|${org._occSig||""}`);
     for (const r of packed){
       const p = worldToScreenPx(cam, r.x, r.y, view);
       boundaryRects.push({ x: p.x, y: p.y + breathY, w: r.w * s, h: r.h * s });
@@ -1696,29 +1788,64 @@ if (Array.isArray(state.coins)){
 
   const drawOne = (org, orgId, isSel)=>{
     const m = getOrgMotion(view, orgId);
+
+    // Base (persistent) translation in world blocks (used e.g. for buds separation).
     const dx = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
     const dy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+
+    // Smooth step translation (render-only): while logic moves in whole blocks,
+    // gait makes the visual position slide continuously between them.
+    const gait = m?.gait || null;
+    const gaitPhase = gait ? clamp((gait.t || 0) / Math.max(1e-6, (gait.dur || 0.25)), 0, 1) : 0;
+    const gaitDx = gait ? (gait.dx || 0) : 0;
+    const gaitDy = gait ? (gait.dy || 0) : 0;
+    const gaitDist = gait ? Math.max(1, (gait.dist || 1)) : 1;
+
+    // Translate in world units (blocks)
+    const stepK = gait ? (gaitPhase * gaitDist) : 0; // 0..1 (or 0..2 for dist=2)
+    const tdx = dx + gaitDx * stepK;
+    const tdy = dy + gaitDy * stepK;
+
     const breathMul = Number.isFinite(m?.breathMul) ? m.breathMul : 1;
     const angRad = (Number.isFinite(m?.angleDeg) ? m.angleDeg : 0) * Math.PI / 180;
 
-    // Shift camera so organism appears translated by (dx,dy)
-    const cam2 = { ox: (cam.ox || 0) - dx, oy: (cam.oy || 0) - dy };
+    // Shift camera so organism appears translated by (tdx, tdy)
+    const cam2 = { ox: (cam.ox || 0) - tdx, oy: (cam.oy || 0) - tdy };
 
     // Pivot is core (fallback: first body cell)
     const core = org?.body?.core || org?.body?.cells?.[0] || [0, 0];
     const pivot = worldToScreenPx(cam2, core[0] || 0, core[1] || 0, view);
 
+    // Pleasant squash & stretch during the step (render-only).
+    // Peak in the middle of the gait cycle.
+    let sx = 1, sy = 1;
+    if (gait){
+      const phase = Math.sin(gaitPhase * Math.PI); // 0..1..0
+      const k = 0.05 * phase;
+      if (Math.abs(gaitDx) >= Math.abs(gaitDy)){
+        sx = 1 + k;
+        sy = 1 - k * 0.2;
+      } else {
+        sy = 1 + k;
+        sx = 1 - k * 0.2;
+      }
+    }
+
     ctx.save();
-    if (angRad !== 0){
+
+    // Keep transforms consistent for body, selection, flashes.
+    if (sx !== 1 || sy !== 1 || angRad !== 0){
       ctx.translate(pivot.x, pivot.y);
-      ctx.rotate(angRad);
+      // scale first (screen axes), then rotate
+      if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
+      if (angRad !== 0) ctx.rotate(angRad);
       ctx.translate(-pivot.x, -pivot.y);
     }
 
     const rects = renderOrg(ctx, cam2, org, view, orgId, baseSeed, !!isSel, breathMul);
 
     if (isSel){
-      sel = { rects, pivot, angRad, cam2, org, orgId, breathMul };
+      sel = { rects, pivot, angRad, cam2, org, orgId, breathMul, sx, sy };
     }
 
     ctx.restore();
@@ -1737,32 +1864,28 @@ if (Array.isArray(state.coins)){
   }
 
   // Selection glow drawn after blocks, using the same transform (BODY ONLY)
-if (sel && sel.org && sel.org.body && Array.isArray(sel.org.body.cells) && sel.org.body.cells.length){
+if (sel && sel.org){
+  const bounds = getBodyBoundsCached(sel.org);
+  if (!bounds.empty){
+    const sPx = Number.isFinite(view.blockPx) ? view.blockPx : 4;
+    const breathY = breathYOffsetPx(sel.org, sel.orgId, baseSeed, sel.breathMul);
 
-  const sPx = Number.isFinite(view.blockPx) ? view.blockPx : 4;
-  const breathY = breathYOffsetPx(sel.org, sel.orgId, baseSeed, sel.breathMul);
+    const pMin = worldToScreenPx(sel.cam2, bounds.minX, bounds.minY, view);
+    const pMax = worldToScreenPx(sel.cam2, bounds.maxX, bounds.maxY, view);
 
-  let minX = Infinity, minY = Infinity;
-  let maxX = -Infinity, maxY = -Infinity;
+    const minX = pMin.x;
+    const minY = pMin.y + breathY;
+    const maxX = pMax.x + sPx;
+    const maxY = pMax.y + sPx + breathY;
 
-  for (const [x, y] of sel.org.body.cells){
-    const p = worldToScreenPx(sel.cam2, x, y, view);
-    const px = p.x;
-    const py = p.y + breathY;
-
-    if (px < minX) minX = px;
-    if (py < minY) minY = py;
-    if (px + sPx > maxX) maxX = px + sPx;
-    if (py + sPx > maxY) maxY = py + sPx;
-  }
-
-  if (Number.isFinite(minX) && Number.isFinite(minY) && Number.isFinite(maxX) && Number.isFinite(maxY)){
     const bbox = [{ x: minX, y: minY, w: (maxX - minX), h: (maxY - minY) }];
 
     ctx.save();
-    if (sel.angRad !== 0){
+    // Apply the same render-only deformation as the organism itself.
+    if ((sel.sx && sel.sx !== 1) || (sel.sy && sel.sy !== 1) || sel.angRad !== 0){
       ctx.translate(sel.pivot.x, sel.pivot.y);
-      ctx.rotate(sel.angRad);
+      if ((sel.sx && sel.sx !== 1) || (sel.sy && sel.sy !== 1)) ctx.scale(sel.sx || 1, sel.sy || 1);
+      if (sel.angRad !== 0) ctx.rotate(sel.angRad);
       ctx.translate(-sel.pivot.x, -sel.pivot.y);
     }
 
@@ -1784,11 +1907,23 @@ if (sel && sel.org && sel.org.body && Array.isArray(sel.org.body.cells) && sel.o
     }
 
     const m = getOrgMotion(view, orgId);
+
     const dx = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
     const dy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+
+    const gait = m?.gait || null;
+    const gaitPhase = gait ? clamp((gait.t || 0) / Math.max(1e-6, (gait.dur || 0.25)), 0, 1) : 0;
+    const gaitDx = gait ? (gait.dx || 0) : 0;
+    const gaitDy = gait ? (gait.dy || 0) : 0;
+    const gaitDist = gait ? Math.max(1, (gait.dist || 1)) : 1;
+    const stepK = gait ? (gaitPhase * gaitDist) : 0;
+    const tdx = dx + gaitDx * stepK;
+    const tdy = dy + gaitDy * stepK;
+
     const breathMul = Number.isFinite(m?.breathMul) ? m.breathMul : 1;
     const angRad = (Number.isFinite(m?.angleDeg) ? m.angleDeg : 0) * Math.PI / 180;
-    const cam2 = { ox: (cam.ox || 0) - dx, oy: (cam.oy || 0) - dy };
+
+    const cam2 = { ox: (cam.ox || 0) - tdx, oy: (cam.oy || 0) - tdy };
     const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
     const pivot = worldToScreenPx(cam2, core[0] || 0, core[1] || 0, view);
 
@@ -1799,10 +1934,25 @@ if (sel && sel.org && sel.org.body && Array.isArray(sel.org.body.cells) && sel.o
       if (!uniq2.has(k)) uniq2.set(k, r);
     }
     if (uniq2.size){
+      // Same squash/stretch as movement (render-only)
+      let sx = 1, sy = 1;
+      if (gait){
+        const phase = Math.sin(gaitPhase * Math.PI);
+        const k = 0.03 * phase;
+        if (Math.abs(gaitDx) >= Math.abs(gaitDy)){
+          sx = 1 + k;
+          sy = 1 - k * 0.6;
+        } else {
+          sy = 1 + k;
+          sx = 1 - k * 0.6;
+        }
+      }
+
       ctx.save();
-      if (angRad !== 0){
+      if (sx !== 1 || sy !== 1 || angRad !== 0){
         ctx.translate(pivot.x, pivot.y);
-        ctx.rotate(angRad);
+        if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
+        if (angRad !== 0) ctx.rotate(angRad);
         ctx.translate(-pivot.x, -pivot.y);
       }
       drawFlashGlow(ctx, [...uniq2.values()]);

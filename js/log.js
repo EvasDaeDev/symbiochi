@@ -21,6 +21,11 @@ export function pushLog(state, msg, kind = "event", meta = null){
   const root = (state && state.__logRoot) ? state.__logRoot : state;
   if (!root) return;
 
+  // A cheap monotonic revision counter to let the UI know the log content changed
+  // even when the log length is capped (MAX_LOG) and stays constant.
+  // Stored as transient (__*) so it won't be serialized into saves.
+  root.__logRev = (root.__logRev || 0) + 1;
+
   root.log = root.log || [];
 
   const orgName = (state && state.name) ? state.name : "Организм";

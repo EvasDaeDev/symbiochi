@@ -8,6 +8,7 @@ import { ensureMoving, tickMoving, setMoveTarget, getOrgMotion } from "./moving.
 import { BAR_MAX } from "./world.js";
 import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
 import { getFxPipeline } from "./FX/pipeline.js";
+import { UI, PERF } from "./config.js";
 
 import {
   syncCanvas,
@@ -184,14 +185,48 @@ function rerenderAll(deltaSec){
   const selectedOrg = (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
     ? root.buds[a]
     : root;
-  renderRules(els.rulesBody);
-  renderLegend(selectedOrg, els.legendBody);
-  renderLog(view.state, els);
+  // UI diffing (cheap) to avoid rebuilding large HTML blobs every second.
+  view._uiCache = view._uiCache || {};
+  const cache = view._uiCache;
+
+  if (!cache.rulesRendered){
+    renderRules(els.rulesBody);
+    cache.rulesRendered = true;
+  }
+
+  // Legend changes when selection changes OR when the selected organism's module set changes.
+  const mods = Array.isArray(selectedOrg?.modules) ? selectedOrg.modules : [];
+  let modsCells = 0;
+  for (const m of mods) modsCells += (m?.cells?.length || 0);
+  const legendKey = `${root.active}|${mods.length}|${modsCells}`;
+  if (cache.legendKey !== legendKey){
+    renderLegend(selectedOrg, els.legendBody);
+    cache.legendKey = legendKey;
+  }
+
+  // Log panel: rebuild only when log length changes.
+  // IMPORTANT: log may live on __logRoot (parent), so use the same root as renderLog().
+  const logRoot = (view.state && view.state.__logRoot) ? view.state.__logRoot : view.state;
+  const log = (logRoot?.log || []);
+  const logLen = log.length;
+  const logRev = (logRoot && Number.isFinite(logRoot.__logRev)) ? logRoot.__logRev : 0;
+  // When the log is capped (MAX_LOG), length may stay constant while content changes.
+  // Prefer revision counter when available.
+  const logSig = logRev ? `r${logRev}` : `l${logLen}|t${(logLen ? (log[logLen-1]?.t||0) : 0)}`;
+  if (cache.logSig !== logSig){
+    renderLog(view.state, els);
+    cache.logSig = logSig;
+  }
+
+  // Debug: cheap, keep updating.
   renderDebugLog(view, els);
   renderHud(root, selectedOrg, els, deltaSec, fmtAgeSeconds, view.zoom);
   // organism info tab
   if (els.orgInfo){
-    const root = view.state;
+    const now = performance.now();
+    const needOrgInfo = (cache.orgInfoActive !== root.active) || (!cache.orgInfoAt) || ((now - cache.orgInfoAt) >= (UI.ORGINFO_UPDATE_MS || 3000));
+    if (!needOrgInfo) return; // keep HUD updated, skip heavy org list
+
     const buds = Array.isArray(root.buds) ? root.buds : [];
 
     const mkBlocks = (o)=> (o?.body?.cells?.length||0) + (o?.modules||[]).reduce((s,m)=>s+(m?.cells?.length||0),0);
@@ -249,8 +284,10 @@ function rerenderAll(deltaSec){
       <div class="orgList">${listHtml}</div>
       <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре.</div>
     `;
+
+    cache.orgInfoAt = now;
+    cache.orgInfoActive = root.active;
   }
-  renderGrid(view.state, els.canvas, els.grid, view);
 }
 
 function escapeHtml(s){
@@ -352,30 +389,23 @@ function tickCamera(view, dtSec){
 
 
 function startLoops(){
-  // Hard cap for INTERNAL animation/view calculations.
-  // Rendering stays on rAF for smoothness; we just don't advance
-  // these calculations more often than 30Hz.
-  const targetFrameMs = 1000 / 30;
   const frame = ()=>{
     if (!view.state) return;
     const now = performance.now();
     const perf = view.perf;
 
-    const delta = perf.lastFrameAt ? Math.max(0, now - perf.lastFrameAt) : targetFrameMs;
+    const delta = Math.max(0, now - (perf.lastFrameAt || now));
     perf.lastFrameAt = now;
     perf.smoothedFrame = perf.smoothedFrame * 0.9 + delta * 0.1;
     perf.frameCount += 1;
 
-    // View-only animation ticks (capped to 30Hz)
-    perf.accumMs = (perf.accumMs || 0) + delta;
-    // prevent spiral-of-death after tab-in
-    const maxCatchUp = targetFrameMs * 4;
-    if (perf.accumMs > maxCatchUp) perf.accumMs = maxCatchUp;
-    while (perf.accumMs >= targetFrameMs){
-      tickMoving(view, view.state, targetFrameMs/1000);
-      tickCamera(view, targetFrameMs/1000);
-      perf.accumMs -= targetFrameMs;
-    }
+    // View-only animation ticks.
+    // IMPORTANT: movement gait must advance smoothly every rAF frame,
+    // otherwise it looks like "дергание" по 1 блоку.
+    // We still clamp dt to avoid huge jumps after tab-switch.
+    const dtSec = Math.min(0.05, Math.max(0, delta) / 1000);
+    tickMoving(view, view.state, dtSec);
+    tickCamera(view, dtSec);
 
     const renderStart = performance.now();
     renderGrid(view.state, els.canvas, els.grid, view);
@@ -393,8 +423,8 @@ function startLoops(){
       perf.lastStatAt = now;
 
       const cpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedRender / Math.max(1, perf.smoothedFrame)) * 100)));
-      // GPU-like load: how much time a frame takes compared to our 30Hz internal tick budget.
-      const gpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedFrame / targetFrameMs) * 100)));
+      // "GPU-like" load: how much time a frame takes compared to a 60Hz budget.
+      const gpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedFrame / (1000/60)) * 100)));
 
       if (els.cpuStat) els.cpuStat.textContent = `CPU: ${cpuLoad}%`;
       if (els.gpuStat) els.gpuStat.textContent = `GPU: ${gpuLoad}%`;
@@ -412,25 +442,30 @@ function startLoops(){
   }
 
   if (!view.autoTimer){
-    view.autoTimer = setInterval(autoTick, 1000);
+    view.autoTimer = setInterval(autoTick, UI.AUTO_TICK_MS || 1000);
   }
 }
 
 function setupResizeObserver(){
   if (view._ro) return;
 
+  let t = null;
   view._ro = new ResizeObserver(() => {
     if (!view.state) return;
+    if (t) clearTimeout(t);
+    t = setTimeout(()=>{
+      t = null;
 
-    // Пробрасываем фактический размер игрового окна в CSS-переменные,
-    // чтобы соседние панели (например #infoPanel) могли рассчитывать свою высоту.
-    const w = els.mainPanel.clientWidth;
-    const h = els.mainPanel.clientHeight;
-    document.documentElement.style.setProperty('--gameW', `${w}px`);
-    document.documentElement.style.setProperty('--gameH', `${h}px`);
+      // Пробрасываем фактический размер игрового окна в CSS-переменные,
+      // чтобы соседние панели (например #infoPanel) могли рассчитывать свою высоту.
+      const w = els.mainPanel.clientWidth;
+      const h = els.mainPanel.clientHeight;
+      document.documentElement.style.setProperty('--gameW', `${w}px`);
+      document.documentElement.style.setProperty('--gameH', `${h}px`);
 
-    syncToSize();
-    rerenderAll(0);
+      syncToSize();
+      rerenderAll(0);
+    }, UI.RESIZE_DEBOUNCE_MS || 80);
   });
 
   view._ro.observe(els.mainPanel);
@@ -443,12 +478,42 @@ function clampZoom(z){
 
 function occHas(org, wx, wy){
   if (!org || !org.body) return false;
-  const k = `${wx},${wy}`;
-  for (const [x,y] of (org.body.cells || [])) if (`${x},${y}` === k) return true;
-  for (const m of (org.modules || [])){
-    for (const [x,y] of (m.cells || [])) if (`${x},${y}` === k) return true;
+  const packXY = (x,y)=>(((x & 0xffff) << 16) | (y & 0xffff));
+
+  const bc = org?.body?.cells;
+  const mc = org?.modules;
+  const bLen = Array.isArray(bc) ? bc.length : 0;
+  const mLen = Array.isArray(mc) ? mc.length : 0;
+  let mCells = 0;
+  let lastMx = 0, lastMy = 0;
+  if (mLen){
+    for (const m of mc){
+      const cells = m?.cells;
+      if (!Array.isArray(cells) || !cells.length) continue;
+      mCells += cells.length;
+      const last = cells[cells.length - 1];
+      lastMx = last?.[0] || 0;
+      lastMy = last?.[1] || 0;
+    }
   }
-  return false;
+  const lastB = (bLen && bc) ? bc[bLen - 1] : null;
+  const sig = `${bLen}|${mLen}|${mCells}|${lastB?.[0]||0},${lastB?.[1]||0}|${lastMx},${lastMy}`;
+
+  if (org._occMainSig !== sig || !org._occMain){
+    const set = new Set();
+    if (Array.isArray(bc)) for (const c of bc) set.add(packXY(c?.[0]||0, c?.[1]||0));
+    if (Array.isArray(mc)){
+      for (const m of mc){
+        const cells = m?.cells;
+        if (!Array.isArray(cells)) continue;
+        for (const c of cells) set.add(packXY(c?.[0]||0, c?.[1]||0));
+      }
+    }
+    org._occMain = set;
+    org._occMainSig = sig;
+  }
+
+  return org._occMain.has(packXY(wx, wy));
 }
 
 function screenToWorld(e){

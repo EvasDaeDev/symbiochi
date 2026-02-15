@@ -97,9 +97,6 @@ org.seed = seed;
 
     // Variant A: ensure organic body-wave growth params exist (single source: mods/body_wave.js)
     ensureBodyWave(org);
-
-    // Variant A: make sure body wave params exist for old saves.
-    ensureBodyWave(org);
     for (const m of org.modules){ m.cells = normCells(m.cells); }
 
     function enforceAppendageRules(){
@@ -304,6 +301,56 @@ function updateHungerGate(org){
   return { minBar, paused: !!org.evoPausedByHunger };
 }
 
+// =====================
+// Decay step (time-accurate offline)
+// =====================
+// IMPORTANT:
+// Offline simulation must NOT apply a single huge decay upfront.
+// Otherwise the hunger gate (anabiosis pause) is evaluated "from the end"
+// and the creature can lose all positive growth that should have happened
+// before entering the pause.
+//
+// This helper applies the same decay logic as the old big block, but for
+// an arbitrary small dt. We then advance dt along the simulated timeline.
+function applyDecayStep(org, dt){
+  if (!org || !Number.isFinite(dt) || dt <= 0) return;
+  org.bars = org.bars || { food: 1, clean: 1, hp: 1, mood: 1 };
+  org.care = org.care || { feed: 0, wash: 0, heal: 0, neglect: 0 };
+
+  org.bars.food  = clamp(applyNonLinearDecay(org.bars.food,  DECAY.food_per_sec,  dt), 0, BAR_MAX);
+  org.bars.clean = clamp(applyNonLinearDecay(org.bars.clean, DECAY.clean_per_sec, dt), 0, BAR_MAX);
+  org.bars.mood  = clamp(applyNonLinearDecay(org.bars.mood,  DECAY.mood_per_sec,  dt), 0, BAR_MAX);
+
+  const hungerFactor = clamp01(1 - org.bars.food);
+  const dirtFactor   = clamp01(1 - org.bars.clean);
+  const sadness      = clamp01(1 - org.bars.mood);
+
+  const hpLoss = (DECAY.base_hp_per_sec + (0.55*hungerFactor + 0.35*dirtFactor + 0.20*sadness) / 3600) * dt;
+  org.bars.hp = clamp(org.bars.hp - hpLoss, 0, BAR_MAX);
+
+  const stress = clamp01((hungerFactor + dirtFactor + sadness + clamp01(1-org.bars.hp)) / 4);
+  const neglectStress = stress > 0.25 ? stress : 0;
+  org.care.neglect += dt * (0.00012 * neglectStress);
+
+  // Hunger gate (mutations pause/resume with hysteresis)
+  updateHungerGate(org);
+
+  // Shrink accumulator: if ANY bar reaches 0 and stays critical long enough,
+  // shrink every 60 minutes. We accumulate steps here and apply the actual
+  // shrink AFTER catch-up.
+  if (minBarValue(org) <= 0){
+    org._offlineZeroAccSec = (org._offlineZeroAccSec || 0) + dt;
+    const stepSec = 60 * 60;
+    const steps = Math.floor(org._offlineZeroAccSec / stepSec);
+    if (steps > 0){
+      org._offlineZeroAccSec -= steps * stepSec;
+      org._offlineShrinks = (org._offlineShrinks || 0) + steps;
+    }
+  } else {
+    org._offlineZeroAccSec = 0;
+  }
+}
+
 function allBarsZero(org){
   const b = org?.bars || {};
   return (b.food ?? 0) <= 0 && (b.clean ?? 0) <= 0 && (b.hp ?? 0) <= 0 && (b.mood ?? 0) <= 0;
@@ -383,40 +430,13 @@ export function simulate(state, deltaSec){
     return bodyN + modN;
   };
   const blocksBefore = orgs.map(countBlocks);
-  for (const org of orgs){
-    org.bars.food  = clamp(applyNonLinearDecay(org.bars.food, DECAY.food_per_sec, deltaSec), 0, BAR_MAX);
-    org.bars.clean = clamp(applyNonLinearDecay(org.bars.clean, DECAY.clean_per_sec, deltaSec), 0, BAR_MAX);
-    org.bars.mood  = clamp(applyNonLinearDecay(org.bars.mood, DECAY.mood_per_sec, deltaSec), 0, BAR_MAX);
 
-    const hungerFactor = clamp01(1 - org.bars.food);
-    const dirtFactor   = clamp01(1 - org.bars.clean);
-    const sadness      = clamp01(1 - org.bars.mood);
-
-    const hpLoss = (DECAY.base_hp_per_sec + (0.55*hungerFactor + 0.35*dirtFactor + 0.20*sadness) / 3600) * deltaSec;
-    org.bars.hp = clamp(org.bars.hp - hpLoss, 0, BAR_MAX);
-
-    const stress = clamp01((hungerFactor + dirtFactor + sadness + clamp01(1-org.bars.hp)) / 4);
-    const neglectStress = stress > 0.25 ? stress : 0;
-    org.care.neglect += deltaSec * (0.00012 * neglectStress);
-
-    // Hunger gate (mutations pause/resume with hysteresis)
-    updateHungerGate(org);
-
-    // Shrink (usykhanie): if ANY bar reaches 0 and stays critical long enough,
-    // shrink every 60 minutes.
-    // Works both offline and during active play. Shrink is applied AFTER catch-up so it never
-    // changes mutation timing/placement.
-    if (minBarValue(org) <= 0){
-      org._offlineZeroAccSec = (org._offlineZeroAccSec || 0) + deltaSec;
-      const stepSec = 60 * 60;
-      const steps = Math.floor(org._offlineZeroAccSec / stepSec);
-      if (steps > 0){
-        org._offlineZeroAccSec -= steps * stepSec;
-        org._offlineShrinks = (org._offlineShrinks || 0) + steps;
-      }
-    } else {
-      org._offlineZeroAccSec = 0;
-    }
+  // Decay:
+  // - Online: apply as a single step (cheap).
+  // - Offline: apply along the simulated timeline (inside applySteps) so the hunger
+  //   gate doesn't pause "retroactively".
+  if (!isOffline){
+    for (const org of orgs) applyDecayStep(org, deltaSec);
   }
 
   const intervalSec = Math.max(1, Math.floor(Number(state.evoIntervalMin || 12) * 60));
@@ -457,7 +477,14 @@ export function simulate(state, deltaSec){
     const applied = Math.min(due, org._remainingOfflineSteps ?? MAX_OFFLINE_STEPS);
 
     for (let k=0; k<applied; k++){
-      org.lastMutationAt = (org.lastMutationAt || 0) + stepIntervalSec;
+      const nextT = (org.lastMutationAt || 0) + stepIntervalSec;
+      if (isOffline){
+        const cursor = Number.isFinite(org._decayCursor) ? org._decayCursor : (org.lastSeen || offlineStart);
+        const dt = Math.max(0, nextT - cursor);
+        if (dt > 0) applyDecayStep(org, dt);
+        org._decayCursor = nextT;
+      }
+      org.lastMutationAt = nextT;
       onTick(org);
     }
 
@@ -466,7 +493,14 @@ export function simulate(state, deltaSec){
     let skippedLocal = 0;
     if (due > applied){
       skippedLocal = due - applied;
-      org.lastMutationAt = (org.lastMutationAt || 0) + skippedLocal * stepIntervalSec;
+      const nextT = (org.lastMutationAt || 0) + skippedLocal * stepIntervalSec;
+      if (isOffline){
+        const cursor = Number.isFinite(org._decayCursor) ? org._decayCursor : (org.lastSeen || offlineStart);
+        const dt = Math.max(0, nextT - cursor);
+        if (dt > 0) applyDecayStep(org, dt);
+        org._decayCursor = nextT;
+      }
+      org.lastMutationAt = nextT;
     }
     if (skippedLocal > 0){
       org.mutationDebt = Math.max(0, (org.mutationDebt || 0) + skippedLocal);
@@ -522,6 +556,7 @@ export function simulate(state, deltaSec){
 
   state._remainingOfflineSteps = MAX_OFFLINE_STEPS;
   {
+    if (isOffline && !Number.isFinite(state._decayCursor)) state._decayCursor = (state.lastSeen || offlineStart);
     const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
       eaten += processCarrotsTick(state, state);
       processCoins(state);
@@ -552,8 +587,18 @@ export function simulate(state, deltaSec){
       dueSteps += slowResult.due;
       skipped += slowResult.skipped;
     }
+
+    // Finish remaining offline decay to "now" (handles the remainder < tick interval
+    // or cases when there were 0 mutation ticks).
+    if (isOffline){
+      const cursor = Number.isFinite(state._decayCursor) ? state._decayCursor : (state.lastSeen || offlineStart);
+      const dt = Math.max(0, now - cursor);
+      if (dt > 0) applyDecayStep(state, dt);
+      state._decayCursor = now;
+    }
   }
   delete state._remainingOfflineSteps;
+  if (isOffline) delete state._decayCursor;
 
   // buds: evolve instantly too
   if (Array.isArray(state.buds)){
@@ -562,6 +607,7 @@ export function simulate(state, deltaSec){
       const budUpTo = (bud.lastSeen || state.lastSeen) + deltaSec;
       bud.lastMutationAt = Number.isFinite(bud.lastMutationAt) ? bud.lastMutationAt : state.lastMutationAt;
       bud._remainingOfflineSteps = MAX_OFFLINE_STEPS;
+      if (isOffline && !Number.isFinite(bud._decayCursor)) bud._decayCursor = (bud.lastSeen || offlineStart);
       const budNormalEnd = Math.min(budUpTo, anabiosisStart);
 
       applySteps(bud, budNormalEnd, intervalSec, ()=>{
@@ -588,6 +634,15 @@ export function simulate(state, deltaSec){
         });
       }
       delete bud._remainingOfflineSteps;
+
+      if (isOffline){
+        const cursor = Number.isFinite(bud._decayCursor) ? bud._decayCursor : (bud.lastSeen || offlineStart);
+        const dt = Math.max(0, budUpTo - cursor);
+        if (dt > 0) applyDecayStep(bud, dt);
+        bud._decayCursor = budUpTo;
+      }
+
+      if (isOffline) delete bud._decayCursor;
 
       // IMPORTANT: advance bud.lastSeen, иначе оффлайн будет считаться снова и снова
       bud.lastSeen = budUpTo;

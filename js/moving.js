@@ -349,7 +349,7 @@ export function tickMoving(view, state, dtSec){
 const blockPx = Math.max(1, view.blockPx || 1);
 
 // ✅ скорость в блоках/сек — источник истины
-const speedBlocksS = Math.max(0.25, view.moving.params.speedBlocksS || 3);
+const speedBlocksS = Math.max(0.15, view.moving.params.speedBlocksS || 3);
 const speedCellsS = speedBlocksS;
 
 // ✅ совместимость: render.js может ожидать speedPxS

@@ -566,7 +566,6 @@ export function applyMutation(state, momentSec){
     mul("antenna", 0.95);
   } else if (eco === "swimmer"){
     bump("tail", 0.15);
-    bump("fin", 0.18);     // появится только в late-game, но пусть вес уже будет
     mul("limb", 0.90);
   } else if (eco === "sentinel"){
     bump("antenna", 0.10);
