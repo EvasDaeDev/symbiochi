@@ -4,7 +4,7 @@ import { CARROT } from "./mods/carrots.js";
 import { COIN } from "./mods/coins.js";
 import { migrateOrNew, saveGame, simulate } from "./state.js";
 import { pushLog } from "./log.js";
-import { ensureMoving, tickMoving, setMoveTarget, getOrgMotion } from "./moving.js";
+import { ensureMoving, tickMoving, tickTiltDrift, setMoveTarget, getOrgMotion } from "./moving.js";
 import { BAR_MAX } from "./world.js";
 import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
 import { getFxPipeline } from "./FX/pipeline.js";
@@ -47,6 +47,7 @@ const els = {
   playBtn: document.getElementById("playBtn"),
 
   settingsBtn: document.getElementById("settingsBtn"),
+  parallaxBtn: document.getElementById("parallaxBtn"),
   settingsOverlay: document.getElementById("settingsOverlay"),
   evoInput: document.getElementById("evoInput"),
   saveSettings: document.getElementById("saveSettings"),
@@ -129,6 +130,26 @@ const view = {
   // Moving module state (view-only)
   moving: null,
 
+  // Tilt/WASD input (view-only). Values are normalized -1..+1.
+  // x: right, y: down (world coords)
+  tilt: {
+    x: 0,
+    y: 0,
+    // Visual tilt is smoothed separately so we can slow down only the parallax.
+    parX: 0,
+    parY: 0,
+    // Parallax response speed (seconds). Bigger = slower.
+    parTau: 0.10,
+    // For parallax: clamped visual tilt (max 20%)
+    visX: 0,
+    visY: 0,
+    // Internal smoothing / sources
+    _tx: 0,
+    _ty: 0,
+    _useGyro: false,
+    _keys: { w:false, a:false, s:false, d:false },
+  },
+
 
   // dynamic camera size in blocks
   gridW: 60,
@@ -158,6 +179,136 @@ const view = {
   // resize observer
   _ro: null,
 };
+
+function clamp(v, a, b){ return (v < a) ? a : (v > b ? b : v); }
+
+function attachTiltControls(){
+  // Desktop WASD
+  // IMPORTANT: use e.code so keyboard layout (RU/EN) doesn't matter.
+  const keyMap = {
+    KeyW: "w",
+    KeyA: "a",
+    KeyS: "s",
+    KeyD: "d",
+    ArrowUp: "w",
+    ArrowLeft: "a",
+    ArrowDown: "s",
+    ArrowRight: "d",
+  };
+  const isTypingTarget = (e)=>{
+    const el = e?.target;
+    const tag = (el?.tagName || "").toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable;
+  };
+  const down = (e)=>{
+    if (isTypingTarget(e)) return;
+    const mapped = keyMap[e.code];
+    if (!mapped) return;
+    view.tilt._keys[mapped] = true;
+    view.tilt._useGyro = false;
+    // Prevent page scroll on arrows/space.
+    if (e.code.startsWith("Arrow")) e.preventDefault();
+  };
+  const up = (e)=>{
+    if (isTypingTarget(e)) return;
+    const mapped = keyMap[e.code];
+    if (!mapped) return;
+    view.tilt._keys[mapped] = false;
+    if (e.code.startsWith("Arrow")) e.preventDefault();
+  };
+  window.addEventListener("keydown", down);
+  window.addEventListener("keyup", up);
+
+  // Mobile gyroscope (DeviceOrientation).
+  // iOS requires permission inside a user gesture; we request it on first pointerdown.
+  const tryEnableGyro = async ()=>{
+    try {
+      if (!("DeviceOrientationEvent" in window)) return false;
+      // iOS 13+
+      if (typeof DeviceOrientationEvent.requestPermission === "function"){
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res !== "granted") return false;
+      }
+      // IMPORTANT:
+      // "Neutral" orientation is the one at app start / when gyro gets enabled.
+      // We calibrate on first event and subtract the baseline so returning the
+      // device to that pose returns tilt back to 0.
+      view.tilt._gyroBaseSet = false;
+      view.tilt._gyroG0 = 0;
+      view.tilt._gyroB0 = 0;
+      const DEAD = 0.03; // deadzone in normalized units
+      const onOri = (ev)=>{
+        // gamma: left(-) .. right(+), beta: front(-) .. back(+)
+        const g = Number(ev.gamma);
+        const b = Number(ev.beta);
+        if (!Number.isFinite(g) || !Number.isFinite(b)) return;
+        if (!view.tilt._gyroBaseSet){
+          view.tilt._gyroG0 = g;
+          view.tilt._gyroB0 = b;
+          view.tilt._gyroBaseSet = true;
+          // start from neutral
+          view.tilt._tx = 0;
+          view.tilt._ty = 0;
+          view.tilt._useGyro = true;
+          return;
+        }
+        // Normalize roughly to [-1..1] using conservative range.
+        const nx0 = clamp((g - view.tilt._gyroG0) / 30, -1, 1);
+        const ny0 = clamp((b - view.tilt._gyroB0) / 30, -1, 1);
+        // deadzone to avoid drifting / "not returning" visually
+        const nx = Math.abs(nx0) < DEAD ? 0 : nx0;
+        const ny = Math.abs(ny0) < DEAD ? 0 : ny0;
+        view.tilt._tx = nx;
+        view.tilt._ty = ny;
+        view.tilt._useGyro = true;
+      };
+      window.addEventListener("deviceorientation", onOri, { passive: true });
+      return true;
+    } catch (_e){
+      return false;
+    }
+  };
+
+  // One-shot gesture hook
+  els.grid?.addEventListener?.("pointerdown", ()=>{ tryEnableGyro(); }, { once: true });
+}
+
+function tickTiltInput(dtSec){
+  const dt = Math.max(0, dtSec || 0);
+  const t = view.tilt;
+
+  // Compute target from keys (if gyro not active)
+  if (!t._useGyro){
+    const k = t._keys;
+    let tx = 0;
+    let ty = 0;
+    if (k.a) tx -= 1;
+    if (k.d) tx += 1;
+    if (k.w) ty -= 1;
+    if (k.s) ty += 1;
+    // diagonal normalize
+    const m = Math.hypot(tx, ty);
+    if (m > 1e-6){ tx /= m; ty /= m; }
+    t._tx = tx;
+    t._ty = ty;
+  }
+
+  // Smooth input to avoid jitter.
+  const TAU = 0.10;
+  const a = 1 - Math.exp(-dt / Math.max(1e-6, TAU));
+  t.x = (Number.isFinite(t.x) ? t.x : 0) + (t._tx - (t.x || 0)) * a;
+  t.y = (Number.isFinite(t.y) ? t.y : 0) + (t._ty - (t.y || 0)) * a;
+
+  // Smooth parallax separately (so we can make ONLY the grid/background slower).
+  const parTau = Math.max(1e-4, Number.isFinite(t.parTau) ? t.parTau : 0.10);
+  const ap = 1 - Math.exp(-dt / parTau);
+  t.parX = (Number.isFinite(t.parX) ? t.parX : 0) + (t.x - (t.parX || 0)) * ap;
+  t.parY = (Number.isFinite(t.parY) ? t.parY : 0) + (t.y - (t.parY || 0)) * ap;
+
+  // Visual clamp for parallax only: max 20%.
+  t.visX = clamp(t.parX, -0.20, 0.20) / 0.20; // normalize back to [-1..1]
+  t.visY = clamp(t.parY, -0.20, 0.20) / 0.20;
+}
 
 function stopLoops(){
   if (view.renderTimer){
@@ -404,7 +555,9 @@ function startLoops(){
     // otherwise it looks like "дергание" по 1 блоку.
     // We still clamp dt to avoid huge jumps after tab-switch.
     const dtSec = Math.min(0.05, Math.max(0, delta) / 1000);
+    tickTiltInput(dtSec);
     tickMoving(view, view.state, dtSec);
+    tickTiltDrift(view, view.state, dtSec);
     tickCamera(view, dtSec);
 
     const renderStart = performance.now();
@@ -774,11 +927,7 @@ function attachOrgListClicks(){
     const org = (which === -1) ? view.state : (view.state.buds?.[which] || null);
     const core = org?.body?.core;
     if (Array.isArray(core) && core.length === 2){
-      const orgId = (which === -1) ? 0 : (which|0) + 1;
-      const m = getOrgMotion(view, orgId);
-      const ox = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
-      const oy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
-      view.camTarget = { x: (core[0] || 0) + ox, y: (core[1] || 0) + oy };
+      view.camTarget = { x: (core[0] || 0), y: (core[1] || 0) };
     }
     rerenderAll(0);
   });
@@ -823,6 +972,8 @@ async function startGame(){
   attachSymbiosisUI(view, els, toast);
   attachPickOrganism();
   attachOrgListClicks();
+
+  attachTiltControls();
 
 
   setupResizeObserver();
