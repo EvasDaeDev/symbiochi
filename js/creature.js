@@ -761,8 +761,8 @@ export function addModule(state, type, rng, target=null){
   const wiggle = state?.plan?.wiggle ?? 0.0;
   let growStyle = "straight";
   if (movable || type === "spike" || type === "teeth"){
-    if (wiggle > 0.66) growStyle = "curve";
-    else if (wiggle > 0.33) growStyle = "zigzag";
+    if (wiggle > 0.56) growStyle = "curve";
+    else if (wiggle > 0.23) growStyle = "zigzag";
   }
   if (type === "limb"){
     growStyle = "jointed";
@@ -778,7 +778,7 @@ export function addModule(state, type, rng, target=null){
     growStep: 0,
     zigzagSign: rng() < 0.5 ? 1 : -1,
     curveSign: rng() < 0.5 ? 1 : -1,
-    turnChance: 0.05 + 0.25 * wiggle // чем выше wiggle, тем чаще повороты
+    turnChance: 0.05 + 0.15 * wiggle // чем выше wiggle, тем чаще повороты
   };
   
   state.modules.push({
@@ -1014,7 +1014,7 @@ export function growPlannedModules(state, rng, options = {}){
     } else if (m.cells.length >= 3){
       // ⛔ У ОСНОВАНИЯ ИГНОРИРУЕМ "КРИВИЗНУ"
       if (m.growStyle === "zigzag"){
-        dir = (m.growStep % 2 === 0)
+        dir = (m.growStep % 3 === 0)
           ? baseDir
           : [baseDir[1], -baseDir[0]];
         m.growStep++;

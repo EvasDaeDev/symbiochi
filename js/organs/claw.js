@@ -8,8 +8,8 @@ export const CLAW = {
   maxExtra: 7,
   maxLen: 9,
   spawnWeight: 0.08,
-  growthChance: 0.9,
-  width: 1,
+  growthChance: 0.2,
+  width: 2,
   anim: {
     growthSec: 0.7,
     swipeSec: 4.8

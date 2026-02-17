@@ -3,7 +3,7 @@
 export const EVO = {
   // Hard cap of how many mutations may be applied in a single mutation tick.
   // Keep this small so evolution remains readable and doesn't "burst".
-  maxMutationsPerTick: 2,
+  maxMutationsPerTick: 1,
 
   // Multiplier for body growth ("grow_body") mutation.
   // 1.0 = neutral. Prefer tuning evoIntervalMin / weights first.

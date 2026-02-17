@@ -27,7 +27,6 @@ export const ORGAN_DEFS = {
   tentacle: TENTACLE,
   tail: TAIL,
   worm: WORM,
-  limb: LIMB,
   spike: SPIKE,
   shell: SHELL,
   eye: EYE,
@@ -35,6 +34,7 @@ export const ORGAN_DEFS = {
   // late mutations
   teeth: TEETH,
   claw: CLAW,
+  limb: LIMB,
   mouth: MOUTH,
   fin: FIN,
 };

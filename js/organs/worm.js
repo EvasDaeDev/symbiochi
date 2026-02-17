@@ -6,7 +6,7 @@ export const WORM = {
   maxExtra: 7,
   maxBodyMult: 2,
   spawnWeight: 0.12,
-  growthChance: 0.85,
+  growthChance: 0.34,
   width: 1,
   anim: {
     growthSec: 0.7,

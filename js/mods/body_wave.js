@@ -8,19 +8,19 @@ import { clamp01, hash32, mulberry32 } from "../util.js";
 
 export const BODY_WAVE = {
   // Требование пользователя: шум радиусом 3..9 блоков.
-  ampMinBlocks: 5,
-  ampMaxBlocks: 8,
+  ampMinBlocks: 10,
+  ampMaxBlocks: 16,
 
   // Кол-во "лепестков" по окружности (чем больше — тем чаще смена направления).
   lobesMin: 0,
-  lobesMax: 1,
+  lobesMax: 3,
 
   // Скорость дрейфа фазы (медленно, чтобы форма "помнила" себя)
-  phaseSpeedMin: 0.0003,
-  phaseSpeedMax: 0.001,
+  phaseSpeedMin: 0.003,
+  phaseSpeedMax: 0.015,
 
   // Сколько дискретных узлов для 1D value-noise по углу
-  bins: 10,
+  bins: 6,
 
   // Слабый микро-джиттер на кандидата, чтобы не застревать в локальных паттернах
   microJitter: 0.05

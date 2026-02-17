@@ -10,7 +10,7 @@ export const LIMB = {
   animAngleMin: 5,
   animAngleMax: 40,
   spawnWeight: 0.1,
-  growthChance: 0.7,
+  growthChance: 0.4,
   width: 1,
   anim: {
     growthSec: 0.7,

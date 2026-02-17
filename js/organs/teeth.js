@@ -6,8 +6,8 @@ export const TEETH = {
   maxExtra: 5,
   dir: [1, 0],
   spawnWeight: 0.1,
-  growthChance: 0.8,
-  width: 1,
+  growthChance: 0.1,
+  width: 2,
   anim: {
     growthSec: 0.7,
     chatterSec: 4.2

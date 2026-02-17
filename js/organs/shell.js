@@ -6,7 +6,7 @@ export const SHELL = {
   spawnMinBody: 130,
   size: 2,
   spawnWeight: 0.06,
-  growthChance: 0.65,
+  growthChance: 0.35,
   width: 2,
   anim: {
     growthSec: 0.7,

@@ -10,7 +10,7 @@ export const FIN = {
     [2, -1]
   ],
   spawnWeight: 0.06,
-  growthChance: 0.8,
+  growthChance: 0.1,
   width: 2,
   anim: {
     growthSec: 0.7,

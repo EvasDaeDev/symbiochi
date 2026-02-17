@@ -5,7 +5,7 @@ export const BODY = {
   appendageGrowWeight: 0.12,
   appendageGrowPerModule: 0.03,
   growBodyPenaltyMult: 0.65,
-  growthChance: 0.93,
+  growthChance: 0.52,
   width: 1,
   anim: {
     growthSec: 0.7,
