@@ -32,81 +32,19 @@ html, body {
 }
 
 #wrap.wrap2{
-  display: grid;
-  grid-template-columns: auto 1fr 340px;
-  gap: 10px;
-  align-items: stretch;
+  display: flex;
+    justify-content: center; /* Горизонталь */
+  align-items: center;     /* Вертикаль */
+  height: 100vh;           /* Высота на весь экран */
+  gap: 5px; /* расстояние между centerCol и infoPanel */
 }
 
-/* Left debug panel */
-.dbgPanel{
-  width: 280px;
-  height: calc(var(--statusH) + var(--gameH) + 10px);
-  position: relative;
-  display: block;
-}
-.dbgPanel .dbgInner{
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto 1fr;
-}
-.dbgPanel .dbgBody{
-  padding: 8px 10px;
-  overflow: auto;
-  font-size: 11px;
-  line-height: 1.25;
-  color: rgba(255,255,255,0.85);
-  white-space: pre-wrap;
-}
-.dbgTail{
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  width: 22px;
-  height: 22px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.02);
-  color: var(--text);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  padding: 0;
-}
-.dbgLine{ margin: 0 0 4px 0; }
-.dbgLine .when{ color: rgba(255,255,255,0.45); }
-.dbgLine .kind{ color: rgba(125,211,252,0.9); margin: 0 6px; }
-.dbgLine.good .kind{ color: rgba(52,211,153,0.9); }
-.dbgLine.bud .kind{ color: rgba(96,165,250,0.9); }
-.dbgLine.warn .kind{ color: rgba(251,191,36,0.95); }
-.dbgLine.alert .kind{ color: rgba(251,113,133,0.95); }
-
-.dbgPanel.collapsed{
-  width: 15px;
-  height: 15px;
-  min-width: 15px;
-  min-height: 15px;
-  align-self: start;
-  margin-top: calc(var(--statusH) + 10px + 10px);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.dbgPanel.collapsed .dbgInner{ display: none; }
-.dbgPanel.collapsed .dbgTail{
-  position: static;
-  width: 15px;
-  height: 15px;
-  border-radius: 8px;
-  border: none;
-  background: rgba(255,255,255,0.06);
-  font-size: 11px;
-}
 
 .panel{
   background: radial-gradient(120% 120% at 50% 30%, #0e1420 0%, #070a0f 70%);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.55);
+  
   overflow: hidden;
 }
 
@@ -115,20 +53,13 @@ html, body {
 #centerCol{
   display: grid;
   grid-template-rows: var(--statusH) auto;
-  gap: 10px;
-  min-width: 600px;
+  gap: 5px;
 }
 
 #infoPanel{
   display: grid;
   grid-template-rows: auto auto 1fr;
-  height: calc(var(--statusH) + var(--gameH) + 10px);
-  min-width: 355px;
-
-  /* раньше resize был только у #mainPanel, поэтому тянуть можно было лишь одно окно */
-  resize: both;
-  overflow: hidden;
-  min-height: 240px;
+  min-height: 550px;
 }
 
 .tabs{
@@ -531,7 +462,7 @@ html, body {
   z-index: 30;
 }
 .startBox{
-  width: 100%;
+  width: 70%;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: rgba(16,24,38,.7);
@@ -567,7 +498,7 @@ html, body {
   position: absolute;
   left: 50%;
   right: auto;
-  top: 10px;
+  top: 5px;
   background: rgba(16, 24, 38, 0.6);
   border: 1px solid var(--border);
   border-radius: 10px;
