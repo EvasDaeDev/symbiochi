@@ -2089,7 +2089,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   if (els.lifePill){
     const now = state.lastSeen || target.lastSeen || 0;
     const age = Math.max(0, now - (target.createdAt || now));
-    els.lifePill.textContent = `жизнь: ${fmtAgeSeconds(age)}`;
+    els.lifePill.textContent = `Возраст: ${fmtAgeSeconds(age)}`;
   }
   if (els.carrotHudInput && document.activeElement !== els.carrotHudInput){
     const v = state.inv?.carrots ?? 0;
@@ -2133,6 +2133,6 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const intervalSec = Math.max(1, Math.floor(state.evoIntervalMin * 60));
     const until = Math.max(0, (state.lastMutationAt + intervalSec) - state.lastSeen);
     els.footerInfo.textContent =
-      `Мутация через ~${fmtAgeSeconds(until)} (интервал ${state.evoIntervalMin} мин) zoom:${zoom ?? ""}`;
+      `Эволюция через ~${fmtAgeSeconds(until)} (интервал ${state.evoIntervalMin} мин) zoom:${zoom ?? ""}`;
   }
 }

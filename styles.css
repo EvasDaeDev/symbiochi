@@ -3,7 +3,7 @@
   --mainH: 300px;
   --sideW: 200px;
   --sideH: 300px;
-  --statusH: 98px;
+  --statusH: 80px;
 
   /* фактический размер игрового окна (обновляется ResizeObserver-ом) */
   --gameW: 300px;
@@ -33,8 +33,9 @@ html, body {
 
 #wrap.wrap2{
   display: grid;
-  grid-template-columns: auto 1fr 340px;
-  gap: 10px;
+  /* Debug panel removed: keep only center + right info panel */
+  grid-template-columns: 1fr 355px;
+  gap: 5px;
   align-items: stretch;
 }
 
@@ -116,17 +117,18 @@ html, body {
   display: grid;
   grid-template-rows: var(--statusH) auto;
   gap: 10px;
-  min-width: 600px;
+  min-width: 400px;
+  max-width: 600px;
 }
 
 #infoPanel{
   display: grid;
   grid-template-rows: auto auto 1fr;
   height: calc(var(--statusH) + var(--gameH) + 10px);
-  min-width: 355px;
+  min-width: 390px;
 
-  /* раньше resize был только у #mainPanel, поэтому тянуть можно было лишь одно окно */
-  resize: both;
+  /* fixed layout: no manual resize handle */
+  resize: none;
   overflow: hidden;
   min-height: 240px;
 }
@@ -137,6 +139,12 @@ html, body {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: rgba(255,255,255,0.02);
+}
+
+/* Settings button lives in the top-right corner of the info panel */
+.tabs .iconBtn{
+  margin-left: auto;
+  align-self: center;
 }
 
 .tabBtn{
@@ -163,7 +171,7 @@ html, body {
 }
 .hueTitle{ font-weight:800; margin-bottom:6px; }
 
-.orgInfo{ padding: 10px; color: rgba(255,255,255,0.85); font-size: 13px; line-height: 1.35; min-width: 210px; }
+.orgInfo{ padding: 10px; color: rgba(255,255,255,0.85); text-align: center; font-size: 13px; line-height: 1.35; min-width: 210px; }
 
 #statusPanel{
   width: 100%;          /* было var(--centerW) */
@@ -175,7 +183,7 @@ html, body {
   height: 445px;        /* стартовый размер */
   position: relative;
 
-  resize: both;         /* <-- вот оно */
+  resize: none;
   overflow: hidden;     /* важно: resize работает, если overflow не visible */
   min-width: 240px;
   min-height: 240px;
@@ -183,26 +191,25 @@ html, body {
 
 .lifeOverlay{
   position: absolute;
-  top: 8px;
-  right: 10px;
+  top: 16px;
+  right: 19px;
   z-index: 5;
   pointer-events: none;
   display: grid;
   gap: 4px;
-  justify-items: end;
+    justify-items: end;
   text-align: right;
 }
 
 .lifePill{
-  color: #f59e0b;
   
-}
+  }
 
 .perfStats{
   display: grid;
   gap: 2px;
   font-size: 10px;
-  color: var(--muted);
+  color:  #cc632c;
 }
 .perfItem{
   line-height: 1.2;
@@ -242,6 +249,14 @@ html, body {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+/* Status panel: keep only 2 rows (name row + stats row) */
+.hudStatsRow{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 .hudName{
   display:flex;
@@ -341,8 +356,8 @@ html, body {
   display: block;
 
   user-select: none;
-  border: 1px solid rgba(31,42,58,.65);
-  border-radius: 10px;
+  border: 3px solid rgb(31,42,58);
+  border-radius: 15px;
   background: rgba(0,0,0,.16);
   overflow: hidden;
   cursor: grab;
@@ -531,7 +546,7 @@ html, body {
   z-index: 30;
 }
 .startBox{
-  width: 100%;
+  width: 70%;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: rgba(16,24,38,.7);
@@ -541,7 +556,7 @@ html, body {
 }
 .startBox h1{
   margin: 0 0 6px 0;
-  font-size: 16px;
+  font-size: 20px;
   letter-spacing: .6px;
 }
 .startBox p{
@@ -551,7 +566,7 @@ html, body {
   line-height: 1.35;
 }
 .btn {
-  width: 100%;
+  width: 50%;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid #24344a;
@@ -603,6 +618,7 @@ html, body {
 
 /* offline report ("Пока тебя не было") */
 #offlineSummary.offlineOverlay .offlineCard{
+	
   width: 480px; /* ~1.5x wider than previous */
   max-width: min(480px, 92vw);
   border: 1px solid #24344a;
@@ -613,7 +629,7 @@ html, body {
   box-sizing: border-box;
   color: rgba(255,255,255,0.88);
 
-  opacity: 0;
+  opacity: 1;
   transform: translateY(8px) scale(0.98);
   transition: opacity .18s ease, transform .18s ease;
 }
@@ -713,6 +729,7 @@ html, body {
 .modal h2{
   margin: 0 0 8px 0;
   font-size: 13px;
+  text-align: center;
   letter-spacing: .4px;
   color: var(--accent);
 }
@@ -749,6 +766,7 @@ html, body {
   gap: 10px;
   user-select: none;
   white-space: nowrap;
+  font-size: 11px;
   justify-content: flex-start;
 }
 
@@ -908,59 +926,11 @@ html, body { overscroll-behavior: none; }
 .modalBtns #symbiosisBtn{
   color: var(--muted);
 }
-.seedRow {
-  display: flex;
-  gap: 6px;
-}
-
-
-.seedCol {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.seedTitle {
-  font-size: 12px;
-  opacity: 0.75;
-  margin-bottom: 4px
-}
-
-.seedInfo {
-  font-size: 10px;
-  color: #ccc;
-}
-.planCol {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-
-.planTitle{
-  font-size: 12px;
-  opacity: 0.75;
-  margin-bottom: 4px;
-}
-
-.planInfo{
-  font-size: 12px;
-  line-height: 1.25;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
-  white-space: pre-line; /* чтобы \n работали */
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
 /* Organism list (info tab) */
 .orgList{
   display:flex;
   flex-direction:column;
-  gap:6px;
+  gap:10px;
   margin-bottom:10px;
 }
 .orgCell{
@@ -980,35 +950,42 @@ html, body { overscroll-behavior: none; }
 }
 .orgCellTop{
   display:flex;
-  align-items:baseline;
-  justify-content:space-between;
-  gap:8px;
-  font-weight:900;
-  font-size:11px;
-  color: var(--text);
+  align-items:center;
+  gap:10px;
 }
+
+.orgMetaInline{
+  margin-left:auto;
+  font-size:10px;
+  color:var(--muted);
+  font-weight:400;
+}
+
 .orgCellStage{
   font-weight:800;
   font-size:10px;
   opacity:0.7;
 }
 .orgCellMeta{
-  margin-top:4px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:6px;
   font-size:10px;
   color: var(--muted);
+  flex-wrap:wrap;
 }
 .orgBars{
   display:flex;
-  gap:5px;
+  gap:10px;
   margin-top:6px;
 }
 
 /* organism list: show the same pill style as the top HUD */
 .orgCellPills{
   display:flex;
-  flex-wrap: wrap;
   gap:6px;
-  margin-top:6px;
+  margin:0;              /* убираем третью строку */
 }
 .orgBar{
   flex:1;

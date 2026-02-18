@@ -229,6 +229,8 @@ function rerenderAll(deltaSec){
 
     const buds = Array.isArray(root.buds) ? root.buds : [];
 
+    const nowS = root.lastSeen || 0;
+
     const mkBlocks = (o)=> (o?.body?.cells?.length||0) + (o?.modules||[]).reduce((s,m)=>s+(m?.cells?.length||0),0);
     const mkBarsRow = (o)=>{
       const b = o?.bars || {};
@@ -240,7 +242,6 @@ function rerenderAll(deltaSec){
         if (v > 0.00) return "bad";
         return "bad";
       };
-
       // Show exactly like the top HUD: same labels, same % conversion, same tone classes.
       const items = [
         ["еда",  b.food],
@@ -257,22 +258,27 @@ function rerenderAll(deltaSec){
           }).join("")}
         </div>`;
     };
-    const mkItem = (which, o)=>{
+
+const mkItem = (which, o)=>{
       const isSel = (root.active === (which === -1 ? -1 : which));
       const blocks = mkBlocks(o);
       const stage = (o===root) ? 'Родитель' : 'Почка';
       const name = (o?.name || '—');
-      const now = root.lastSeen || 0;
-      const createdAt = (o?.createdAt ?? now);
-      const age = Math.max(0, now - createdAt);
+      const createdAt = (o?.createdAt ?? nowS);
+      const age = Math.max(0, nowS - createdAt);
       const ageTxt = fmtAgeSeconds ? fmtAgeSeconds(age) : `${Math.floor(age)}с`;
       const cls = isSel ? 'orgCell isActive' : 'orgCell';
+
       return `
         <div class="${cls}" data-which="${which}">
-          <div class="orgCellTop">${escapeHtml(name)}<span class="orgCellStage">${stage}</span></div>
-          <div class="orgCellMeta">блоков: ${blocks} • жизнь: ${ageTxt}</div>
+          <div class="orgCellTop">
+            <span class="orgName">${escapeHtml(name)}</span>
+            <span class="orgCellStage">${stage}</span>
+            <span class="orgMetaInline">блоков: ${blocks} • возраст: ${ageTxt}</span>
+          </div>
           ${mkBarsRow(o)}
-        </div>`;
+        </div>
+      `;
     };
 
     const listHtml = [
@@ -284,11 +290,11 @@ function rerenderAll(deltaSec){
       <div class="orgList">${listHtml}</div>
       <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре.</div>
     `;
-
-    cache.orgInfoAt = now;
+cache.orgInfoAt = now;
     cache.orgInfoActive = root.active;
   }
 }
+
 
 function escapeHtml(s){
   return String(s)
@@ -359,7 +365,7 @@ function autoTick(){
     const suffix = extras.length ? ` <span style="opacity:.7">${extras.join(" ")}</span>` : "";
     toast(`${escapeHtml(line)}${suffix}`);
   } else if ((sim.mutations|0) > 0){
-    toast(`Мутаций: <b>${sim.mutations|0}</b>.`);
+    toast(`Эволюций: <b>${sim.mutations|0}</b>.`);
   }
 
 }
@@ -846,7 +852,7 @@ function showOfflineSummary(deltaSec, sim){
     el.style.zIndex = "9999";
     el.innerHTML = `
       <div class="offlineCard">
-        <div class="offlineTitle">Пока тебя не было…</div>
+        <div class="offlineTitle">Оффлайн сводка...</div>
         <div id="offlineText" class="offlineText"></div>
         <button class="offlineOk" id="offlineOk">OK</button>
       </div>`;

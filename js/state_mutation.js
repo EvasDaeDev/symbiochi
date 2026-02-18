@@ -302,20 +302,28 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
   // отрезаем "почку": не ближе чем 2/3 длины от отростка (от крепления),
   // при этом у родителя остаётся хотя бы несколько сегментов.
   // Минимум 4 клетки в почке.
-  const minCut = Math.max(2, Math.ceil(len * (5/6)));
+  const minCut = Math.max(2, Math.ceil(len * (2/3)));
   const maxCut = len - 4;
   if (minCut > maxCut) return false;
   const cut = (minCut === maxCut)
     ? minCut
     : (minCut + Math.floor(rng() * (maxCut - minCut + 1)));
   const budSeg = cells.slice(cut);
-  if (budSeg.length < 4) return false;
+  // Safety: sometimes module.cells can be malformed or contain holes during movement/regen.
+  // If we can't get a valid bud segment, fail gracefully instead of crashing the whole tick.
+  if (!Array.isArray(budSeg) || budSeg.length < 4) return false;
 
   // Дизайн-правило: отпрыск НЕ наследует органы и НЕ получает "мини-тело".
   // Его тело — это только отделившийся сегмент отростка.
   const budSeed = (rng() * 2**31) | 0;
-  let budBodyCells = budSeg.map(([x,y]) => [x,y]);
-  const [tx,ty] = budBodyCells[10];
+  // Keep only valid [x,y] pairs (guards against undefined entries)
+  let budBodyCells = budSeg
+    .filter(c => Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]))
+    .map(([x,y]) => [x,y]);
+  if (budBodyCells.length < 4) return false;
+  const first = budBodyCells[0];
+  if (!first) return false;
+  const [tx,ty] = first;
   const budCore = [tx, ty];
 
   // направление, куда "сдвигать" почку, чтобы отделилась от родителя.
@@ -725,10 +733,10 @@ export function applyMutation(state, momentSec){
     const { biases } = getGrowthBiases(state, "body");
     const grown = growBodyConnected(state, addN, rng, null, biases);
     if (grown){
-      pushLog(state, `плоть растет (+${addN})${reasonLabel ? ` — ${reasonLabel}` : ""}.`, "mut_ok", { part: "body" });
+      pushLog(state, `Эволюция: тело выросло (+${addN})${reasonLabel ? ` — ${reasonLabel}` : ""}.`, "mut_ok", { part: "body" });
       return true;
     }
-    pushLog(state, `плоть не растет ${reasonLabel ? ` — ${reasonLabel}` : ""}.`, "mut_fail", { part: "body" });
+    pushLog(state, `Эволюция: рост тела не удался${reasonLabel ? ` — ${reasonLabel}` : ""}.`, "mut_fail", { part: "body" });
     return false;
   }
   for (let step = 0; step < growthCount; step++){
@@ -777,7 +785,7 @@ export function applyMutation(state, momentSec){
       const idx = pickBuddingModule(state, rng);
       if (idx === -1){
         // нет подходящих модулей -> не тратим тик впустую: подрастим тело
-        pushLog(state, `почкование не удалось (нет хорошего органа).`, "mut_fail", { part: "bud" });
+        pushLog(state, `Эволюция: почкование не удалось (нет подходящего Органа).`, "mut_fail", { part: "bud" });
         growBodyWithEarlyBoost("фолбэк после неудачного почкования");
         continue;
       }
@@ -789,11 +797,11 @@ export function applyMutation(state, momentSec){
       if (ok){
         state.bars.food = clamp01(state.bars.food - 0.20);
         state.bars.hp = clamp01(state.bars.hp - 0.20);
-        pushLog(state, `почкование — новый организм появился.`, "bud_ok", { part: budType, mi: idx });
+        pushLog(state, `Эволюция: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
       } else {
         pushLog(
           state,
-          `почкование не поместилось.`,
+          `Эволюция: почкование не поместилось.`,
           "mut_fail",
           { part: budType }
         );
@@ -823,15 +831,15 @@ export function applyMutation(state, momentSec){
         if (forcedByPerimeter){
           pushLog(
             state,
-            `нет места ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → тело выросло (+${addN}).`,
+            `Эволюция: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → тело выросло (+${addN}).`,
             "mut_ok",
             { part: "body" }
           );
         } else {
-          pushLog(state, `тело растет (+${addN}).`, "mut_ok", { part: "body" });
+          pushLog(state, `Эволюция: тело выросло (+${addN}).`, "mut_ok", { part: "body" });
         }
       }
-      else pushLog(state, `плоть не растет.`, "mut_fail", { part: "body" });
+      else pushLog(state, `Эволюция: рост тела не удался.`, "mut_fail", { part: "body" });
       continue;
     }
 
@@ -845,7 +853,7 @@ export function applyMutation(state, momentSec){
         strength = carrotStrength;
       }
       const baseGrows = 1 + Math.floor(rng() * 2); // 1..2
-      const moduleBoost = Math.floor((state.modules?.length || 0) / 10); // +1 per 4 modules
+      const moduleBoost = Math.floor((state.modules?.length || 0) / 7); // +1 per 4 modules
       let maxGrows = Math.max(
         1,
         Math.round((baseGrows + moduleBoost) * (EVO.appendageGrowMult || 1))
@@ -867,13 +875,13 @@ export function applyMutation(state, momentSec){
         }
         const primaryMi = (grownModules.length === 1) ? grownModules[0] : null;
         if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
-          pushLog(state, `Периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → органы тянутся.`, "mut_ok", {
+          pushLog(state, `Эволюция: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → Растут органы.`, "mut_ok", {
             part: "appendage",
             mi: primaryMi,
             grownModules
           });
         } else {
-          pushLog(state, `Орган подрос.`, "mut_ok", {
+          pushLog(state, `Эволюция: орган вырос.`, "mut_ok", {
             part: "appendage",
             mi: primaryMi,
             grownModules
@@ -882,11 +890,11 @@ export function applyMutation(state, momentSec){
       } else {
         // Do not waste the mutation step: if appendage growth failed, expand body.
         if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
-          pushLog(state, `Периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → удлинение отростков не удалось.`, "mut_fail", { part: "appendage" });
+          pushLog(state, `Эволюция: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → Рост органов не удался.`, "mut_fail", { part: "appendage" });
           // Requirement: if perimeter cap reached and we couldn't extend organs, grow body.
           growBodyWithEarlyBoost("периметр занят — фолбэк на рост тела");
         } else {
-          pushLog(state, `Рост органов не удался.`, "mut_fail", { part: "appendage" });
+          pushLog(state, `Эволюция: рост органов не удался.`, "mut_fail", { part: "appendage" });
           growBodyWithEarlyBoost("фолбэк после неудачного роста отростка");
         }
       }
@@ -906,7 +914,7 @@ export function applyMutation(state, momentSec){
       if (appendageBudget !== null && appendageKinds.has(kind)){
         mutationContext.appendageBudget = Math.max(0, appendageBudget - 1);
       }
-      pushLog(state, `Появился орган (${organLabel(kind)}).`, "mut_ok", { part: kind, mi: newMi });
+      pushLog(state, `Эволюция: появился орган (${organLabel(kind)}).`, "mut_ok", { part: kind, mi: newMi });
       continue;
     }
 
@@ -955,7 +963,7 @@ export function applyMutation(state, momentSec){
     if (altOk){
       pushLog(
         state,
-        `Орган (${organLabel(kind)}) не смог появиться → появился другой орган (${organLabel(altKind)}).`,
+        `Эволюция: орган (${organLabel(kind)}) не смог появиться → появился другой орган (${organLabel(altKind)}).`,
         "mut_ok",
         { part: altKind, mi: altMi }
       );
@@ -981,7 +989,7 @@ export function applyMutation(state, momentSec){
       // Иначе — просто фиксируем неудачу, без раздувания тела.
       pushLog(
         state,
-        `Орган (${organLabel(kind)}) ${reasonLabel}.`,
+        `Эволюция: орган (${organLabel(kind)}) ${reasonLabel}.`,
         "mut_fail",
         { part: kind }
       );
