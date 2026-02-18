@@ -31,38 +31,51 @@ html, body {
   place-items: center;
 }
 
-#wrap.wrap2{
+#wrap.wrap2 {
   display: flex;
-  grid-template-columns: 600px 355px;
-  justify-content: center; /* Горизонталь */
-  align-items: center;     /* Вертикаль */
-  height: 100vh;           /* Высота на весь экран */
-  gap: 5px; /* расстояние между centerCol и infoPanel */
-}
-
-
-.panel{
-  background: radial-gradient(120% 120% at 50% 30%, #0e1420 0%, #070a0f 70%);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  flex-direction: row;      /* По умолчанию в ряд (десктоп) */
+  justify-content: center;
+  align-items: stretch;     /* Уравнивает высоту колонок */
+  align-content: center;    /* Центрирует группу по вертикали */
+  flex-wrap: wrap;          /* Разрешает перенос на новую строку */
+  height: 100vh;
+  gap: 5px;
+  padding: 10px;
+  box-sizing: border-box;
   
-  overflow: hidden;
 }
 
-/* legacy panels removed in new UI */
-
-#centerCol{
+#centerCol {
   display: grid;
   grid-template-rows: var(--statusH) auto;
-  gap: 5px;
+    flex: 0 1 600px;         /* Базовая ширина 600px, но может сужаться */
+  border-radius: 12px;
+  border: 1px solid var(--border)
 }
 
-#infoPanel{
+#infoPanel {
   display: grid;
   grid-template-rows: auto auto 1fr;
-  min-height: 550px;
-  resize: both;
+  flex: 0 1 355px;         /* Базовая ширина 355px */
+  min-height: 240px; 
   overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border)
+}
+
+/* --- Адаптив для телефонов --- */
+@media (max-width: 980px) { /* Если экран меньше суммы ширин колонок */
+  #wrap.wrap2 {
+    height: auto;           /* Разрешаем странице скроллиться вниз */
+    flex-direction: column; /* Ставим окна друг под друга */
+    align-items: center;    /* Центрируем их по горизонтали */
+  }
+  
+  #centerCol, #infoPanel {
+    width: 100%;            /* Растягиваем на всю ширину экрана */
+    max-width: 600px;       /* Чтобы не были слишком широкими */
+    flex: none;             /* Отключаем флекс-управление шириной */
+  }
 }
 
 .tabs{
