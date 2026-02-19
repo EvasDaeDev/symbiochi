@@ -9,6 +9,7 @@ import { wormOffset as wormOffsetAnim } from "./organs/worm.js";
 import { tentacleOffset as tentacleOffsetAnim } from "./organs/tentacle.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 import { RULES } from "./rules-data.js";
+import { moodEmoji, stateEmoji } from "../content/icons.js";
 
 /**
  * Canvas pixel-block renderer (procedural, no sprites).
@@ -2001,16 +2002,16 @@ export function renderLegend(org, legendEl){
 
   const items = [
     { part:"body",    title:"Тело",    desc:"Основная биомасса." },
-    { part:"core",     title:"Ядро",    desc:"Центр жизненной активности. Цвет отражает текущее состояние организма." },
+    { part:"core",     title:"Ядро",    desc:"Цвет отражает состояние организма." },
     { part:"eye",     title:"Глаза",   desc:"Растут вместе с телом." },
 
-    { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный отросток." },
+    { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный огран." },
     { part:"tentacle", title:organLabel("tentacle"), desc:"Мягкая, подвижная структура." },
-    { part:"tail",     title:organLabel("tail"),     desc:"Чем лучше уход, тем дальше он тянется от тела." },
+    { part:"tail",     title:organLabel("tail"),     desc:"Чем лучше уход, тем дальше тянется." },
     { part:"worm",     title:organLabel("worm"),     desc:"Мягкое волнообразное движение." },
     { part:"limb",     title:organLabel("limb"),     desc:"Опора/движение." },
     { part:"spike",    title:organLabel("spike"),    desc:"Защитная реакция." },
-    { part:"shell",    title:organLabel("shell"),    desc:"Закрытая форма. Тело пытается изолироваться." },
+    { part:"shell",    title:organLabel("shell"),    desc:"Тело пытается изолироваться." },
 
     // поздние органы (добавлены в PARTS)
     { part:"teeth",    title:organLabel("teeth"),    desc:"Атака (зубы)." },
@@ -2078,11 +2079,11 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   // seed moved to settings
 
   els.hudMeta.innerHTML = `
-    <span class="pill ${barToneCls(target.bars.food)}">еда: ${barPct(target.bars.food)}%</span>
-    <span class="pill ${barToneCls(target.bars.clean)}">чист: ${barPct(target.bars.clean)}%</span>
-    <span class="pill ${barToneCls(target.bars.hp)}">здор: ${barPct(target.bars.hp)}%</span>
-    <span class="pill ${barToneCls(target.bars.mood)}">настр: ${barPct(target.bars.mood)}%</span>
-    <span class="pill ${status.cls}">сост: ${status.txt}</span>
+    <span class="pill stat ${barToneCls(target.bars.food)}" data-stat="food" title="еда: ${barPct(target.bars.food)}%"><span class="ico"></span><span class="val">${barPct(target.bars.food)}%</span></span>
+    <span class="pill stat ${barToneCls(target.bars.clean)}" data-stat="clean" title="чист: ${barPct(target.bars.clean)}%"><span class="ico"></span><span class="val">${barPct(target.bars.clean)}%</span></span>
+    <span class="pill stat ${barToneCls(target.bars.hp)}" data-stat="hp" title="здор: ${barPct(target.bars.hp)}%"><span class="ico"></span><span class="val">${barPct(target.bars.hp)}%</span></span>
+    <span class="pill stat ${barToneCls(target.bars.mood)}" data-stat="mood" title="настр: ${barPct(target.bars.mood)}%"><span class="ico">${moodEmoji(target.bars.mood)}</span><span class="val">${barPct(target.bars.mood)}%</span></span>
+    <span class="pill stat ${status.cls}" data-stat="state" title="сост: ${status.txt}"><span class="ico">${stateEmoji(status.txt)}</span></span>
       `;
 
   // second row: life time + carrots inventory (input is static in DOM)

@@ -10,6 +10,8 @@ import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
 import { getFxPipeline } from "./FX/pipeline.js";
 import { UI, PERF } from "./config.js";
 
+import { applyIconCssVars, moodEmoji, stateEmoji } from "../content/icons.js";
+
 import {
   syncCanvas,
   renderRules,
@@ -115,6 +117,9 @@ const els = {
   dbgBody: document.getElementById("dbgBody"),
   dbgCount: document.getElementById("dbgCount"),
 };
+
+// Centralized SVG icon sources -> CSS variables (buttons + stat pills)
+applyIconCssVars();
 
 const toast = makeToast();
 
@@ -233,30 +238,37 @@ function rerenderAll(deltaSec){
 
     const mkBlocks = (o)=> (o?.body?.cells?.length||0) + (o?.modules||[]).reduce((s,m)=>s+(m?.cells?.length||0),0);
     const mkBarsRow = (o)=>{
-      const b = o?.bars || {};
+      const b = o?.bars || { food:1, clean:1, hp:1, mood:1 };
       const tone = (v)=>{
         if (!Number.isFinite(v)) return "";
         if (v > 0.80) return "ok";
         if (v > 0.60) return "info";
         if (v > 0.20) return "warn";
-        if (v > 0.00) return "bad";
         return "bad";
       };
-      // Show exactly like the top HUD: same labels, same % conversion, same tone classes.
-      const items = [
-        ["еда",  b.food],
-        ["чист", b.clean],
-        ["здор", b.hp],
-        ["настр", b.mood],
-      ];
-      return `
-        <div class="orgCellPills">
-          ${items.map(([k,v])=>{
-            const p = barPct(v);
-            const cls = tone(v);
-            return `<span class="pill ${cls}">${k}: ${p}%</span>`;
-          }).join("")}
-        </div>`;
+
+      const minBar = Math.min(b.food ?? 0, b.clean ?? 0, b.hp ?? 0, b.mood ?? 0);
+      const statusTxt = (minBar <= 0.01) ? "усыхание" :
+                        (minBar <= 0.10) ? "анабиоз" :
+                        (minBar <= 0.15) ? "критично" :
+                        (minBar <= 0.35) ? "плохо" :
+                        (minBar <= 0.65) ? "норма" :
+                        "хорошо";
+
+      const pill = (stat, title, cls, icoText, valText)=>{
+        // icoText: emoji for mood/state; SVG pills keep empty text and use CSS background-image.
+        const icoSpan = `<span class="ico">${icoText || ""}</span>`;
+        const valSpan = `<span class="val">${valText}</span>`;
+        return `<span class="pill stat ${cls}" data-stat="${stat}" title="${escapeHtml(title)}">${icoSpan}${valSpan}</span>`;
+      };
+
+      const f = pill("food",  `еда: ${barPct(b.food)}%`,  tone(b.food),  "", `${barPct(b.food)}%`);
+      const c = pill("clean", `чист: ${barPct(b.clean)}%`, tone(b.clean), "", `${barPct(b.clean)}%`);
+      const h = pill("hp",    `здор: ${barPct(b.hp)}%`,    tone(b.hp),    "", `${barPct(b.hp)}%`);
+      const m = pill("mood",  `настр: ${barPct(b.mood)}%`, tone(b.mood),  moodEmoji(Math.max(0, Math.min(1, b.mood ?? 0))), `${barPct(b.mood)}%`);
+      const s = pill("state", `сост: ${statusTxt}`,         tone(minBar),   stateEmoji(statusTxt), "");
+
+      return `<div class="orgCellPills">${f}${c}${h}${m}${s}</div>`;
     };
 
 const mkItem = (which, o)=>{
@@ -797,7 +809,7 @@ async function startGame(){
   view.lastActive = view.state?.active ?? null;
 
   ensureMoving(view);
-
+  
   // Получаем pipeline
   view.canvas = els.canvas;  
   const fx = getFxPipeline(view, els.canvas);
@@ -811,7 +823,10 @@ async function startGame(){
   view.cam = { ox: (c[0]||0), oy: (c[1]||0) };
   view.camTarget = null;
 
-  els.startOverlay.style.display = "none";
+if (els.startOverlay){
+  els.startOverlay.classList.remove("show");
+  setTimeout(()=>{ els.startOverlay.style.display = "none"; }, 200);
+}
 
   // hooks
   attachDebugPanel(view, els);
@@ -836,28 +851,43 @@ async function startGame(){
   rerenderAll(0);
   autoTick();
   startLoops();
+  
+
 }
 
 function showOfflineSummary(deltaSec, sim){
   let el = document.getElementById("offlineSummary");
+
   if (!el){
     el = document.createElement("div");
     el.id = "offlineSummary";
-    el.style.position = "fixed";
-    el.style.inset = "0";
-    el.style.background = "rgba(0,0,0,0.6)";
-    el.style.display = "flex";
-    el.style.alignItems = "center";
-    el.style.justifyContent = "center";
-    el.style.zIndex = "9999";
+    el.className = "overlay offlineOverlay";
+
     el.innerHTML = `
-      <div class="offlineCard">
-        <div class="offlineTitle">Оффлайн сводка...</div>
-        <div id="offlineText" class="offlineText"></div>
-        <button class="offlineOk" id="offlineOk">OK</button>
-      </div>`;
+      <div class="offlineCard modalAnim">
+        <div class="offlineHeader">
+          <div class="offlineTitle">ОФФЛАЙН СВОДКА</div>
+          <div class="offlineSub">Пока тебя не было, симуляция продолжалась.</div>
+        </div>
+
+        <div class="offlineBody" id="offlineText"></div>
+
+        <div class="offlineFooter">
+          <button class="btn" id="offlineOk">OK</button>
+        </div>
+      </div>
+    `;
+
     document.body.appendChild(el);
-    el.querySelector("#offlineOk").onclick = ()=> el.remove();
+
+    // ВАЖНО: addClass show — после вставки в DOM
+    requestAnimationFrame(()=> el.classList.add("show"));
+
+    el.querySelector("#offlineOk").onclick = ()=>{
+      el.classList.remove("show");
+      // дать анимации уйти
+      setTimeout(()=> el.remove(), 200);
+    };
   }
 
   const mins = Math.round(deltaSec/60);
@@ -865,13 +895,36 @@ function showOfflineSummary(deltaSec, sim){
   const grown = sim.grownBlocks|0;
   const shrunk = sim.shrunkBlocks|0;
 
-  const lines = [];
-  lines.push(`Отсутствие: <b>${mins} мин</b>`);
-  lines.push(`Мутаций: <b>${mutTotal}</b>`);
-  lines.push(`Рост: <b>+${grown}</b> блок.`);
-  lines.push(`Усыхание: <b>-${shrunk}</b> блок.`);
-
-  el.querySelector("#offlineText").innerHTML = lines.join("<br>");
+  el.querySelector("#offlineText").innerHTML = `
+    <div class="offlineRow neutral"><span class="label">Тебя не было</span><span class="value"><b>${mins} мин</b></span></div>
+    <div class="offlineRow neutral"><span class="label">Циклов эволюции</span><span class="value"><b>${mutTotal}</b></span></div>
+    <div class="offlineRow good"><span class="label">Появилось</span><span class="value"><b>+${grown}</b> блок.</span></div>
+    <div class="offlineRow bad"><span class="label">Усохло</span><span class="value"><b>-${shrunk}</b> блок.</span></div>
+  `;
 }
 
+
 els.playBtn.addEventListener("click", startGame);
+
+document.addEventListener("click", (e) => {
+  const pill = e.target.closest?.(".pill.stat");
+  if (!pill) return;
+
+  // Проверяем что это touch-устройство
+  const isTouch =
+    (window.matchMedia && matchMedia("(hover: none)").matches) ||
+    ("ontouchstart" in window);
+
+  if (!isTouch) return;
+
+  const text = pill.getAttribute("title");
+  if (!text) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  makeToast(text);
+}, { passive: false });
+requestAnimationFrame(() => {
+  if (els.startOverlay) els.startOverlay.classList.add("show");
+});
