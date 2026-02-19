@@ -142,13 +142,94 @@ function weightedPick(rng, pairs){
   return pairs[pairs.length - 1][0];
 }
 
+// === Organ type caps (per organism) ===
+// Limit applies to DISTINCT organ TYPES within each group, not module count.
+// (Eyes are excluded by default.)
+function getUsedOrganTypesByCaps(state, caps){
+  const used = { HARD: new Set(), MOBILE: new Set(), LATE: new Set() };
+  if (!caps || !state) return used;
+  const ex = new Set(caps.EXCLUDE || []);
+  const mods = Array.isArray(state.modules) ? state.modules : [];
+  for (const m of mods){
+    const t = m?.type;
+    if (!t || ex.has(t)) continue;
+    if (caps.HARD?.types?.includes(t)) used.HARD.add(t);
+    if (caps.MOBILE?.types?.includes(t)) used.MOBILE.add(t);
+    if (caps.LATE?.types?.includes(t)) used.LATE.add(t);
+  }
+  return used;
+}
+
+function groupForOrganType(t, caps){
+  if (!caps || !t) return null;
+  if (caps.HARD?.types?.includes(t)) return "HARD";
+  if (caps.MOBILE?.types?.includes(t)) return "MOBILE";
+  if (caps.LATE?.types?.includes(t)) return "LATE";
+  return null;
+}
+
+function applyOrganTypeCapsToWeights(state, baseWeights, caps){
+  if (!caps) return baseWeights;
+  const used = getUsedOrganTypesByCaps(state, caps);
+  const mods = Array.isArray(state.modules) ? state.modules : [];
+  const hasAnyModule = mods.length > 0;
+
+  // We only cap ORGAN SPAWN weights (adding a new type).
+  // If type already exists -> allow (organ can still be spawned again).
+  const spawnKeysToType = {
+    antenna: "antenna",
+    shell: "shell",
+    spike: "spike",
+    limb: "limb",
+    tail: "tail",
+    tentacle: "tentacle",
+    worm: "worm",
+    claw: "claw",
+    fin: "fin",
+    mouth: "mouth",
+    teeth: "teeth",
+    // eye excluded by design
+  };
+
+  let blockedSum = 0;
+  const out = baseWeights.map(([k, w]) => {
+    const t = spawnKeysToType[k];
+    if (!t) return [k, w];
+    const group = groupForOrganType(t, caps);
+    if (!group) return [k, w];
+    const capN = Number.isFinite(caps[group]?.cap) ? caps[group].cap : null;
+    if (capN === null) return [k, w];
+    const isTypePresent = used[group].has(t);
+    const isFull = used[group].size >= capN;
+    if (isFull && !isTypePresent){
+      blockedSum += Math.max(0, w);
+      return [k, 0];
+    }
+    return [k, w];
+  });
+
+  // Soft compensation: if we blocked "new type" spawns, redistribute some weight
+  // to growth mutations so evolution doesn't stall.
+  if (blockedSum > 0){
+    const toAppendage = hasAnyModule ? blockedSum * 0.65 : 0;
+    const toBody = blockedSum - toAppendage;
+    for (let i = 0; i < out.length; i++){
+      const k = out[i][0];
+      if (k === "grow_appendage" && toAppendage > 0) out[i] = [k, out[i][1] + toAppendage];
+      if (k === "grow_body" && toBody > 0) out[i] = [k, out[i][1] + toBody];
+    }
+  }
+
+  return out;
+}
+
 // === Perimeter cap for *new organs* ===
 // New organs may not "occupy" more than 75% of the body's perimeter.
 // If cap reached: do NOT spawn new organs. Instead either:
 //  - grow existing organs (lengthen appendages), OR
 //  - grow body to create new perimeter.
-const MAX_PERIMETER_USAGE = 0.52;
-const EARLY_FAST_BODY_BLOCKS = 180; // early stage grows faster
+const MAX_PERIMETER_USAGE = 0.47;
+const EARLY_FAST_BODY_BLOCKS = 250; // early stage grows faster
 
 // We count *occupied perimeter anchors* (body perimeter cells that have an attached organ).
 // This matches the requirement "free perimeter too low" much better than a heuristic cost sum.
@@ -765,7 +846,13 @@ export function applyMutation(state, momentSec){
         forcedKind = "grow_appendage";
       }
     }
-    let kind = forcedKind ?? weightedPick(rng, weights);
+    // Apply per-organism organ-type caps (distinct types per group).
+    // Must be evaluated per-step because the organism may gain a new type mid-tick.
+    const caps = EVO?.organTypeCaps || null;
+    const stepWeights = applyOrganTypeCapsToWeights(state, weights, caps);
+    let sumW = 0;
+    for (const [, w] of stepWeights) sumW += Math.max(0, w);
+    let kind = forcedKind ?? (sumW > 0 ? weightedPick(rng, stepWeights) : "grow_body");
     const appendageBudget = Number.isFinite(mutationContext?.appendageBudget)
       ? mutationContext.appendageBudget
       : null;
@@ -950,15 +1037,20 @@ export function applyMutation(state, momentSec){
     // Reasons that should trigger "make room / grow body" fallback.
     let blockedSeen = (firstReason === "blocked" || firstReason === "min_body");
 
-    const organKeys = weights
+    // IMPORTANT:
+    // Use the *effective* weights for this step (with caps + compensation applied),
+    // otherwise the fallback may spawn organ types that were intentionally blocked
+    // (e.g. by organ-type caps), which can break invariants.
+    const organKeys = stepWeights
       .map(([k]) => k)
       .filter((k) => k !== "grow_body" && k !== "grow_appendage" && k !== "bud");
 
     // Сортируем по весу (сильнее вероятные — раньше), но с небольшим шумом.
-    const weightMap = new Map(weights);
+    const weightMap = new Map(stepWeights);
     const candidates = organKeys
       .filter((k) => k !== kind)
       .map((k) => ({ k, w: (weightMap.get(k) || 0) }))
+      .filter((o) => (o.w || 0) > 0)
       .sort((a, b) => (b.w - a.w) || (rng() - 0.5));
 
     let altOk = false;

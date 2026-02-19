@@ -31,6 +31,10 @@ html, body {
   place-items: center;
 }
 
+.toast.bad{
+  color: var(--danger);
+}
+
 /* Универсальная анимация появления карточек */
 .modalAnim{
   opacity: 0;
@@ -320,6 +324,10 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  justify-content: space-between; /* иконка слева, число справа */
+  gap: 6px;
+  width: 58px;        /* ← фиксированная ширина */
+  box-sizing: border-box;
 }
 .pill.stat .ico{
   width: 16px;
@@ -1056,15 +1064,13 @@ html, body { overscroll-behavior: none; }
 .orgCellPills{
   display:flex;
   gap:6px;
-  margin:0;              /* убираем третью строку */
+  width: 58px;          /* фиксированная общая ширина */
+  margin:0;             /* убираем третью строку */
 }
 .orgBar{
-  flex:1;
+.orgBar{
+  flex: 1 1 0;           /* делят ширину поровну */
   height:6px;
-  border-radius:6px;
-  overflow:hidden;
-  background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.06);
 }
 .orgBarFill{
   height:100%;

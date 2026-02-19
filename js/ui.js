@@ -19,11 +19,22 @@ function getActiveOrg(state){
 
 export function makeToast(){
   const el = document.getElementById("toast");
-  return (msg)=>{
+
+  return (msg, type)=>{
+    // сброс предыдущих типов
+    el.className = "toast";
+
+    if (type){
+      el.classList.add(type); // например "bad"
+    }
+
     el.innerHTML = msg;
     el.classList.add("show");
+
     clearTimeout(el._t);
-    el._t = setTimeout(()=>el.classList.remove("show"), 1200);
+    el._t = setTimeout(()=>{
+      el.classList.remove("show");
+    }, 1200);
   };
 }
 

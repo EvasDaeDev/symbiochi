@@ -591,7 +591,7 @@ function attachPickOrganism(){
       s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
       if (s.carrotTick.id !== tickId){ s.carrotTick.id = tickId; s.carrotTick.used = 0; }
       if (s.carrotTick.used >= CARROT.maxPerTick){
-        toast(`Лимит: ${CARROT.maxPerTick} морковки за тик.`);
+        toast(`Лимит: ${CARROT.maxPerTick} морковки за тик.`, "bad");
         return;
       }
 
@@ -625,7 +625,7 @@ function attachPickOrganism(){
       s.coinTick = s.coinTick || { id: tickId, used: 0 };
       if (s.coinTick.id !== tickId){ s.coinTick.id = tickId; s.coinTick.used = 0; }
       if (s.coinTick.used >= COIN.maxPerTick){
-        toast(`Лимит: ${COIN.maxPerTick} монетки за тик.`);
+        toast(`Лимит: ${COIN.maxPerTick} монетки за тик.`, "bad");
         return;
       }
 

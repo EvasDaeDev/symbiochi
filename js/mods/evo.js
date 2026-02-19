@@ -18,5 +18,20 @@ export const EVO = {
   organGrowthRate: {
     tail: 4/3,
     tentacle: 4/3
+  },
+
+  // === Organ type caps (per organism) ===
+  // Limits apply to the NUMBER OF DISTINCT TYPES from each group, not to module count.
+  // Examples:
+  //  - HARD: any 2 of [ANTENNA, SHELL, SPIKE]
+  //  - MOBILE: any 3 of [LIMB, TAIL, TENTACLE, WORM]
+  //  - LATE: any 2 of [CLAW, FIN, MOUTH, TEETH]
+  // Eyes (and core) are excluded.
+  // Set to null to disable.
+  organTypeCaps: {
+    HARD:   { types: ["antenna", "shell", "spike"], cap: 2 },
+    MOBILE: { types: ["limb", "tail", "tentacle", "worm"], cap: 3 },
+    LATE:   { types: ["claw", "fin", "mouth", "teeth"], cap: 2 },
+    EXCLUDE: ["eye", "core"]
   }
 };
