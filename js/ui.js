@@ -38,43 +38,66 @@ export function makeToast(){
   };
 }
 
-export function renderLog(state, els){
+// Переменная для отслеживания последней отрисованной записи (вне функции)
+let lastRenderedTime = 0;
+
+export function renderLog(state, els) {
   const root = (state && state.__logRoot) ? state.__logRoot : state;
   const log = root?.log || [];
 
-  els.logBody.innerHTML = log.slice().reverse().map((e) => {
-    const cls =
-      e.kind === "mut_ok" ? "logEntry good" :
-      e.kind === "bud_ok" ? "logEntry bud" :
-      e.kind === "mut_fail" ? "logEntry warn" :
-      e.kind === "alert" ? "logEntry alert" :
-      "logEntry";
+  // 1. Находим только ТЕ записи, которых еще нет в DOM
+  // Фильтруем по времени (e.t), так как записи в логе обычно идут по порядку
+  const newEntries = log.filter(e => e.t > lastRenderedTime);
 
-    const meta = e.meta || {};
-    const org = Number.isFinite(meta.org) ? meta.org : "";
-    const mi = Number.isFinite(meta.mi) ? meta.mi : "";
-    const part = meta.part ? String(meta.part) : "";
-    const grown = Array.isArray(meta.grownModules) ? meta.grownModules.join(",") : "";
+  if (newEntries.length > 0) {
+    // Генерируем HTML только для НОВЫХ записей
+    const newHtml = newEntries.map((e) => {
+      const cls = 
+        e.kind === "mut_ok" ? "logEntry good" :
+        e.kind === "bud_ok" ? "logEntry bud" :
+        e.kind === "mut_fail" ? "logEntry warn" :
+        e.kind === "alert" ? "logEntry alert" : "logEntry";
 
-    return `
-      <div class="${cls}" data-org="${org}" data-mi="${mi}" data-part="${escapeHtml(part)}" data-grown="${escapeHtml(grown)}">
-        <div class="when">${new Date(e.t*1000).toLocaleTimeString()} • ${escapeHtml(e.kind)}</div>
-        <div class="msg">${escapeHtml(e.msg)}</div>
-      </div>
-    `;
-  }).join("");
+      const meta = e.meta || {};
+      const org = Number.isFinite(meta.org) ? meta.org : "";
+      const mi = Number.isFinite(meta.mi) ? meta.mi : "";
+      const part = meta.part ? String(meta.part) : "";
+      const grown = Array.isArray(meta.grownModules) ? meta.grownModules.join(",") : "";
 
-  const total = 1e-6 + state.care.feed + state.care.wash + state.care.heal + state.care.neglect;
-  const pf = state.care.feed/total, pw = state.care.wash/total, ph = state.care.heal/total, pn = state.care.neglect/total;
+      return `
+        <div class="${cls}" data-org="${org}" data-mi="${mi}" data-part="${escapeHtml(part)}" data-grown="${escapeHtml(grown)}">
+          <div class="when">${new Date(e.t * 1000).toLocaleTimeString()} • ${escapeHtml(e.kind)}</div>
+          <div class="msg">${escapeHtml(e.msg)}</div>
+        </div>
+      `;
+    }).join("");
+
+    // Вставляем новые записи в САМОЕ НАЧАЛО списка
+    els.logBody.insertAdjacentHTML('afterbegin', newHtml);
+    
+    // Обновляем метку времени последней записи
+    lastRenderedTime = Math.max(...newEntries.map(e => e.t));
+
+    // 2. Ограничиваем длину списка в DOM (чтобы не тормозило при 180+ записях)
+    while (els.logBody.children.length > 70) {
+      els.logBody.lastElementChild.remove();
+    }
+  }
+
+  // 3. Расчет футера (остается прежним, так как он всегда меняется)
+  const total = 1e-6 + (state.care?.feed || 0) + (state.care?.wash || 0) + (state.care?.heal || 0) + (state.care?.neglect || 0);
+  const pf = (state.care?.feed || 0) / total, 
+        pw = (state.care?.wash || 0) / total, 
+        ph = (state.care?.heal || 0) / total, 
+        pn = (state.care?.neglect || 0) / total;
+        
   const top = [
-    ["кормить", pf],
-    ["помыть", pw],
-    ["лечение", ph],
-    ["запущ", pn]
-  ].sort((a,b)=>b[1]-a[1])[0];
+    ["кормить", pf], ["помыть", pw], ["лечение", ph], ["запущ", pn]
+  ].sort((a, b) => b[1] - a[1])[0];
 
-  els.logFooter.textContent = `Стиль: ${top[0]} (${Math.round(top[1]*100)}%) • лог: ${log.length}/${180}`;
+  els.logFooter.textContent = `Стиль ухода: ${top[0]} (${Math.round(top[1] * 100)}%) • лог: ${log.length}/70`;
 }
+
 
 export function renderDebugLog(view, els){
   if (!els.dbgBody || !els.dbgCount) return;
