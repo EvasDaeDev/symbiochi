@@ -9,6 +9,12 @@ import { BAR_MAX } from "./world.js";
 import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
 import { getFxPipeline } from "./FX/pipeline.js";
 import { UI, PERF } from "./config.js";
+import {
+  initBioHandpan,
+  updateBioHandpan,
+  setOrganismFilter,
+  debugPlayTestHit,
+} from "./mods/audio/bio_handpan.js";
 
 import { applyIconCssVars, moodEmoji, stateEmoji } from "../content/icons.js";
 
@@ -143,6 +149,8 @@ const view = {
   _ro: null,
   flash: null,
 };
+
+window.debugPlayTestHit = debugPlayTestHit;
 
 function stopLoops(){
   if (view.renderTimer){
@@ -385,6 +393,8 @@ function startLoops(){
     const dtSec = Math.min(0.05, Math.max(0, delta) / 1000);
     tickMoving(view, view.state, dtSec);
     tickCamera(view, dtSec);
+
+	updateBioHandpan(view.state);
 
     const renderStart = performance.now();
     renderGrid(view.state, els.canvas, els.grid, view);
@@ -744,6 +754,34 @@ function attachOrgListClicks() {
 async function startGame(){
   view.state = migrateOrNew();
   view.lastActive = view.state?.active ?? null;
+  
+  // --- Bio Handpan: init + фильтр состояний организмов ---
+  // Создаём AudioContext и мастер-цепочку (gain + компрессор)
+  initBioHandpan();
+
+  // Организм звучит только если он "живой":
+  // не в анабиозе и не в усыхании.
+  //
+  // Логика совпадает с mkBarsRow: там minBar <= 0.01 → "усыхание",
+  // <= 0.10 → "анабиоз". Мы вырубаем звук для обоих случаев.
+  setOrganismFilter((org) => {
+    if (!org) return false;
+
+    const b = org.bars || {};
+    const food  = Number.isFinite(b.food)  ? b.food  : 1;
+    const clean = Number.isFinite(b.clean) ? b.clean : 1;
+    const hp    = Number.isFinite(b.hp)    ? b.hp    : 1;
+    const mood  = Number.isFinite(b.mood)  ? b.mood  : 1;
+
+    const minBar = Math.min(food, clean, hp, mood);
+
+    // minBar <= 0.01  → усыхание
+    // minBar <= 0.10  → анабиоз
+    if (minBar <= 0.10) return false;
+
+    return true;
+  });
+  // --- конец блока Bio Handpan ---
 
   ensureMoving(view);
   

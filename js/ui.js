@@ -4,6 +4,7 @@ import { saveGame, deleteSave, actOn } from "./state.js";
 import { extractGenome, encodeGenome } from "./mods/merge.js";
 import { applySymbiosisMerge } from "./state_mutation.js";
 import { getFxPipeline } from "./FX/pipeline.js";
+import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
 
 function getActiveOrg(state){
   // Selection model:
@@ -580,8 +581,8 @@ export function attachDragPan(el, view) {
       }
     }
 
-    view.cam.ox -= dx / (view.blockPx || 4);
-    view.cam.oy -= dy / (view.blockPx || 4);
+    view.cam.ox -= dx / ((view.blockPx || 4) * 2);
+    view.cam.oy -= dy / ((view.blockPx || 4) * 2);
 
     lastPos = { x: e.clientX, y: e.clientY };
   };
@@ -592,11 +593,21 @@ export function attachDragPan(el, view) {
     isDragging = false;
     el.classList.remove("dragging");
     if (e.pointerId !== undefined) el.releasePointerCapture(e.pointerId);
-    
+    if (!window._wasDrag) {
+  const rect = view.canvas.getBoundingClientRect();
+  const nx = (e.clientX - rect.left) / rect.width;
+  let ny = (e.clientY - rect.top) / rect.height;
+	ny = 1 - ny;
+  // если будет вверх ногами — раскомментируй:
+  // ny = 1 - ny;
+
+  addRipple(view, nx, ny, RIPPLE_KIND.TAP);
+}
     // Сбрасываем флаг drag через небольшое время
     setTimeout(() => {
       window._wasDrag = false;
     }, 50);
+
   };
 
   el.addEventListener("pointerdown", startDrag);

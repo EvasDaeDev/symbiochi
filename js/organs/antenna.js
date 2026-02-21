@@ -3,7 +3,7 @@ export const ANTENNA = {
   wind: false,
   growthDir: 8,
   minLen: 2,
-  maxExtra: 17,
+  maxExtra: 22,
   maxLen: 16,
   upBias: 0.7,
   spawnWeight: 0.12,

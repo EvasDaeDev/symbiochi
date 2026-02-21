@@ -1,6 +1,12 @@
 export const FIN = {
   label: "Плавник",
   wind: true,
+  minLen: 3,
+  maxExtra: 15,
+  maxLen: 10,
+  spawnWeight: 0.08,
+  growthChance: 0.2,
+  width: 2,
   growthDir: 16,
   offsets: [
     [1, 0],

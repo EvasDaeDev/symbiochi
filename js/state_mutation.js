@@ -228,7 +228,7 @@ function applyOrganTypeCapsToWeights(state, baseWeights, caps){
 // If cap reached: do NOT spawn new organs. Instead either:
 //  - grow existing organs (lengthen appendages), OR
 //  - grow body to create new perimeter.
-const MAX_PERIMETER_USAGE = 0.47;
+const MAX_PERIMETER_USAGE = 0.55;
 const EARLY_FAST_BODY_BLOCKS = 250; // early stage grows faster
 
 // We count *occupied perimeter anchors* (body perimeter cells that have an attached organ).
@@ -239,17 +239,48 @@ const EARLY_FAST_BODY_BLOCKS = 250; // early stage grows faster
 // - We store computed anchors on the module as `anchorKeys` (array of body-cell keys).
 // - For backward compatibility with old saves, anchors are computed lazily when needed.
 
-function bodyPerimeterSet(body){
-  const set = new Set();
-  if (!body || !Array.isArray(body.cells)) return set;
-  const bodySet = new Set(body.cells.map(([x, y]) => key(x, y)));
-  for (const [x, y] of body.cells){
-    // A body cell is on the perimeter if it has at least one empty 4-neighbor.
-    if (!bodySet.has(key(x + 1, y)) || !bodySet.has(key(x - 1, y)) || !bodySet.has(key(x, y + 1)) || !bodySet.has(key(x, y - 1))){
-      set.add(key(x, y));
+function outerBodyPerimeterSet(body){
+  const perim = new Set();
+  if (!body || !Array.isArray(body.cells) || body.cells.length === 0) return perim;
+
+  const bodySet = new Set(body.cells.map(([x,y]) => key(x,y)));
+
+  // bounds + padding 1
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  for (const [x,y] of body.cells){
+    if (x<minX) minX=x; if (y<minY) minY=y;
+    if (x>maxX) maxX=x; if (y>maxY) maxY=y;
+  }
+  minX -= 1; minY -= 1; maxX += 1; maxY += 1;
+
+  // flood fill empty space from outside
+  const q = [[minX, minY]];
+  const seen = new Set([key(minX, minY)]);
+
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  while (q.length){
+    const [x,y] = q.pop();
+    for (const [dx,dy] of dirs){
+      const nx = x + dx, ny = y + dy;
+      if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
+      const k = key(nx, ny);
+      if (seen.has(k)) continue;
+      if (bodySet.has(k)) continue; // can't go through body
+      seen.add(k);
+      q.push([nx, ny]);
     }
   }
-  return set;
+
+  // perimeter cells: body cells adjacent to "outside reachable empty"
+  for (const [x,y] of body.cells){
+    const kxy = key(x,y);
+    // if any neighbor is outside-reachable empty -> outer perimeter
+    const n1 = key(x+1,y), n2 = key(x-1,y), n3 = key(x,y+1), n4 = key(x,y-1);
+    if (seen.has(n1) || seen.has(n2) || seen.has(n3) || seen.has(n4)){
+      perim.add(kxy);
+    }
+  }
+  return perim;
 }
 
 function computeModuleAnchorKeys(state, mod, bodySet, perimSet){
@@ -278,7 +309,7 @@ function collectOccupiedPerimeterAnchors(state){
   const occupied = new Set();
   if (!state?.body || !Array.isArray(state.body.cells)) return occupied;
   const bodySet = new Set(state.body.cells.map(([x, y]) => key(x, y)));
-  const perimSet = bodyPerimeterSet(state.body);
+  const perimSet = outerBodyPerimeterSet(state.body);
 
   for (const m of (state.modules || [])){
     if (!m) continue;
@@ -296,9 +327,10 @@ function collectOccupiedPerimeterAnchors(state){
 }
 
 function perimeterUsage(state){
-  const total = calcBodyPerimeter(state?.body);
+  const perimSet = outerBodyPerimeterSet(state?.body);
+  const total = perimSet.size;
   if (!total) return 0;
-  const used = collectOccupiedPerimeterAnchors(state).size;
+  const used = collectOccupiedPerimeterAnchors(state).size; // он уже будет использовать outer
   return used / total;
 }
 

@@ -3,7 +3,7 @@ export const TEETH = {
   wind: false,
   growthDir: 8,
   minLen: 2,
-  maxExtra: 5,
+  maxExtra: 10,
   dir: [1, 0],
   spawnWeight: 0.1,
   growthChance: 0.1,

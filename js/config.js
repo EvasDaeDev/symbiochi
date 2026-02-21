@@ -9,7 +9,7 @@
 // Максимальная длина отростка относительно длины тела.
 // (Сейчас в проекте рост органов дополнительно ограничивается самими орган-правилами,
 // но этот коэффициент остаётся как верхний "предохранитель".)
-export const APPENDAGE_MAX_BODY_MULT = 2;
+export const APPENDAGE_MAX_BODY_MULT = 3;
 
 export function getMaxAppendageLen(bodyLen){
   return Math.max(0, (bodyLen || 0) * APPENDAGE_MAX_BODY_MULT);

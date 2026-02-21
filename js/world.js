@@ -2,7 +2,7 @@ export const GRID_W = 36;
 export const GRID_H = 18;
 
 export const BAR_MAX = 1.4;
-export const MAX_LOG = 180;
+export const MAX_LOG = 70;
 
 export const CARROT_BODY_RANGE = 15;
 

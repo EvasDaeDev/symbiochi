@@ -3,7 +3,7 @@ export const WORM = {
   wind: false,
   growthDir: 16,
   minLen: 3,
-  maxExtra: 7,
+  maxExtra: 22,
   maxBodyMult: 2,
   spawnWeight: 0.12,
   growthChance: 0.34,
