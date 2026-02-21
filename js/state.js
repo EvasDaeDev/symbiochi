@@ -513,7 +513,12 @@ export function simulate(state, deltaSec){
   const getMutationContext = (momentSec)=>{
     const tickIndex = Math.floor(momentSec / intervalSec);
     if (!state._mutationContext || state._mutationContext.tickIndex !== tickIndex){
-      state._mutationContext = { tickIndex, appendageBudget: 200 };
+   state._mutationContext = {
+     tickIndex,
+     appendageBudget: 200,
+     offlineSim: isOffline,       // весь оффлайн catch-up
+     offlineRollup: false         // выставим точечно на "накат"
+   };
     }
     return state._mutationContext;
   };
@@ -533,20 +538,22 @@ export function simulate(state, deltaSec){
     if (gate.paused) return 0;
 
     let applied = 0;
-    const applyOnce = ()=>{
-      org._mutationContext = getMutationContext(momentSec);
-      applyMutation(org, momentSec);
-      applied += 1;
-    };
+ const applyOnce = (isRollup = false)=>{
+   org._mutationContext = getMutationContext(momentSec);
+   // важно: выставлять ПОСЛЕ getMutationContext (он может вернуть новый объект)
+   org._mutationContext.offlineRollup = !!isRollup;
+   applyMutation(org, momentSec);
+   applied += 1;
+ };
 
-    applyOnce();
+    applyOnce(false);
 
     let debt = Number.isFinite(org.mutationDebt) ? org.mutationDebt : 0;
     const remainingBudget = Math.max(0, maxPerTick - applied);
     if (debt > 0 && remainingBudget > 0){
       const extra = Math.min(debt, remainingBudget);
       for (let i = 0; i < extra; i++){
-        applyOnce();
+        applyOnce(isOffline); // если сейчас оффлайн-симуляция — это именно "накат"
       }
       debt -= extra;
       org.mutationDebt = debt;

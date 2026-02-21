@@ -741,11 +741,18 @@ export function applyMutation(state, momentSec){
   // Threshold is configurable via EVO.budMinBar (default 0.35).
   const budMinBar = Number.isFinite(EVO?.budMinBar) ? EVO.budMinBar : 0.35;
   const isHealthyEnoughForBud = minBar > budMinBar;
-  const isOfflineSim = !!state.__offlineSim;
+  // Offline sim OR offline catch-up/rollup ("накат" оффлайн роста)
+  const isOfflineSim = !!mutationContext?.offlineSim;
+  const isOfflineRollup =
+  !!state.__offlineRollup ||
+  !!state.__offlineCatchup ||
+  !!mutationContext?.offlineRollup ||
+  !!mutationContext?.offlineCatchup;
+  const isOfflineGrowth = isOfflineSim || isOfflineRollup;
 
   const canBud =
     bigBody &&
-    !isOfflineSim &&
+    !isOfflineGrowth &&
     isHealthyEnoughForBud &&
     pickBuddingModule(state, rng) !== -1;
   const hasLongModule = (state.modules || []).some((m) => (m?.cells?.length || 0) >= 60);
@@ -882,16 +889,15 @@ export function applyMutation(state, momentSec){
     // 1) Почкование
     if (kind === "bud"){
       // Hard gate: no budding offline, and no budding when "плохо" or worse.
-      if (isOfflineSim || !isHealthyEnoughForBud){
+      if (isOfflineGrowth || !isHealthyEnoughForBud){
         pushLog(
           state,
-          isOfflineSim
-            ? `Эволюция: почкование запрещено в оффлайн-режиме → растим тело.`
-            : `Эволюция: почкование запрещено при состоянии "плохо" или ниже → растим тело.`,
+          isOfflineGrowth
+            ? `Эволюция: почкование запрещено вне онлайн-игры (оффлайн/накат) → ничего не происходит.`
+            : `Эволюция: почкование запрещено при состоянии "плохо" или ниже → ничего не происходит.`,
           "mut_fail",
           { part: "bud" }
         );
-        growBodyWithEarlyBoost("почкование заблокировано правилами");
         continue;
       }
 

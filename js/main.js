@@ -12,6 +12,7 @@ import { UI, PERF } from "./config.js";
 
 import { applyIconCssVars, moodEmoji, stateEmoji } from "../content/icons.js";
 
+
 import {
   syncCanvas,
   renderRules,
@@ -26,17 +27,16 @@ import {
   renderDebugLog,
   attachSettings,
   attachActions,
-  attachDragPan,
   attachInfoTabs,
-  attachZoomWheel,
-  attachPinchZoom,
   attachLegendHuePicker,
   attachCarrotHudInput,
   attachCoinHudInput,
   attachLogFlash,
   attachDisableDoubleTapZoom,
   attachSymbiosisUI,
-  attachDebugPanel
+  attachDebugPanel,
+  attachDragPan,
+  attachZoomWheel
 } from "./ui.js";
 
 const els = {
@@ -90,7 +90,6 @@ const els = {
   coin: document.getElementById("coin"),
   wash: document.getElementById("wash"),
   heal: document.getElementById("heal"),
-  // settings modal extra fields
   seedInput: document.getElementById("seedInput"),
   planInfo: document.getElementById("planInfo"),
   lenPrio: document.getElementById("lenPrio"),
@@ -110,46 +109,28 @@ const els = {
   symConfirm: document.getElementById("symConfirm"),
   symConfirmYes: document.getElementById("symConfirmYes"),
   symConfirmNo: document.getElementById("symConfirmNo"),
-
-  // left screen log (debug)
-  dbgPanel: document.getElementById("dbgPanel"),
-  dbgTail: document.getElementById("dbgTail"),
-  dbgBody: document.getElementById("dbgBody"),
-  dbgCount: document.getElementById("dbgCount"),
 };
 
-// Centralized SVG icon sources -> CSS variables (buttons + stat pills)
-applyIconCssVars();
+// Глобальные флаги
+window._wasDrag = false;
+window._pendingClearTimer = null;
 
+applyIconCssVars();
 const toast = makeToast();
 
 const view = {
   state: null,
-
-  // Camera (world coords in blocks). View-only: not stored in save.
   cam: { ox: 0, oy: 0 },
-  // Smooth camera centering target (view-only)
-  camTarget: null, // {x,y}
-
-  // Moving module state (view-only)
+  camTarget: null,
   moving: null,
-
-
-  // dynamic camera size in blocks
   gridW: 60,
   gridH: 40,
   blockPx: 4,
   dpr: 1,
-  zoom: 0, // -3..+3 (mouse wheel)
-
-  // interaction modes
-  mode: null, // "carrot" or null
-
-
-  // timers
+  zoom: 0,
+  mode: null,
   renderTimer: null,
   autoTimer: null,
-
   perf: {
     lastFrameAt: 0,
     lastStatAt: 0,
@@ -159,9 +140,8 @@ const view = {
     smoothedRender: 0,
   },
   lastActive: null,
-
-  // resize observer
   _ro: null,
+  flash: null,
 };
 
 function stopLoops(){
@@ -176,7 +156,6 @@ function stopLoops(){
 }
 
 function syncToSize(){
-  // returns true if something changed
   return syncCanvas(els.canvas, els.grid, view);
 }
 
@@ -190,7 +169,7 @@ function rerenderAll(deltaSec){
   const selectedOrg = (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
     ? root.buds[a]
     : root;
-  // UI diffing (cheap) to avoid rebuilding large HTML blobs every second.
+  
   view._uiCache = view._uiCache || {};
   const cache = view._uiCache;
 
@@ -199,7 +178,7 @@ function rerenderAll(deltaSec){
     cache.rulesRendered = true;
   }
 
-  // Legend changes when selection changes OR when the selected organism's module set changes.
+
   const mods = Array.isArray(selectedOrg?.modules) ? selectedOrg.modules : [];
   let modsCells = 0;
   for (const m of mods) modsCells += (m?.cells?.length || 0);
@@ -209,104 +188,96 @@ function rerenderAll(deltaSec){
     cache.legendKey = legendKey;
   }
 
-  // Log panel: rebuild only when log length changes.
-  // IMPORTANT: log may live on __logRoot (parent), so use the same root as renderLog().
   const logRoot = (view.state && view.state.__logRoot) ? view.state.__logRoot : view.state;
   const log = (logRoot?.log || []);
   const logLen = log.length;
   const logRev = (logRoot && Number.isFinite(logRoot.__logRev)) ? logRoot.__logRev : 0;
-  // When the log is capped (MAX_LOG), length may stay constant while content changes.
-  // Prefer revision counter when available.
   const logSig = logRev ? `r${logRev}` : `l${logLen}|t${(logLen ? (log[logLen-1]?.t||0) : 0)}`;
   if (cache.logSig !== logSig){
     renderLog(view.state, els);
     cache.logSig = logSig;
   }
 
-  // Debug: cheap, keep updating.
   renderDebugLog(view, els);
   renderHud(root, selectedOrg, els, deltaSec, fmtAgeSeconds, view.zoom);
-  // organism info tab
+  
   if (els.orgInfo){
     const now = performance.now();
     const needOrgInfo = (cache.orgInfoActive !== root.active) || (!cache.orgInfoAt) || ((now - cache.orgInfoAt) >= (UI.ORGINFO_UPDATE_MS || 3000));
-    if (!needOrgInfo) return; // keep HUD updated, skip heavy org list
+    if (needOrgInfo) {
+      const buds = Array.isArray(root.buds) ? root.buds : [];
+      const nowS = root.lastSeen || 0;
 
-    const buds = Array.isArray(root.buds) ? root.buds : [];
+      const mkBlocks = (o)=> (o?.body?.cells?.length||0) + (o?.modules||[]).reduce((s,m)=>s+(m?.cells?.length||0),0);
+      const mkBarsRow = (o)=>{
+        const b = o?.bars || { food:1, clean:1, hp:1, mood:1 };
+        const tone = (v)=>{
+          if (!Number.isFinite(v)) return "";
+          if (v > 0.80) return "ok";
+          if (v > 0.60) return "info";
+          if (v > 0.20) return "warn";
+          return "bad";
+        };
 
-    const nowS = root.lastSeen || 0;
+        const minBar = Math.min(b.food ?? 0, b.clean ?? 0, b.hp ?? 0, b.mood ?? 0);
+        const statusTxt = (minBar <= 0.01) ? "усыхание" :
+                          (minBar <= 0.10) ? "анабиоз" :
+                          (minBar <= 0.15) ? "критично" :
+                          (minBar <= 0.35) ? "плохо" :
+                          (minBar <= 0.65) ? "норма" :
+                          "хорошо";
 
-    const mkBlocks = (o)=> (o?.body?.cells?.length||0) + (o?.modules||[]).reduce((s,m)=>s+(m?.cells?.length||0),0);
-    const mkBarsRow = (o)=>{
-      const b = o?.bars || { food:1, clean:1, hp:1, mood:1 };
-      const tone = (v)=>{
-        if (!Number.isFinite(v)) return "";
-        if (v > 0.80) return "ok";
-        if (v > 0.60) return "info";
-        if (v > 0.20) return "warn";
-        return "bad";
+        const pill = (stat, title, cls, icoText, valText)=>{
+          const icoSpan = `<span class="ico">${icoText || ""}</span>`;
+          const valSpan = `<span class="val">${valText}</span>`;
+          return `<span class="pill stat ${cls}" data-stat="${stat}" title="${escapeHtml(title)}">${icoSpan}${valSpan}</span>`;
+        };
+
+        const f = pill("food",  `еда: ${barPct(b.food)}%`,  tone(b.food),  "", `${barPct(b.food)}%`);
+        const c = pill("clean", `чист: ${barPct(b.clean)}%`, tone(b.clean), "", `${barPct(b.clean)}%`);
+        const h = pill("hp",    `здор: ${barPct(b.hp)}%`,    tone(b.hp),    "", `${barPct(b.hp)}%`);
+        const m = pill("mood",  `настр: ${barPct(b.mood)}%`, tone(b.mood),  moodEmoji(Math.max(0, Math.min(1, b.mood ?? 0))), `${barPct(b.mood)}%`);
+        const s = pill("state", `сост: ${statusTxt}`,         tone(minBar),   stateEmoji(statusTxt), "");
+
+        return `<div class="orgCellPills">${f}${c}${h}${m}${s}</div>`;
       };
 
-      const minBar = Math.min(b.food ?? 0, b.clean ?? 0, b.hp ?? 0, b.mood ?? 0);
-      const statusTxt = (minBar <= 0.01) ? "усыхание" :
-                        (minBar <= 0.10) ? "анабиоз" :
-                        (minBar <= 0.15) ? "критично" :
-                        (minBar <= 0.35) ? "плохо" :
-                        (minBar <= 0.65) ? "норма" :
-                        "хорошо";
+      const mkItem = (which, o)=>{
+        const isSel = (root.active === (which === -1 ? -1 : which));
+        const blocks = mkBlocks(o);
+        const stage = (o===root) ? 'Родитель' : 'Почка';
+        const name = (o?.name || '—');
+        const createdAt = (o?.createdAt ?? nowS);
+        const age = Math.max(0, nowS - createdAt);
+        const ageTxt = fmtAgeSeconds ? fmtAgeSeconds(age) : `${Math.floor(age)}с`;
+        const cls = isSel ? 'orgCell isActive' : 'orgCell';
 
-      const pill = (stat, title, cls, icoText, valText)=>{
-        // icoText: emoji for mood/state; SVG pills keep empty text and use CSS background-image.
-        const icoSpan = `<span class="ico">${icoText || ""}</span>`;
-        const valSpan = `<span class="val">${valText}</span>`;
-        return `<span class="pill stat ${cls}" data-stat="${stat}" title="${escapeHtml(title)}">${icoSpan}${valSpan}</span>`;
-      };
-
-      const f = pill("food",  `еда: ${barPct(b.food)}%`,  tone(b.food),  "", `${barPct(b.food)}%`);
-      const c = pill("clean", `чист: ${barPct(b.clean)}%`, tone(b.clean), "", `${barPct(b.clean)}%`);
-      const h = pill("hp",    `здор: ${barPct(b.hp)}%`,    tone(b.hp),    "", `${barPct(b.hp)}%`);
-      const m = pill("mood",  `настр: ${barPct(b.mood)}%`, tone(b.mood),  moodEmoji(Math.max(0, Math.min(1, b.mood ?? 0))), `${barPct(b.mood)}%`);
-      const s = pill("state", `сост: ${statusTxt}`,         tone(minBar),   stateEmoji(statusTxt), "");
-
-      return `<div class="orgCellPills">${f}${c}${h}${m}${s}</div>`;
-    };
-
-const mkItem = (which, o)=>{
-      const isSel = (root.active === (which === -1 ? -1 : which));
-      const blocks = mkBlocks(o);
-      const stage = (o===root) ? 'Родитель' : 'Почка';
-      const name = (o?.name || '—');
-      const createdAt = (o?.createdAt ?? nowS);
-      const age = Math.max(0, nowS - createdAt);
-      const ageTxt = fmtAgeSeconds ? fmtAgeSeconds(age) : `${Math.floor(age)}с`;
-      const cls = isSel ? 'orgCell isActive' : 'orgCell';
-
-      return `
-        <div class="${cls}" data-which="${which}">
-          <div class="orgCellTop">
-            <span class="orgName">${escapeHtml(name)}</span>
-            <span class="orgCellStage">${stage}</span>
-            <span class="orgMetaInline">блоков: ${blocks} • возраст: ${ageTxt}</span>
+        return `
+          <div class="${cls}" data-which="${which}">
+            <div class="orgCellTop">
+              <span class="orgName">${escapeHtml(name)}</span>
+              <span class="orgCellStage">${stage}</span>
+              <span class="orgMetaInline">блоков: ${blocks} • возраст: ${ageTxt}</span>
+            </div>
+            ${mkBarsRow(o)}
           </div>
-          ${mkBarsRow(o)}
-        </div>
+        `;
+      };
+
+      const listHtml = [
+        mkItem(-1, root),
+        ...buds.map((b,i)=> mkItem(i, b))
+      ].join('');
+
+      els.orgInfo.innerHTML = `
+        <div class="orgList">${listHtml}</div>
+        <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре.</div>
       `;
-    };
-
-    const listHtml = [
-      mkItem(-1, root),
-      ...buds.map((b,i)=> mkItem(i, b))
-    ].join('');
-
-    els.orgInfo.innerHTML = `
-      <div class="orgList">${listHtml}</div>
-      <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре.</div>
-    `;
-cache.orgInfoAt = now;
-    cache.orgInfoActive = root.active;
+      cache.orgInfoAt = now;
+      cache.orgInfoActive = root.active;
+    }
   }
 }
-
 
 function escapeHtml(s){
   return String(s)
@@ -316,11 +287,13 @@ function escapeHtml(s){
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
 function shorten(s, max=76){
   s = String(s ?? "");
   if (s.length <= max) return s;
   return s.slice(0, Math.max(0, max-1)) + "…";
 }
+
 function getLogLine(entry){
   if (!entry) return "";
   if (typeof entry === "string") return entry;
@@ -334,14 +307,12 @@ function autoTick(){
   if (!view.state) return;
   const state = view.state;
 
-  // Expose view-driven movement state to the simulation (transient, not saved).
-  // Mutations are allowed only while standing; while moving they become debt.
   {
     const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
     for (let i = 0; i < orgs.length; i++){
       const org = orgs[i];
       if (!org) continue;
-      const orgId = (i === 0) ? 0 : i; // 0 = parent, 1.. = buds
+      const orgId = (i === 0) ? 0 : i;
       const m = getOrgMotion(view, orgId);
       org.__moving = !!m?.moving;
     }
@@ -365,7 +336,6 @@ function autoTick(){
     showOfflineSummary(delta, sim);
   }
 
-  // Informative top toast: short duplicate of the newest log line this tick.
   const logAfter = (state.log || []).length;
   const addedLogs = Math.max(0, logAfter - logBefore);
   if (addedLogs > 0){
@@ -379,7 +349,6 @@ function autoTick(){
   } else if ((sim.mutations|0) > 0){
     toast(`Эволюций: <b>${sim.mutations|0}</b>.`);
   }
-
 }
 
 function tickCamera(view, dtSec){
@@ -390,21 +359,17 @@ function tickCamera(view, dtSec){
   const ty = view.camTarget.y;
   if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
 
-  // Exponential smoothing: ~fast, but never snaps.
-  // k=8 => reaches ~95%% in ~0.4s
   const k = 8;
   const a = 1 - Math.exp(-k * dt);
   view.cam.ox += (tx - view.cam.ox) * a;
   view.cam.oy += (ty - view.cam.oy) * a;
 
-  // Stop when close enough
   if (Math.abs(tx - view.cam.ox) < 0.02 && Math.abs(ty - view.cam.oy) < 0.02){
     view.cam.ox = tx;
     view.cam.oy = ty;
     view.camTarget = null;
   }
 }
-
 
 function startLoops(){
   const frame = ()=>{
@@ -417,10 +382,6 @@ function startLoops(){
     perf.smoothedFrame = perf.smoothedFrame * 0.9 + delta * 0.1;
     perf.frameCount += 1;
 
-    // View-only animation ticks.
-    // IMPORTANT: movement gait must advance smoothly every rAF frame,
-    // otherwise it looks like "дергание" по 1 блоку.
-    // We still clamp dt to avoid huge jumps after tab-switch.
     const dtSec = Math.min(0.05, Math.max(0, delta) / 1000);
     tickMoving(view, view.state, dtSec);
     tickCamera(view, dtSec);
@@ -429,6 +390,7 @@ function startLoops(){
     renderGrid(view.state, els.canvas, els.grid, view);
     const renderTime = performance.now() - renderStart;
     perf.smoothedRender = perf.smoothedRender * 0.9 + renderTime * 0.1;
+    
     if (view.lastActive !== view.state.active){
       view.lastActive = view.state.active;
       rerenderAll(0);
@@ -441,7 +403,6 @@ function startLoops(){
       perf.lastStatAt = now;
 
       const cpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedRender / Math.max(1, perf.smoothedFrame)) * 100)));
-      // "GPU-like" load: how much time a frame takes compared to a 60Hz budget.
       const gpuLoad = Math.min(100, Math.max(0, Math.round((perf.smoothedFrame / (1000/60)) * 100)));
 
       if (els.cpuStat) els.cpuStat.textContent = `CPU: ${cpuLoad}%`;
@@ -473,14 +434,10 @@ function setupResizeObserver(){
     if (t) clearTimeout(t);
     t = setTimeout(()=>{
       t = null;
-
-      // Пробрасываем фактический размер игрового окна в CSS-переменные,
-      // чтобы соседние панели (например #infoPanel) могли рассчитывать свою высоту.
       const w = els.mainPanel.clientWidth;
       const h = els.mainPanel.clientHeight;
       document.documentElement.style.setProperty('--gameW', `${w}px`);
       document.documentElement.style.setProperty('--gameH', `${h}px`);
-
       syncToSize();
       rerenderAll(0);
     }, UI.RESIZE_DEBOUNCE_MS || 80);
@@ -489,14 +446,9 @@ function setupResizeObserver(){
   view._ro.observe(els.mainPanel);
 }
 
-
-function clampZoom(z){
-  return Math.max(-3, Math.min(3, z|0));
-}
-
-function occHas(org, wx, wy){
+function occHas(org, wx, wy) {
   if (!org || !org.body) return false;
-  const packXY = (x,y)=>(((x & 0xffff) << 16) | (y & 0xffff));
+  const packXY = (x, y) => (((x & 0xffff) << 16) | (y & 0xffff));
 
   const bc = org?.body?.cells;
   const mc = org?.modules;
@@ -504,8 +456,8 @@ function occHas(org, wx, wy){
   const mLen = Array.isArray(mc) ? mc.length : 0;
   let mCells = 0;
   let lastMx = 0, lastMy = 0;
-  if (mLen){
-    for (const m of mc){
+  if (mLen) {
+    for (const m of mc) {
       const cells = m?.cells;
       if (!Array.isArray(cells) || !cells.length) continue;
       mCells += cells.length;
@@ -515,16 +467,20 @@ function occHas(org, wx, wy){
     }
   }
   const lastB = (bLen && bc) ? bc[bLen - 1] : null;
-  const sig = `${bLen}|${mLen}|${mCells}|${lastB?.[0]||0},${lastB?.[1]||0}|${lastMx},${lastMy}`;
+  const sig = `${bLen}|${mLen}|${mCells}|${lastB?.[0] || 0},${lastB?.[1] || 0}|${lastMx},${lastMy}`;
 
-  if (org._occMainSig !== sig || !org._occMain){
+  if (!(org._occMain instanceof Set) || org._occMainSig !== sig) {
     const set = new Set();
-    if (Array.isArray(bc)) for (const c of bc) set.add(packXY(c?.[0]||0, c?.[1]||0));
-    if (Array.isArray(mc)){
-      for (const m of mc){
-        const cells = m?.cells;
-        if (!Array.isArray(cells)) continue;
-        for (const c of cells) set.add(packXY(c?.[0]||0, c?.[1]||0));
+    if (Array.isArray(bc)) {
+      for (let i = 0; i < bc.length; i++) {
+        set.add(packXY(bc[i][0], bc[i][1]));
+      }
+    }
+    if (Array.isArray(mc)) {
+      for (const m of mc) {
+        if (Array.isArray(m?.cells)) {
+          for (const c of m.cells) set.add(packXY(c[0], c[1]));
+        }
       }
     }
     org._occMain = set;
@@ -534,8 +490,8 @@ function occHas(org, wx, wy){
   return org._occMain.has(packXY(wx, wy));
 }
 
-function screenToWorld(e){
-  const rect = els.grid.getBoundingClientRect();
+function screenToWorld(e, view, gridEl) {
+  const rect = gridEl.getBoundingClientRect();
   const px = (e.clientX - rect.left);
   const py = (e.clientY - rect.top);
 
@@ -551,308 +507,279 @@ function screenToWorld(e){
   return [wx, wy];
 }
 
+function handleCarrotMode(view, wx, wy) {
+  const s = view.state;
+  const inv = s.inv || (s.inv = { carrots: 0 });
+  if (inv.carrots <= 0) {
+    toast("Нет морковок.");
+    return;
+  }
 
+  const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
+  const tickId = Math.floor(nowSec() / intervalSec);
+  s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
+  if (s.carrotTick.id !== tickId) { 
+    s.carrotTick.id = tickId; 
+    s.carrotTick.used = 0; 
+  }
+  if (s.carrotTick.used >= CARROT.maxPerTick) {
+    toast(`Лимит: ${CARROT.maxPerTick} морковки за тик.`, "bad");
+    return;
+  }
 
-function attachPickOrganism(){
-  let pendingClearTimer = null;
-  const cancelPendingClear = ()=>{
-    if (pendingClearTimer){
-      clearTimeout(pendingClearTimer);
-      pendingClearTimer = null;
-    }
-  };
+  s.carrots = Array.isArray(s.carrots) ? s.carrots : [];
+  s.carrots.push({ x: wx, y: wy, w: CARROT.w, h: CARROT.h, t: nowSec() });
+  s.carrotTick.used++;
+  inv.carrots--;
 
-  els.grid.addEventListener("pointerdown", (e)=>{
-    if (!view.state) return;
-
-    // View-only FX: "желе"-волна по тапу/клику (всегда, даже в режимах морковки/монетки).
-    // Координаты нормализованы (0..1) по видимому grid-элементу.
-    try {
-    const rect = canvas.getBoundingClientRect();
-	const nx = (e.clientX - rect.left) / rect.width;
-	const ny = 1.0 - (e.clientY - rect.top) / rect.height; // инверсия Y
-	addRipple(view, nx, ny, RIPPLE_KIND.TAP);
-    } catch (_e){}
-
-    const [wx, wy] = screenToWorld(e);
-    const s = view.state;
-
-    // Carrot-throw mode (feeding is now interactive)
-    if (view.mode === "carrot"){
-      const inv = s.inv || (s.inv = { carrots: 0 });
-      if (inv.carrots <= 0){
-        toast("Нет морковок.");
-        return;
-      }
-
-      // max carrots per feeding tick (same as mutation tick)
-      const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
-      const tickId = Math.floor(nowSec() / intervalSec);
-      s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
-      if (s.carrotTick.id !== tickId){ s.carrotTick.id = tickId; s.carrotTick.used = 0; }
-      if (s.carrotTick.used >= CARROT.maxPerTick){
-        toast(`Лимит: ${CARROT.maxPerTick} морковки за тик.`, "bad");
-        return;
-      }
-
-      // place carrot with its 3x7 shape starting at click cell
-      s.carrots = Array.isArray(s.carrots) ? s.carrots : [];
-      s.carrots.push({ x: wx, y: wy, w: CARROT.w, h: CARROT.h, t: nowSec() });
-      s.carrotTick.used++;
-      inv.carrots--;
-
-      pushLog(s, `Морковка: брошена. Осталось: ${Math.max(0, inv.carrots|0)}.`, "carrot");
-
-
-      toast(`Морковка: (${wx},${wy}).`);
-
-      saveGame(s);
-      rerenderAll(0);
-      return; // do not change selection
-    }
-
-    // Coin placement mode (lure the nearest organism by its core)
-    if (view.mode === "coin"){
-      const inv = s.inv || (s.inv = { carrots: 0, coins: 0 });
-      if ((inv.coins|0) <= 0){
-        toast("Нет монеток.");
-        return;
-      }
-
-      // max coins per mutation tick
-      const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
-      const tickId = Math.floor(nowSec() / intervalSec);
-      s.coinTick = s.coinTick || { id: tickId, used: 0 };
-      if (s.coinTick.id !== tickId){ s.coinTick.id = tickId; s.coinTick.used = 0; }
-      if (s.coinTick.used >= COIN.maxPerTick){
-        toast(`Лимит: ${COIN.maxPerTick} монетки за тик.`, "bad");
-        return;
-      }
-
-      // place coin (3x3) starting at click cell
-      s.coins = Array.isArray(s.coins) ? s.coins : [];
-      const t = nowSec();
-      const id = ((t & 0xffff) << 16) ^ ((wx & 0xff) << 8) ^ (wy & 0xff);
-      s.coins.push({ x: wx, y: wy, w: COIN.w, h: COIN.h, t, id });
-      s.coinTick.used++;
-      inv.coins--;
-
-      // choose nearest organism by distance from coin to core
-      const orgs = [s, ...(Array.isArray(s.buds) ? s.buds : [])];
-      let bestId = 0;
-      let bestD = Infinity;
-      const tx = wx + 1; // center of 3x3
-      const ty = wy + 1;
-      for (let i = 0; i < orgs.length; i++){
-        const org = orgs[i];
-        if (!org) continue;
-        const core = org?.body?.core || org?.body?.cells?.[0] || [0, 0];
-        const cx = (core[0] || 0);
-        const cy = (core[1] || 0);
-        const d = Math.abs(tx - cx) + Math.abs(ty - cy);
-        if (d < bestD){ bestD = d; bestId = i; }
-      }
-
-      // Add "aim error" up to 3 blocks: bias direction, keep destination at the coin center.
-      const prng = mulberry32(hash32(s.seed || 1, 60606, t, wx, wy, inv.coins|0));
-      const j = COIN.aimJitter|0;
-      const offX = Math.round((prng()*2 - 1) * j);
-      const offY = Math.round((prng()*2 - 1) * j);
-
-      setMoveTarget(view, s, bestId, tx, ty, {
-        stopTolBlocks: 0,
-        intentJitter: j,
-        intentOffsetX: offX,
-        intentOffsetY: offY,
-      });
-
-      pushLog(s, `Монетка: поставлена. Осталось: ${Math.max(0, inv.coins|0)}.`, "coin");
-      toast(`Монетка: (${wx},${wy}) → цель: ${bestId === 0 ? "родитель" : `почка ${bestId}`}.`);
-      saveGame(s);
-      rerenderAll(0);
-      return; // do not change selection
-    }
-
-    // Clicking on empty field should allow clearing selection.
-    // But single click is also the first half of a double-click; delay clearing a bit.
-    cancelPendingClear();
-    pendingClearTimer = setTimeout(()=>{
-      pendingClearTimer = null;
-      if (!view.state) return;
-      // clear selection completely
-      view.state.active = null;
-      saveGame(view.state);
-      rerenderAll(0);
-    }, 260);
-  });
-  // Double-click / double-tap: move selected organism to clicked point ("swim")
-//els.grid.addEventListener("dblclick", (e)=>{
-//    if (!view.state) return;
-//    if (view.mode === "carrot" || view.mode === "coin") return;
-
-//    cancelPendingClear();
-
-//    const a = view.state.active;
-
-    // Важно: плавание — только если реально выбран организм (рамка через ячейку)
-//    if (a === null || a === undefined) return;
-
-//    const [wx, wy] = screenToWorld(e);
-
-    // which: -1 (родитель) или 0..n-1 (почки)
-//const which = Number.isFinite(a) ? (a|0) : null;
-//if (which === null) return;
-
-    // orgId: 0 = родитель, 1.. = почки
-//    const orgId = (which === -1) ? 0 : (which + 1);
-
-//    setMoveTarget(view, view.state, orgId, wx, wy);
-//  });
-
-  // touch double-tap (mobile)
-  const DT_MS = 280;
-  const DT_DIST_PX = 18;
-  let lastTap = null;
-  els.grid.addEventListener("pointerup", (e)=>{
-    if (e.pointerType !== "touch") return;
-    if (!view.state) return;
-    if (view.mode === "carrot") return;
-    if (view._pinchActive) return;
-	const a = view.state.active;
-
-    // Важно: без выбора через ячейку — double-tap ничего не делает
-    if (a === null || a === undefined) return;
-
-    const sel = a;
-    const now = performance.now();
-    const cur = { t: now, x: e.clientX, y: e.clientY, ev: e };
-    if (lastTap && (now - lastTap.t) <= DT_MS){
-      const dx = cur.x - lastTap.x;
-      const dy = cur.y - lastTap.y;
-      if ((dx*dx + dy*dy) <= (DT_DIST_PX*DT_DIST_PX)){
-        cancelPendingClear();
-        const [wx, wy] = screenToWorld(e);
-        const which = Number.isFinite(sel) ? (sel|0) : null;
-        if (which === null) return;
-        const orgId = (which === -1) ? 0 : (which + 1);
-        setMoveTarget(view, view.state, orgId, wx, wy);
-        lastTap = null;
-        return;
-      }
-    }
-    lastTap = cur;
-  });
-
+  pushLog(s, `Морковка: брошена. Осталось: ${Math.max(0, inv.carrots|0)}.`, "carrot");
+  toast(`Морковка: (${wx},${wy}).`);
+  
+  saveGame(s);
+  rerenderAll(0);
 }
 
-function attachOrgListClicks(){
+function handleCoinMode(view, wx, wy) {
+  const s = view.state;
+  const inv = s.inv || (s.inv = { carrots: 0, coins: 0 });
+  if ((inv.coins|0) <= 0) {
+    toast("Нет монеток.");
+    return;
+  }
+
+  const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
+  const tickId = Math.floor(nowSec() / intervalSec);
+  s.coinTick = s.coinTick || { id: tickId, used: 0 };
+  if (s.coinTick.id !== tickId) { 
+    s.coinTick.id = tickId; 
+    s.coinTick.used = 0; 
+  }
+  if (s.coinTick.used >= COIN.maxPerTick) {
+    toast(`Лимит: ${COIN.maxPerTick} монетки за тик.`, "bad");
+    return;
+  }
+
+  s.coins = Array.isArray(s.coins) ? s.coins : [];
+  const t = nowSec();
+  const id = ((t & 0xffff) << 16) ^ ((wx & 0xff) << 8) ^ (wy & 0xff);
+  s.coins.push({ x: wx, y: wy, w: COIN.w, h: COIN.h, t, id });
+  s.coinTick.used++;
+  inv.coins--;
+
+  const orgs = [s, ...(Array.isArray(s.buds) ? s.buds : [])];
+  let bestId = 0;
+  let bestD = Infinity;
+  const tx = wx + 1;
+  const ty = wy + 1;
+  for (let i = 0; i < orgs.length; i++) {
+    const org = orgs[i];
+    if (!org) continue;
+    const core = org?.body?.core || org?.body?.cells?.[0] || [0, 0];
+    const cx = (core[0] || 0);
+    const cy = (core[1] || 0);
+    const d = Math.abs(tx - cx) + Math.abs(ty - cy);
+    if (d < bestD) { bestD = d; bestId = i; }
+  }
+
+  const prng = mulberry32(hash32(s.seed || 1, 60606, t, wx, wy, inv.coins|0));
+  const j = COIN.aimJitter|0;
+  const offX = Math.round((prng()*2 - 1) * j);
+  const offY = Math.round((prng()*2 - 1) * j);
+
+  setMoveTarget(view, s, bestId, tx, ty, {
+    stopTolBlocks: 0,
+    intentJitter: j,
+    intentOffsetX: offX,
+    intentOffsetY: offY,
+  });
+
+  pushLog(s, `Монетка: поставлена. Осталось: ${Math.max(0, inv.coins|0)}.`, "coin");
+  toast(`Монетка: (${wx},${wy}) → цель: ${bestId === 0 ? "родитель" : `почка ${bestId}`}.`);
+  
+  saveGame(s);
+  rerenderAll(0);
+}
+
+function selectOrganismAt(view, wx, wy) {
+  const s = view.state;
+  const orgs = [s, ...(Array.isArray(s.buds) ? s.buds : [])];
+  
+  // Ищем организм, содержащий указанную клетку
+  for (let i = 0; i < orgs.length; i++) {
+    const org = orgs[i];
+    if (!org) continue;
+    
+    if (occHas(org, wx, wy)) {
+      const which = i === 0 ? -1 : i - 1;
+      view.state.active = which;
+      saveGame(view.state);
+      rerenderAll(0);
+      
+      view.flash = {
+        org: which,
+        mi: null,
+        part: null,
+        grownModules: [],
+        until: Date.now()/1000 + 0.2,
+        strength: 2,
+      };
+      
+      toast(`Выбран: ${which === -1 ? 'Родитель' : `Почка ${which}`}`);
+      return true;
+    }
+  }
+  return false;
+}
+
+function attachGridInteractions() {
+  if (els.grid.__hasGridClicks) return;
+  els.grid.__hasGridClicks = true;
+
+  let lastTapTime = 0;
+  let clickTimer = null;
+
+  els.grid.addEventListener("pointerup", (e) => {
+    if (window._wasDrag) return; // Игнорируем клик, если это был перенос камеры
+
+    const now = Date.now();
+    const isDouble = (now - lastTapTime < 300);
+    lastTapTime = now;
+
+    const [wx, wy] = screenToWorld(e, view, els.grid);
+
+    // 1. ДВОЙНОЙ КЛИК: Всегда центрируем камеру (удобная навигация)
+     if (isDouble) {
+     if (clickTimer) clearTimeout(clickTimer);
+     view.camTarget = { x: wx, y: wy };
+     return; 
+    }
+
+    // 2. ОДИНОЧНЫЙ КЛИК: Логика зависит от выбранного режима (view.mode)
+    if (clickTimer) clearTimeout(clickTimer);
+
+    // Если в руках морковка или монетка — ставим их мгновенно
+    if (view.mode === 'carrot') {
+      handleCarrotMode(view, wx, wy);
+      return;
+    } 
+    if (view.mode === 'coin') {
+      handleCoinMode(view, wx, wy);
+      return;
+    }
+
+    // Если руки пустые (view.mode === null) — управляем выделением
+    clickTimer = setTimeout(() => {
+      const found = selectOrganismAt(view, wx, wy);
+      
+      if (!found) {
+        // Кликнули в пустоту -> СБРОС выделения
+        view.state.active = null; 
+//        toast("Выделение снято");
+      }
+
+      // Обновляем всё: сохраняем состояние и перерисовываем интерфейс
+      saveGame(view.state);
+      rerenderAll(0);
+    }, 250);
+  });
+}
+
+function attachOrgListClicks() {
   if (!els.orgInfo) return;
   if (els.orgInfo.__hasOrgListClicks) return;
   els.orgInfo.__hasOrgListClicks = true;
 
-  // A single click is also the first half of a double-click.
-  // If we rerender immediately on the first click, the list DOM is rebuilt and
-  // the dblclick may never fire. So we defer the single-click action briefly
-  // and cancel it if a dblclick happens.
+  let lastClickTime = 0;
+  let lastClickWhich = null;
   let clickTimer = null;
-  let pendingWhich = null;
+  const DOUBLE_TAP_DELAY = 300; 
 
-  els.orgInfo.addEventListener("pointerdown", (ev)=>{
+  els.orgInfo.addEventListener("click", (ev) => {
     const cell = ev.target?.closest?.(".orgCell");
     if (!cell) return;
-    if (!view.state) return;
+    
     const which = parseInt(cell.dataset.which, 10);
     if (!Number.isFinite(which)) return;
 
-    // Defer single-click select a bit so dblclick can win.
-    pendingWhich = which;
-    if (clickTimer) clearTimeout(clickTimer);
-    clickTimer = setTimeout(()=>{
-      clickTimer = null;
-      if (!view.state) return;
-      view.state.active = pendingWhich;
+    const now = Date.now();
+    const isDouble = (now - lastClickTime < DOUBLE_TAP_DELAY) && (lastClickWhich === which);
+
+    if (isDouble) {
+      // ДВОЙНОЙ КЛИК / ТАП
+      if (clickTimer) clearTimeout(clickTimer);
+      
+      view.state.active = which;
       saveGame(view.state);
+
+      const org = (which === -1) ? view.state : (view.state.buds?.[which] || null);
+      const core = org?.body?.core;
+      if (Array.isArray(core) && core.length === 2) {
+        const orgId = (which === -1) ? 0 : which + 1;
+        const m = getOrgMotion(view, orgId);
+        view.camTarget = { 
+          x: core[0] + (m?.offsetX || 0), 
+          y: core[1] + (m?.offsetY || 0) 
+        };
+        toast("Камера центрирована");
+      }
       rerenderAll(0);
-    }, 220);
-  });
-
-  // Double click: center camera on clicked organism
-  els.orgInfo.addEventListener("dblclick", (ev)=>{
-    if (clickTimer){ clearTimeout(clickTimer); clickTimer = null; }
-    const cell = ev.target?.closest?.(".orgCell");
-    if (!cell) return;
-    if (!view.state) return;
-    const which = parseInt(cell.dataset.which, 10);
-    if (!Number.isFinite(which)) return;
-
-    // Ensure selection matches
-    view.state.active = which;
-    saveGame(view.state);
-
-    const org = (which === -1) ? view.state : (view.state.buds?.[which] || null);
-    const core = org?.body?.core;
-    if (Array.isArray(core) && core.length === 2){
-      const orgId = (which === -1) ? 0 : (which|0) + 1;
-      const m = getOrgMotion(view, orgId);
-      const ox = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
-      const oy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
-      view.camTarget = { x: (core[0] || 0) + ox, y: (core[1] || 0) + oy };
+      lastClickTime = 0; 
+    } else {
+      // ОДИНОЧНЫЙ КЛИК / ТАП
+      lastClickTime = now;
+      lastClickWhich = which;
+      if (clickTimer) clearTimeout(clickTimer);
+      
+      clickTimer = setTimeout(() => {
+        if (view.state) {
+          view.state.active = which;
+          saveGame(view.state);
+          rerenderAll(0);
+        }
+      }, DOUBLE_TAP_DELAY);
     }
-    rerenderAll(0);
   });
 }
 
-
 async function startGame(){
-
   view.state = migrateOrNew();
   view.lastActive = view.state?.active ?? null;
 
   ensureMoving(view);
   
-  // Получаем pipeline
   view.canvas = els.canvas;  
   const fx = getFxPipeline(view, els.canvas);
-
-  // Загружаем настройку
   fx.enabled = (view.state?.settings?.fxEnabled !== false);
 
-  // Always center camera to the parent organism on game start (view-only, not persisted).
-  // (Selection may be restored to a bud, but the initial framing should show the parent.)
   const c = view.state?.body?.core || [0, 0];
   view.cam = { ox: (c[0]||0), oy: (c[1]||0) };
   view.camTarget = null;
 
-if (els.startOverlay){
-  els.startOverlay.classList.remove("show");
-  setTimeout(()=>{ els.startOverlay.style.display = "none"; }, 200);
-}
+  if (els.startOverlay){
+    els.startOverlay.classList.remove("show");
+    setTimeout(()=>{ els.startOverlay.style.display = "none"; }, 200);
+  }
 
   // hooks
   attachDebugPanel(view, els);
   attachSettings(view, els, toast);
   attachActions(view, els, toast, rerenderAll);
-  attachDragPan(view, els); // drag uses els.grid size + view.gridW/H
-  attachPinchZoom(view, els, rerenderAll);
+  attachDragPan(els.grid, view);
+  attachZoomWheel(els.grid, view);
   attachDisableDoubleTapZoom(els);
   attachInfoTabs(els);
   attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);
   attachCarrotHudInput(view, els, rerenderAll);
   attachCoinHudInput(view, els, rerenderAll);
-  attachZoomWheel(view, els, rerenderAll);
   attachSymbiosisUI(view, els, toast);
-  attachPickOrganism();
+  attachGridInteractions();
   attachOrgListClicks();
 
-
   setupResizeObserver();
-
   rerenderAll(0);
   autoTick();
   startLoops();
-  
-
 }
 
 function showOfflineSummary(deltaSec, sim){
@@ -879,13 +806,10 @@ function showOfflineSummary(deltaSec, sim){
     `;
 
     document.body.appendChild(el);
-
-    // ВАЖНО: addClass show — после вставки в DOM
     requestAnimationFrame(()=> el.classList.add("show"));
 
     el.querySelector("#offlineOk").onclick = ()=>{
       el.classList.remove("show");
-      // дать анимации уйти
       setTimeout(()=> el.remove(), 200);
     };
   }
@@ -903,28 +827,27 @@ function showOfflineSummary(deltaSec, sim){
   `;
 }
 
-
 els.playBtn.addEventListener("click", startGame);
 
 document.addEventListener("click", (e) => {
-  const pill = e.target.closest?.(".pill.stat");
+  const pill = e.target.closest(".pill.stat");
   if (!pill) return;
-
-  // Проверяем что это touch-устройство
-  const isTouch =
-    (window.matchMedia && matchMedia("(hover: none)").matches) ||
-    ("ontouchstart" in window);
-
-  if (!isTouch) return;
 
   const text = pill.getAttribute("title");
   if (!text) return;
 
-  e.preventDefault();
-  e.stopPropagation();
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  
+  if (isTouch) {
+    e.preventDefault(); 
+    toast(text); 
+  } else {
+    toast(text);
+  }
+});
 
-  makeToast(text);
-}, { passive: false });
 requestAnimationFrame(() => {
-  if (els.startOverlay) els.startOverlay.classList.add("show");
+  if (els.startOverlay) {
+    els.startOverlay.classList.add("show");
+  }
 });

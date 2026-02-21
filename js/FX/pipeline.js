@@ -35,7 +35,7 @@ class FxPipeline {
       rippleColor: true, // локальная подсветка по кольцу (можно выключить отдельно)
 
       warp: false,
-      glow: false,
+      glow: true,
       grain: false,
       overlay: false,
     };

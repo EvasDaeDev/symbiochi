@@ -963,6 +963,8 @@ button:disabled{
   height:100%;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  touch-action: none; /* Отключает встроенный зум и скролл браузера */
+  user-select: none;
 }
 
 #grid, #canvas{
@@ -1067,7 +1069,7 @@ html, body { overscroll-behavior: none; }
   width: 58px;          /* фиксированная общая ширина */
   margin:0;             /* убираем третью строку */
 }
-.orgBar{
+
 .orgBar{
   flex: 1 1 0;           /* делят ширину поровну */
   height:6px;

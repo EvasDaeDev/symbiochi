@@ -98,7 +98,6 @@ export function renderLog(state, els) {
   els.logFooter.textContent = `Стиль ухода: ${top[0]} (${Math.round(top[1] * 100)}%) • лог: ${log.length}/70`;
 }
 
-
 export function renderDebugLog(view, els){
   if (!els.dbgBody || !els.dbgCount) return;
   const root = (view.state && view.state.__logRoot) ? view.state.__logRoot : view.state;
@@ -541,101 +540,76 @@ export function attachActions(view, els, toast, rerenderAll){
   });
 }
 
-// reset button removed: "Новое Сущ." is in settings
-
 /**
- * Drag/pan с ограниченной скоростью.
- * PAN_SENS = 0.33 => ~в 3 раза медленнее, питомец не “улетает”.
+ * Drag/pan с ограниченной скоростью для мыши и тача.
  */
-export function attachDragPan(view, els){
-  const PAN_SENS = 0.33;
-  const START_DRAG_PX = 6;
+export function attachDragPan(el, view) {
+  let isDragging = false;
+  let lastPos = { x: 0, y: 0 };
+  const DRAG_THRESHOLD = 8; // Увеличили порог, чтобы микро-дрожания мыши/пальца не сбивали клик
 
-  const grid = els.grid;
-  const drag = {
-    tracking:false, // pointer down, но ещё не “drag”
-    dragging:false, // реальный drag включён
-    pid:null,
-    sx:0, sy:0,
-    ox:0, oy:0,
+  el.style.touchAction = "none";
+  el.style.userSelect = "none";
+
+  const startDrag = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    
+    isDragging = true;
+    lastPos = { x: e.clientX, y: e.clientY };
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
   };
 
-  const getCellDelta = (dxPix, dyPix) => {
-    const rect = grid.getBoundingClientRect();
-    const cellW = rect.width / Math.max(1, view.gridW);
-    const cellH = rect.height / Math.max(1, view.gridH);
-    return [dxPix / cellW, dyPix / cellH];
-  };
+  const moveDrag = (e) => {
+    if (!isDragging) return;
 
-  const onDown = (e)=>{
-    if (!view.state) return;
+    const dx = e.clientX - lastPos.x;
+    const dy = e.clientY - lastPos.y;
 
-    // В режимах броска тап должен ставить объект — pan выключаем
-    if (view.mode === "carrot" || view.mode === "coin") return;
-
-    // Если активен pinch (2 пальца) — пан не стартуем
-    if (view._pinchActive) return;
-
-    drag.tracking = true;
-    drag.dragging = false;
-    drag.pid = e.pointerId;
-    drag.sx = e.clientX;
-    drag.sy = e.clientY;
-    // Camera lives in view, not in saved state.
-    if (!view.cam) view.cam = { ox: 0, oy: 0 };
-    drag.ox = view.cam.ox;
-    drag.oy = view.cam.oy;
-  };
-
-  const onMove = (e)=>{
-    if (!drag.tracking || !view.state) return;
-    if (drag.pid !== e.pointerId) return;
-    if (view._pinchActive) return;
-
-    const dx = e.clientX - drag.sx;
-    const dy = e.clientY - drag.sy;
-
-    // включаем drag только после порога
-    if (!drag.dragging){
-      if ((dx*dx + dy*dy) < (START_DRAG_PX*START_DRAG_PX)) return;
-      drag.dragging = true;
-      grid.classList.add("dragging");
-      grid.setPointerCapture?.(e.pointerId);
+    // Если движение достаточно большое - это drag, а не клик
+    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+      window._wasDrag = true;
+      
+	    // ✅ Как только начался реальный drag — отключаем автопритяжение камеры
+	  if (view.camTarget) view.camTarget = null;
+	  
+      // Отменяем таймер сброса выделения, если начали двигать камеру
+      if (window._pendingClearTimer) {
+        clearTimeout(window._pendingClearTimer);
+        window._pendingClearTimer = null;
+      }
     }
 
-    const [dcx, dcy] = getCellDelta(dx, dy);
-    view.cam.ox = drag.ox - dcx * PAN_SENS;
-    view.cam.oy = drag.oy - dcy * PAN_SENS;
+    view.cam.ox -= dx / (view.blockPx || 4);
+    view.cam.oy -= dy / (view.blockPx || 4);
+
+    lastPos = { x: e.clientX, y: e.clientY };
   };
 
-  const onUp = (e)=>{
-    if (!drag.tracking) return;
-    if (drag.pid !== e.pointerId) return;
-    drag.tracking = false;
-    drag.pid = null;
-    if (drag.dragging){
-      drag.dragging = false;
-      grid.classList.remove("dragging");
-    }
+  const stopDrag = (e) => {
+    if (!isDragging) return;
+    
+    isDragging = false;
+    el.classList.remove("dragging");
+    if (e.pointerId !== undefined) el.releasePointerCapture(e.pointerId);
+    
+    // Сбрасываем флаг drag через небольшое время
+    setTimeout(() => {
+      window._wasDrag = false;
+    }, 50);
   };
 
-  grid.addEventListener("pointerdown", onDown);
-  grid.addEventListener("pointermove", onMove);
-  grid.addEventListener("pointerup", onUp);
-  grid.addEventListener("pointercancel", onUp);
+  el.addEventListener("pointerdown", startDrag);
+  el.addEventListener("pointermove", moveDrag);
+  el.addEventListener("pointerup", stopDrag);
+  el.addEventListener("pointercancel", stopDrag);
 }
-
-// Click a log entry to briefly highlight the organ that caused it.
-// Highlight uses the same outer glow as selection, but white and lasts 0.2s.
-
-export function attachZoomWheel(view, els, rerender){
-  els.canvas.addEventListener("wheel", (e)=>{
-    if (!view.state) return;
+export function attachZoomWheel(el, view) {
+  el.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const dir = e.deltaY > 0 ? -1 : 1;
-    view.zoom = clamp((view.zoom || 0) + dir, -3, 3);
-    rerender(0);
-  }, { passive:false });
+    const delta = Math.sign(e.deltaY);
+    view.zoom = Math.max(-3, Math.min(3, view.zoom - delta));
+  }, { passive: false });
 }
 
 export function attachLogFlash(view, els, rerender){
@@ -648,7 +622,6 @@ export function attachLogFlash(view, els, rerender){
     if (!row) return;
     if (!view?.state) return;
 
-    // meta is optional; if it is missing we still flash the whole organism
     const orgRaw = row.dataset.org;
     const miRaw  = row.dataset.mi;
     const part   = row.dataset.part || null;
@@ -666,79 +639,12 @@ export function attachLogFlash(view, els, rerender){
       mi: Number.isFinite(miN) ? miN : null,
       part,
       grownModules,
-      // brighter + longer is handled in renderer; keep duration 0.2s
       until: Date.now()/1000 + 0.2,
-      strength: 2, // requested: ~2x brighter
+      strength: 2,
     };
 
     rerender(0);
   });
-}
-
-export function attachPinchZoom(view, els, rerender){
-  const grid = els.grid;
-  if (!grid) return;
-
-  const pts = new Map(); // pointerId -> {x,y}
-  let startDist = 0;
-  let startZoom = 0;
-  let active = false;
-
-  const dist = ()=>{
-    const a = [...pts.values()];
-    if (a.length < 2) return 0;
-    const dx = a[0].x - a[1].x;
-    const dy = a[0].y - a[1].y;
-    return Math.hypot(dx, dy);
-  };
-
-  const onDown = (e)=>{
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pts.size === 2){
-      active = true;
-      view._pinchActive = true;
-      startDist = dist();
-      startZoom = view.zoom || 0;
-      grid.setPointerCapture?.(e.pointerId);
-    }
-  };
-
-  const onMove = (e)=>{
-    if (!pts.has(e.pointerId)) return;
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    if (!active || pts.size < 2) return;
-
-    const d = dist();
-    if (!startDist) return;
-
-    // 10% изменения расстояния = шаг зума
-    const ratio = d / startDist;
-    let dz = 0;
-    if (ratio > 1.10) dz = +1;
-    else if (ratio < 0.90) dz = -1;
-
-    if (dz !== 0){
-      view.zoom = Math.max(-3, Math.min(3, startZoom + dz));
-      // пересчёт blockPx обычно в render/buildFrame, но перерендерим сразу
-      startZoom = view.zoom;
-      startDist = d;
-      rerender(0);
-    }
-  };
-
-  const onUp = (e)=>{
-    pts.delete(e.pointerId);
-    if (pts.size < 2){
-      active = false;
-      view._pinchActive = false;
-    }
-  };
-
-  grid.addEventListener("pointerdown", onDown);
-  grid.addEventListener("pointermove", onMove);
-  grid.addEventListener("pointerup", onUp);
-  grid.addEventListener("pointercancel", onUp);
 }
 
 export function attachDisableDoubleTapZoom(els){
