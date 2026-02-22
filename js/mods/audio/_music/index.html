@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<h2>Bio Handpan Tester (Game Accurate — Live Imports)</h2>
+
+<label>Organ:</label>
+<select id="organ"></select><br><br>
+
+<label>Degrees:</label>
+<input id="degree" readonly><br>
+
+<label>Octave:</label>
+<input id="octave" readonly><br>
+
+<label>baseRate:</label>
+<input id="baseRate" readonly><br>
+
+<label>stressBias:</label>
+<input id="stressBias" readonly><br><br>
+
+<label>Degrees (comma separated):</label>
+<input id="degreesEdit"><br>
+
+<label>Octave:</label>
+<input id="octaveEdit" type="number"><br>
+
+<button id="applyBtn">Apply Changes</button>
+
+<button id="playBtn">PLAY</button>
+
+<script type="module">
+/* IMPORT REAL GAME FILES */
+import {
+  ORGAN_AUDIO_CONFIG,
+  BASE_VELOCITY,
+  MASTER_GAIN,
+  initBioHandpan,
+  getBioHandpanAudioContext
+} from "./bio_handpan.js";
+
+import { triggerHandpanHit } from "./handpan_voice.js";
+import { getNoteFrequency } from "./scale.js";
+
+/* INIT AUDIO ENGINE (same as game) */
+initBioHandpan();
+const audioCtx = getBioHandpanAudioContext();
+
+/* POPULATE ORGAN LIST */
+const organSelect = document.getElementById("organ");
+for (const key in ORGAN_AUDIO_CONFIG) {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = key;
+    organSelect.appendChild(opt);
+}
+
+/* UPDATE UI */
+
+let editableConfig = null;   // объявляем заранее
+
+function updateUI() {
+    const cfg = ORGAN_AUDIO_CONFIG[organSelect.value];
+    
+    document.getElementById("degree").value = cfg.degrees.join(",");
+    document.getElementById("octave").value = cfg.octave;
+    document.getElementById("baseRate").value = cfg.baseRate;
+    document.getElementById("stressBias").value = cfg.stressBias ?? 1;
+
+    editableConfig = {
+        degrees: [...cfg.degrees],
+        octave: cfg.octave,
+        baseRate: cfg.baseRate,
+        stressBias: cfg.stressBias
+    };
+
+    document.getElementById("degreesEdit").value = editableConfig.degrees.join(",");
+    document.getElementById("octaveEdit").value = editableConfig.octave;
+}
+
+organSelect.onchange = updateUI;
+updateUI();
+
+
+
+
+
+document.getElementById("applyBtn").onclick = () => {
+    const degStr = document.getElementById("degreesEdit").value.trim();
+    editableConfig.degrees = degStr.split(",").map(x => parseInt(x));
+
+    editableConfig.octave = parseInt(document.getElementById("octaveEdit").value);
+
+    console.log("Using modified config:", editableConfig);
+};
+
+/* PLAY SOUND EXACTLY LIKE IN GAME */
+document.getElementById("playBtn").onclick = () => {
+    const degree = editableConfig.degrees[0];
+const octave = editableConfig.octave;
+
+    const frequency = getNoteFrequency(degree, octave);
+
+    triggerHandpanHit(audioCtx, audioCtx.destination, {
+        frequency,
+        velocity: BASE_VELOCITY,
+        stress: 0,
+        hpRatio: 1
+    });
+};
+</script>
+
+</body>
+</html>

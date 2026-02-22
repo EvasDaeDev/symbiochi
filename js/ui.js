@@ -544,24 +544,79 @@ export function attachActions(view, els, toast, rerenderAll){
 /**
  * Drag/pan с ограниченной скоростью для мыши и тача.
  */
+
 export function attachDragPan(el, view) {
   let isDragging = false;
   let lastPos = { x: 0, y: 0 };
-  const DRAG_THRESHOLD = 8; // Увеличили порог, чтобы микро-дрожания мыши/пальца не сбивали клик
+  const DRAG_THRESHOLD = 8; // защита от микродвижений
+  const activeTouches = new Map(); // pointerId -> { x, y }
 
-  el.style.touchAction = "none";
+  // pinch state
+  let pinchStartDist = null;
+  let pinchStartZoom = 0;
+  const PINCH_SENSITIVITY = 1; // 1 = +1 zoom за 2x масштаб, можешь потом подрегулировать
+
+  el.style.touchAction = "none";   // забираем себе жесты
   el.style.userSelect = "none";
+
+  const getTouchDistance = () => {
+    if (activeTouches.size < 2) return 0;
+    const it = activeTouches.values();
+    const p1 = it.next().value;
+    const p2 = it.next().value;
+    if (!p1 || !p2) return 0;
+    const dx = p1.x - p2.x;
+    const dy = p1.y - p2.y;
+    return Math.hypot(dx, dy);
+  };
 
   const startDrag = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    
+
+    if (e.pointerType === "touch") {
+      activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activeTouches.size === 2) {
+        // старт pinch-жеста
+        pinchStartDist = getTouchDistance();
+        pinchStartZoom = Number.isFinite(view.zoom) ? view.zoom : 0;
+      }
+    }
+
     isDragging = true;
     lastPos = { x: e.clientX, y: e.clientY };
-    el.setPointerCapture(e.pointerId);
+    if (e.pointerId !== undefined) {
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch (_) {}
+    }
     el.classList.add("dragging");
   };
 
   const moveDrag = (e) => {
+    // --- PINCH-ZOOM логика ---
+    if (e.pointerType === "touch" && activeTouches.has(e.pointerId)) {
+      activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (activeTouches.size >= 2 && pinchStartDist && pinchStartDist > 0) {
+        const dist = getTouchDistance();
+        if (dist > 0) {
+          const scale = dist / pinchStartDist; // 1.0 = без изменений
+          const baseZoom = pinchStartZoom;
+          const deltaZoom = Math.log2(scale) * PINCH_SENSITIVITY;
+          const nextZoom = clamp(baseZoom + deltaZoom, -3, 3);
+          if (!Number.isNaN(nextZoom)) {
+            view.zoom = nextZoom;
+            // считаем это "drag", чтобы не было tap-клика
+            window._wasDrag = true;
+            if (view.camTarget) view.camTarget = null;
+          }
+        }
+        // при pinch не двигаем камеру как при обычном drag
+        return;
+      }
+    }
+
+    // --- обычный drag / панорамирование ---
     if (!isDragging) return;
 
     const dx = e.clientX - lastPos.x;
@@ -570,11 +625,11 @@ export function attachDragPan(el, view) {
     // Если движение достаточно большое - это drag, а не клик
     if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
       window._wasDrag = true;
-      
-	    // ✅ Как только начался реальный drag — отключаем автопритяжение камеры
-	  if (view.camTarget) view.camTarget = null;
-	  
-      // Отменяем таймер сброса выделения, если начали двигать камеру
+
+      // отключаем автопритяжение камеры
+      if (view.camTarget) view.camTarget = null;
+
+      // если был таймер сброса выделения — отменяем
       if (window._pendingClearTimer) {
         clearTimeout(window._pendingClearTimer);
         window._pendingClearTimer = null;
@@ -588,26 +643,38 @@ export function attachDragPan(el, view) {
   };
 
   const stopDrag = (e) => {
+    if (e.pointerType === "touch") {
+      activeTouches.delete(e.pointerId);
+      if (activeTouches.size < 2) {
+        // жест закончился
+        pinchStartDist = null;
+      }
+    }
+
     if (!isDragging) return;
-    
+
     isDragging = false;
     el.classList.remove("dragging");
-    if (e.pointerId !== undefined) el.releasePointerCapture(e.pointerId);
-    if (!window._wasDrag) {
-  const rect = view.canvas.getBoundingClientRect();
-  const nx = (e.clientX - rect.left) / rect.width;
-  let ny = (e.clientY - rect.top) / rect.height;
-	ny = 1 - ny;
-  // если будет вверх ногами — раскомментируй:
-  // ny = 1 - ny;
+    if (e.pointerId !== undefined) {
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+    }
 
-  addRipple(view, nx, ny, RIPPLE_KIND.TAP);
-}
+    // Если это был не drag и не pinch — считаем tap и шлём ripple
+    if (!window._wasDrag) {
+      const rect = view.canvas.getBoundingClientRect();
+      const nx = (e.clientX - rect.left) / rect.width;
+      let ny = (e.clientY - rect.top) / rect.height;
+      ny = 1 - ny; // как у тебя было
+
+      addRipple(view, nx, ny, RIPPLE_KIND.TAP);
+    }
+
     // Сбрасываем флаг drag через небольшое время
     setTimeout(() => {
       window._wasDrag = false;
     }, 50);
-
   };
 
   el.addEventListener("pointerdown", startDrag);
@@ -615,6 +682,7 @@ export function attachDragPan(el, view) {
   el.addEventListener("pointerup", stopDrag);
   el.addEventListener("pointercancel", stopDrag);
 }
+
 export function attachZoomWheel(el, view) {
   el.addEventListener("wheel", (e) => {
     e.preventDefault();

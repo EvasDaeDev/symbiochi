@@ -1,6 +1,7 @@
 // js/render.js
 import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { getOrgMotion } from "./moving.js";
+import { IdleWarpConfig, renderBodyWithIdleWarp } from "./render_idleWarp.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { COIN, coinCellOffsets } from "./mods/coins.js";
 import { getFxPipeline } from "./FX/pipeline.js";
@@ -890,7 +891,7 @@ function drawFlashGlow(ctx, rects){
 // =====================
 // Rendering one organism
 // =====================
-function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1){
+function renderOrg(ctx, cam, org, view, orgId, baseSeed, isSelected, breathMul=1, globalTimeSec=null){
   const s = view.blockPx;
   const occPack = getOccCached(org);
   const occ = occPack.all;
@@ -1036,110 +1037,143 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
   const boundaryRects = [];
   const boundaryCells = [];
 
-  // BODY blocks
+    // BODY blocks
   const bodyColor = SH(getPartColor(org, "body", 0));
   const bodySkinColor = scaleBrightness(bodyColor, 1.15); // подсветка периметра
   const bodyCells = org?.body?.cells || [];
   const bodyOcc = occPack.body; // body-only occupancy for perimeter detection
 
-  if (!gaitActive){
-    const staticInner = [];
-    const staticSkin = [];
-
+  // Screen-space bounding box for idle warp pulse (for static body only).
+  let bodyBBoxPx = null;
+  if (!gaitActive && bodyCells.length){
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const [wx, wy] of bodyCells){
-      const nm = neighMaskAt(occ, wx, wy);
-      const kGrow = animProgress(org, wx, wy);
-      const isSkin = isBoundary(bodyOcc, wx, wy);
-      const col = isSkin ? bodySkinColor : bodyColor;
-
-      if (kGrow < 0.999){
-        const p = worldToScreenPx(cam, wx, wy, view);
-        const x = p.x;
-        const y = p.y + breathY;
-        drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
-      } else {
-        (isSkin ? staticSkin : staticInner).push([wx, wy]);
-      }
-
-      if (isSelected && isBoundary(occ, wx, wy)){
-        boundaryCells.push([wx, wy]);
-      }
+      const p = worldToScreenPx(cam, wx, wy, view);
+      const x = p.x;
+      const y = p.y + breathY;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + s > maxX) maxX = x + s;
+      if (y + s > maxY) maxY = y + s;
     }
+    if (Number.isFinite(minX) && Number.isFinite(minY) && Number.isFinite(maxX) && Number.isFinite(maxY)){
+            bodyBBoxPx = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+  }
 
-    const packInner = org.__packBodyInner || (org.__packBodyInner = {});
-    const packSkin  = org.__packBodySkin  || (org.__packBodySkin  = {});
+  function drawBody(ctxBody){
+    const ctx = ctxBody;
 
-    const fillPacked = (cells, col, packObj)=>{
-      if (!cells.length) return;
-      const rects = packedRectsCached(packObj, cells);
-      ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
-      for (const r of rects){
-        const p = worldToScreenPx(cam, r.x, r.y, view);
-        const x = p.x;
-        const y = p.y + breathY;
-        ctx.fillRect(x, y, r.w * s, r.h * s);
-      }
-    };
+    if (!gaitActive){
+      const staticInner = [];
+      const staticSkin = [];
 
-    // Draw bulk static cells in two passes (inner + perimeter skin), so the body outline stays 1-block thick.
-    fillPacked(staticInner, bodyColor, packInner);
-    fillPacked(staticSkin, bodySkinColor, packSkin);
-  } else {
-    // Gait render (smooth stretch, no "bridge union"):
-    // We draw each cell at its integer position but STRETCH it toward the movement direction.
-    // This avoids visible tears even if gait completes in a single tick.
-    const gaitTint = (col)=> (breathK ? brighten(col, 0.04) : col);
+      for (const [wx, wy] of bodyCells){
+        const nm = neighMaskAt(occ, wx, wy);
+        const kGrow = animProgress(org, wx, wy);
+        const isSkin = isBoundary(bodyOcc, wx, wy);
+        const col = isSkin ? bodySkinColor : bodyColor;
 
-    for (const [wx0, wy0] of bodyCells){
-      const isSkin = isBoundary(bodyOcc, wx0, wy0);
-      const col = isSkin ? bodySkinColor : bodyColor;
-      const kGrow = animProgress(org, wx0, wy0);
+        if (kGrow < 0.999){
+          const p = worldToScreenPx(cam, wx, wy, view);
+          const x = p.x;
+          const y = p.y + breathY;
+          drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
+        } else {
+          (isSkin ? staticSkin : staticInner).push([wx, wy]);
+        }
 
-      // 0..gaitDist
-      const o = gaitOffsetFromIntCell(wx0, wy0, null);
-
-      // Stretch in screen pixels (integer) towards gait direction.
-      const extPx = Math.max(0, Math.round(clamp(o, 0, gaitDist) * s));
-
-      const p = worldToScreenPx(cam, wx0, wy0, view);
-      let x = p.x;
-      let y = p.y + breathY;
-
-      // Apply growth scale first (still centered in the original cell),
-      // then stretch the grown block in the movement direction.
-      let ss = s;
-      let dxC = 0;
-      let dyC = 0;
-      if (kGrow < 0.999){
-        ss = Math.max(1, Math.round(s * kGrow));
-        dxC = Math.floor((s - ss) / 2);
-        dyC = Math.floor((s - ss) / 2);
-        x += dxC;
-        y += dyC;
+        if (isSelected && isBoundary(occ, wx, wy)){
+          boundaryCells.push([wx, wy]);
+        }
       }
 
-      const ext = (kGrow < 0.999) ? Math.round(extPx * (ss / s)) : extPx;
+      const packInner = org.__packBodyInner || (org.__packBodyInner = {});
+      const packSkin  = org.__packBodySkin  || (org.__packBodySkin  = {});
 
-      ctx.fillStyle = gaitTint(col);
+      const fillPacked = (cells, col, packObj)=>{
+        if (!cells.length) return;
+        const rects = packedRectsCached(packObj, cells);
+        ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
+        for (const r of rects){
+          const p = worldToScreenPx(cam, r.x, r.y, view);
+          const x = p.x;
+          const y = p.y + breathY;
+          ctx.fillRect(x, y, r.w * s, r.h * s);
+          if (isSelected){
+            boundaryRects.push({ x, y, w: r.w * s, h: r.h * s });
+          }
+        }
+      };
 
-      if (gaitDx !== 0){
-        // Horizontal stretch
-        if (gaitDx > 0) ctx.fillRect(x, y, ss + ext, ss);
-        else ctx.fillRect(x - ext, y, ss + ext, ss);
-      } else if (gaitDy !== 0){
-        // Vertical stretch
-        if (gaitDy > 0) ctx.fillRect(x, y, ss, ss + ext);
-        else ctx.fillRect(x, y - ext, ss, ss + ext);
-      } else {
-        // No direction: fallback
-        ctx.fillRect(x, y, ss, ss);
-      }
+      fillPacked(staticInner, bodyColor, packInner);
+      fillPacked(staticSkin, bodySkinColor, packSkin);
+    } else {
+      // Gait render (бывший код из else оставляем, только переносим внутрь функции)
+      const gaitTint = (col)=> (breathK ? brighten(col, 0.04) : col);
 
-      if (isSelected && isBoundary(occ, wx0, wy0)){
-        boundaryCells.push([wx0, wy0]);
+      for (const [wx0, wy0] of bodyCells){
+        const isSkin = isBoundary(bodyOcc, wx0, wy0);
+        const col = isSkin ? bodySkinColor : bodyColor;
+        const kGrow = animProgress(org, wx0, wy0);
+
+        // 0..gaitDist
+        const o = gaitOffsetFromIntCell(wx0, wy0, null);
+
+        // Stretch in screen pixels (integer) towards gait direction.
+        const extPx = Math.max(0, Math.round(clamp(o, 0, gaitDist) * s));
+
+        const p = worldToScreenPx(cam, wx0, wy0, view);
+        let x = p.x;
+        let y = p.y + breathY;
+
+        // Scale by growth first
+        let ss = s;
+        let dxC = 0;
+        let dyC = 0;
+        if (kGrow < 0.999){
+          ss = Math.max(1, Math.round(s * kGrow));
+          dxC = Math.floor((s - ss) / 2);
+          dyC = Math.floor((s - ss) / 2);
+          x += dxC;
+          y += dyC;
+        }
+
+        const ext = (kGrow < 0.999) ? Math.round(extPx * (ss / s)) : extPx;
+
+        ctx.fillStyle = gaitTint(col);
+
+        if (gaitDx !== 0){
+          if (gaitDx > 0) ctx.fillRect(x, y, ss + ext, ss);
+          else ctx.fillRect(x - ext, y, ss + ext, ss);
+        } else if (gaitDy !== 0){
+          if (gaitDy > 0) ctx.fillRect(x, y, ss, ss + ext);
+          else ctx.fillRect(x, y - ext, ss, ss + ext);
+        } else {
+          ctx.fillRect(x, y, ss, ss);
+        }
+
+        if (isSelected && isBoundary(occ, wx0, wy0)){
+          boundaryCells.push([wx0, wy0]);
+        }
       }
     }
   }
+
+  // Рендер тела (с idle warp pulse, если он сейчас активен)
+  const idleWarpState = renderBodyWithIdleWarp(
+    ctx,
+    {
+      org,
+      orgId,
+      baseSeed,
+      bodyCells,
+      bodyBBoxPx,
+      globalTimeSec,
+      gaitActive,
+    },
+    drawBody
+  );
 
   // MODULES
   const modules = org?.modules || [];
@@ -1156,7 +1190,47 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
     // Use base cell score for the whole module to prevent detachment.
     const baseCellForGait = (cells && cells.length) ? cells[0] : null;
     const modWFront = (gait && baseCellForGait) ? gaitWFront(baseCellForGait[0]||0, baseCellForGait[1]||0) : null;
+	
+    // Idle warp B1: anchor displacement (render-only, no state changes)
+    let organDx = 0;
+    let organDy = 0;
+    if (idleWarpState && idleWarpState.active && baseCellForGait){
+      const anchorWx = baseCellForGait[0] || 0;
+      const anchorWy = baseCellForGait[1] || 0;
+      const anchorP = worldToScreenPx(cam, anchorWx, anchorWy, view);
+      const disp = idleWarpState.getDisplacementAt
+        ? idleWarpState.getDisplacementAt(anchorP.x, anchorP.y + breathY)
+        : null;
+      if (disp){
+        organDx = disp.dx || 0;
+        organDy = disp.dy || 0;
+      }
+    }
 
+    ctx.save();
+    if (organDx !== 0 || organDy !== 0){
+      ctx.translate(organDx, organDy);
+
+      if (IdleWarpConfig.debugDrawAnchors && baseCellForGait){
+        const anchorP2 = worldToScreenPx(cam, baseCellForGait[0] || 0, baseCellForGait[1] || 0, view);
+        const ax = anchorP2.x;
+        const ay = anchorP2.y + breathY;
+        const tx = ax + organDx;
+        const ty = ay + organDy;
+        ctx.save();
+        ctx.strokeStyle = "rgba(56,189,248,0.9)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(tx, ty, 2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+	
     if (type === "spike"){
       const on = spikeBlinkOn();
       const len = cells.length;
@@ -1181,7 +1255,7 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
           if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
-      continue;
+      ctx.restore(); continue;
     }
 
     if (type === "shell"){
@@ -1201,7 +1275,7 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
           if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
-      continue;
+      ctx.restore(); continue;
     }
 
     if (type === "eye"){
@@ -1232,7 +1306,7 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
           if (isSelected && isBoundary(occ, wx0, wy0)) boundaryCells.push([wx, wy]);
         }
       }
-      continue;
+      ctx.restore(); continue;
     }
 
     // tails / limbs / antenna / tentacle: wind deformation on segments
@@ -1447,7 +1521,11 @@ function limbPhalanxIndex(lengths, idx){
         }
       }
     }
+	ctx.restore();
   }
+  
+
+
 
   if (isSelected && boundaryCells.length){
     // Cache on the organism: boundaryCells change only when geometry changes.
@@ -1666,7 +1744,8 @@ export function renderGrid(state, canvas, gridEl, view){
 
   // Local alias used throughout renderGrid (some helpers expect `cam` in scope)
   const cam = view.cam;
-
+  const globalTimeSec = Date.now() / 1000;
+  
   // Optional post-processing FX pipeline (view-only).
   const fx = getFxPipeline(view, canvas);
   const ctx = fx.begin(canvas);
@@ -1843,7 +1922,7 @@ if (Array.isArray(state.coins)){
       ctx.translate(-pivot.x, -pivot.y);
     }
 
-    const rects = renderOrg(ctx, cam2, org, view, orgId, baseSeed, !!isSel, breathMul);
+    const rects = renderOrg(ctx, cam2, org, view, orgId, baseSeed, !!isSel, breathMul, globalTimeSec);
 
     if (isSel){
       sel = { rects, pivot, angRad, cam2, org, orgId, breathMul, sx, sy };

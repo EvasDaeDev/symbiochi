@@ -83,8 +83,8 @@ export function triggerHandpanHit(audioCtx, destinationNode, params) {
     );
 
     // Envelope
-    const attack = 0.005 + Math.random() * 0.005; // мягкий Sanctuary-стиль
-    const baseDecay = 2.0 + Math.random() * 2.8; // 2.5–3.5 sec
+    const attack = 0.035 + Math.random() * 0.005; // мягкий Sanctuary-стиль
+    const baseDecay = 2.0 + Math.random() * 0.8; // 2.5–3.5 sec
     const decay = baseDecay * (0.6 + 0.4 * hpRatio); // HP ↓ → decay короче
 
     const maxGain = Math.max(0.0001, Math.min(1, velocity));
@@ -98,7 +98,7 @@ export function triggerHandpanHit(audioCtx, destinationNode, params) {
     const baseFreq = 700 + Math.random() * 1000; // 700–2400
     const darkenFactor = 1 - 0.3 * stress;
     filter.frequency.value = 1100 + Math.random() * 500; // Sanctuary range
-    filter.Q.value = 0.2 + Math.random() * 0.4; // 0.2–0.6
+    filter.Q.value = 0.2 + Math.random() * 0.15; // 0.2–0.6
 
     // Лёгкая сатурация
     shaper.curve = getSaturatorCurve();

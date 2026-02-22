@@ -22,12 +22,12 @@ export function debugPlayTestHit() {
 
 // === точки настройки (экспортируемые константы) ===
 
-export const MAX_HITS_PER_SEC = 1.4;
-export const MASTER_GAIN = 0.08;
+export const MAX_HITS_PER_SEC = 1.9;
+export const MASTER_GAIN = 0.25;
 export const COMPRESSOR_THRESHOLD = -24;
-export const BASE_VELOCITY = 0.35;
-export const STRESS_MULTIPLIER = 1.0;
-export const UPDATE_INTERVAL_MS = 200; // мс между "решениями" по ударам
+export const BASE_VELOCITY = 0.65;
+export const STRESS_MULTIPLIER = 0.1;
+export const UPDATE_INTERVAL_MS = 100; // мс между "решениями" по ударам
 const GLOBAL_ACTIVITY_GAIN = 3.5;
 // === внутреннее состояние системы ===
 
@@ -152,7 +152,7 @@ function getOrganismPitchFactor(org){
    const motifDegree = pickNextMotifDegree();
 
    // С шансом ~80% орган играет "по мотиву"
-   const followChance = 0.8;
+   const followChance = 0.1;
    if (Math.random() > followChance) {
      return randChoice(cfg.degrees);
    }
@@ -207,12 +207,12 @@ function getFollowersForLeaderType(type) {
 
 // Маппинг типов органов → музыкальные параметры
 export const ORGAN_AUDIO_CONFIG = {
-  CORE:     { degrees: [0],    octave: -1, baseRate: 0.080, stressBias: 1.0 },
-  EYES:     { degrees: [3, 4], octave: -1, baseRate: 0.032, stressBias: 1.0 },
+  CORE:     { degrees: [0],    octave:  0, baseRate: 0.080, stressBias: 1.0 },
+  EYES:     { degrees: [3, 4], octave:  0, baseRate: 0.032, stressBias: 1.0 },
   ANTENNA:  { degrees: [2, 3], octave:  0, baseRate: 0.038, stressBias: 1.0 },
   TAIL:     { degrees: [1, 2], octave:  0, baseRate: 0.055, stressBias: 1.0 },
   LIMB:     { degrees: [0, 2],    octave:  0, baseRate: 0.055, stressBias: 1.0 },
-  TENTACLE: { degrees: [1, 3, 1, 2], octave:  0, baseRate: 0.055, stressBias: 1.0 },
+  TENTACLE: { degrees: [1, 3, 1, 2], octave:  -1, baseRate: 0.055, stressBias: 1.0 },
   WORM:     { degrees: [1, 3, 4],    octave:  0, baseRate: 0.055, stressBias: 1.0 },
   SHELL:    { degrees: [0],    octave: -1, baseRate: 0.064, stressBias: 1.0 },
   SPIKE:    { degrees: [2, 3, 4], octave:  0, baseRate: 0.025, stressBias: 1.0 },
@@ -220,7 +220,7 @@ export const ORGAN_AUDIO_CONFIG = {
   // поздние органы:
   TEETH:    { degrees: [3, 4], octave:  0, baseRate: 0.038, stressBias: 1.2 },
   CLAW:     { degrees: [2],    octave:  0, baseRate: 0.050, stressBias: 1.3 },
-  FIN:      { degrees: [1, 2], octave: -1, baseRate: 0.045, stressBias: 1.0 },
+  FIN:      { degrees: [1, 2], octave:  0, baseRate: 0.045, stressBias: 1.0 },
   MOUTH:    { degrees: [0, 2], octave:  0, baseRate: 0.038, stressBias: 1.1 }
 };
 
