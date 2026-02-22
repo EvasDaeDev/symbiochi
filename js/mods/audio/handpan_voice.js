@@ -10,7 +10,7 @@ function createSaturatorCurve() {
     // Мягкая waveshaper-сатурация.
     const n = 256;
     const curve = new Float32Array(n);
-    const amount = 1.5;
+    const amount = 1.0;
 
     for (let i = 0; i < n; i++) {
         const x = (i * 2) / (n - 1) - 1; // -1..1
@@ -74,17 +74,17 @@ export function triggerHandpanHit(audioCtx, destinationNode, params) {
     // Базовая частота + лёгкая расстройка
     osc1.frequency.setValueAtTime(frequency, now);
     osc2.frequency.setValueAtTime(
-        frequency * 2 * (1 + (Math.random() - 0.5) * 0.01),
+        frequency * 2 * (1 + (Math.random() - 0.5) * 0.003),
         now
     );
     osc3.frequency.setValueAtTime(
-        frequency * 3 * (1 + (Math.random() - 0.5) * 0.015),
+        frequency * 3 * (1 + (Math.random() - 0.5) * 0.006),
         now
     );
 
     // Envelope
-    const attack = 0.015 + Math.random() * 0.010; // мягкий Sanctuary-стиль
-    const baseDecay = 2.5 + Math.random() * 3.0; // 2.5–3.5 sec
+    const attack = 0.035 + Math.random() * 0.005; // мягкий Sanctuary-стиль
+    const baseDecay = 2.0 + Math.random() * 0.8; // 2.5–3.5 sec
     const decay = baseDecay * (0.6 + 0.4 * hpRatio); // HP ↓ → decay короче
 
     const maxGain = Math.max(0.0001, Math.min(1, velocity));
@@ -95,10 +95,10 @@ export function triggerHandpanHit(audioCtx, destinationNode, params) {
 
     // Фильтр
     filter.type = "lowpass";
-    const baseFreq = 700 + Math.random() * 1700; // 700–2400
+    const baseFreq = 700 + Math.random() * 1000; // 700–2400
     const darkenFactor = 1 - 0.3 * stress;
-    filter.frequency.value = 1600 + Math.random() * 700; // Sanctuary range
-    filter.Q.value = 0.2 + Math.random() * 0.4; // 0.2–0.6
+    filter.frequency.value = 1100 + Math.random() * 500; // Sanctuary range
+    filter.Q.value = 0.2 + Math.random() * 0.15; // 0.2–0.6
 
     // Лёгкая сатурация
     shaper.curve = getSaturatorCurve();

@@ -25,7 +25,7 @@ export function debugPlayTestHit() {
 export const MAX_HITS_PER_SEC = 1.6;
 export const MASTER_GAIN = 0.15;
 export const COMPRESSOR_THRESHOLD = -24;
-export const BASE_VELOCITY = 0.75;
+export const BASE_VELOCITY = 0.55;
 export const STRESS_MULTIPLIER = 1.0;
 export const UPDATE_INTERVAL_MS = 250; // мс между "решениями" по ударам
 
@@ -53,19 +53,19 @@ function randChoice(arr) {
 }
 
 // Маппинг типов органов → музыкальные параметры
-const ORGAN_AUDIO_CONFIG = {
-  CORE:     { degrees: [0],    octave: -1, baseRate: 0.060, stressBias: 0.3 },
-  EYES:     { degrees: [3, 4], octave:  1, baseRate: 0.032, stressBias: 0.3 },
-  ANTENNA:  { degrees: [2, 3], octave:  0, baseRate: 0.038, stressBias: 0.3 },
-  TAIL:     { degrees: [1, 2], octave:  0, baseRate: 0.055, stressBias: 0.3 },
-  LIMB:     { degrees: [0, 2],    octave:  0, baseRate: 0.055, stressBias: 0.3 },
-  TENTACLE: { degrees: [1, 2, 3], octave:  0, baseRate: 0.095, stressBias: 0.3 },
-  WORM:     { degrees: [1, 3, 4],    octave:  0, baseRate: 0.095, stressBias: 0.3 },
-  SHELL:    { degrees: [0],    octave:  0, baseRate: 0.024, stressBias: 0.3 },
-  SPIKE:    { degrees: [0, 1], octave:  2, baseRate: 0.025, stressBias: 0.3 },
+export const ORGAN_AUDIO_CONFIG = {
+  CORE:     { degrees: [0],    octave: -1, baseRate: 0.060, stressBias: 1.0 },
+  EYES:     { degrees: [3, 4], octave:  0, baseRate: 0.032, stressBias: 1.0 },
+  ANTENNA:  { degrees: [2, 3], octave:  0, baseRate: 0.038, stressBias: 1.0 },
+  TAIL:     { degrees: [1, 2], octave:  0, baseRate: 0.055, stressBias: 1.0 },
+  LIMB:     { degrees: [0, 2],    octave:  0, baseRate: 0.055, stressBias: 1.0 },
+  TENTACLE: { degrees: [2, 3], octave:  -1, baseRate: 0.095, stressBias: 1.0 },
+  WORM:     { degrees: [1, 3, 4],    octave:  0, baseRate: 0.095, stressBias: 1.0 },
+  SHELL:    { degrees: [0],    octave:  0, baseRate: 0.024, stressBias: 1.0 },
+  SPIKE:    { degrees: [2, 3, 4], octave:  0, baseRate: 0.025, stressBias: 1.0 },
 
   // поздние органы:
-  TEETH:    { degrees: [3, 4], octave:  1, baseRate: 0.038, stressBias: 1.2 },
+  TEETH:    { degrees: [3, 4], octave:  0, baseRate: 0.038, stressBias: 1.2 },
   CLAW:     { degrees: [2],    octave:  0, baseRate: 0.050, stressBias: 1.3 },
   FIN:      { degrees: [1, 2], octave:  0, baseRate: 0.045, stressBias: 1.0 },
   MOUTH:    { degrees: [0, 2], octave:  0, baseRate: 0.038, stressBias: 1.1 }
@@ -413,3 +413,4 @@ function maybeEmitHitForOrganism(organism, totalActiveOrgans, energyBudget) {
     }
   }
 }
+

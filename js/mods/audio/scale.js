@@ -1,7 +1,7 @@
 // mods/audio/scale.js
 // D minor pentatonic scale (fixed, без сидов и сдвигов)
 
-export const ROOT_NOTE_D3 = 146.83; // D3
+export const ROOT_NOTE_D3 = 93.42; // D3
 export const PENTATONIC_STEPS = [0, 3, 5, 7, 10]; // 0..4 — ступени гаммы
 
 /**
