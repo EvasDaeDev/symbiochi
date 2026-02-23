@@ -278,6 +278,7 @@ export function getStageName(state){
   if (blocks <= 400) return "Существо";
   if (blocks <= 800) return "Организм";
   if (blocks <= 1200) return "Вид";
+  if (blocks <= 4200) return "Монстр";
   return "Форма жизни";
 }
 

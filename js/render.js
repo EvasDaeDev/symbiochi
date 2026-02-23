@@ -115,7 +115,7 @@ function _quantSat(sat){
   if (!Number.isFinite(sat)) return 1;
   // state.js already quantizes, but keep render robust
   const step = 0.05;
-  return clamp(Math.round(sat/step)*step, 0.25, 1);
+  return clamp(Math.round(sat/step)*step, 0.15, 1);
 }
 function satColorHex(hex, sat){
   if (!hex || typeof hex !== "string" || hex[0] !== "#") return hex;
@@ -141,72 +141,8 @@ function getBaseBlockPx(){
   return Number.isFinite(n) && n >= 2 ? n : 4;
 }
 
-// =====================
-// Crystal border glow (jagged/fractal)
-// =====================
-function _noise01(i, seed){
-  const x = Math.sin((i*12.9898 + seed*78.233) ) * 43758.5453;
-  return x - Math.floor(x);
-}
-function drawCrystalPerimeter(ctx, w, h, px, strength01, seed){
-  const inset = 10;
-  const x0 = inset, y0 = inset;
-  const x1 = w - inset, y1 = h - inset;
-  const seg = 6; // segment size in px
-  ctx.save();
-  ctx.globalAlpha = 0.08 + 0.30 * strength01;
-  ctx.shadowColor = "rgba(255,105,180,0.85)";
-  ctx.shadowBlur = 10 + px;
-  ctx.lineWidth = Math.max(2, Math.min(10, Math.round(px/2)));
-  ctx.strokeStyle = "rgba(255,105,180,0.65)";
 
-  // draw 4 sides as noisy paths with a ragged inner edge
-  const drawSide = (ax, ay, bx, by, nx, ny, idxBase)=>{
-    const len = Math.max(1, Math.hypot(bx-ax, by-ay));
-    const steps = Math.max(8, Math.floor(len / seg));
-    ctx.beginPath();
-    for (let i=0;i<=steps;i++){
-      const t = i/steps;
-      const x = ax + (bx-ax)*t;
-      const y = ay + (by-ay)*t;
-      // fractal-ish: combine 3 octaves
-      const n1 = _noise01(idxBase + i, seed);
-      const n2 = _noise01(idxBase + i*3.1, seed ^ 0x9e3779b9);
-      const n3 = _noise01(idxBase + i*7.7, seed ^ 0x85ebca6b);
-      const n = (0.55*n1 + 0.30*n2 + 0.15*n3);
-      const jitter = (0.35 + 0.65*n) * px;
-      const xx = x + nx * jitter;
-      const yy = y + ny * jitter;
-      if (i===0) ctx.moveTo(xx,yy);
-      else ctx.lineTo(xx,yy);
-    }
-    ctx.stroke();
 
-    // add crystalline spikes
-    ctx.globalAlpha *= 0.65;
-    for (let i=0;i<steps;i++){
-      if (_noise01(idxBase + i*11.3, seed) < 0.14) continue;
-      const t = i/steps;
-      const x = ax + (bx-ax)*t;
-      const y = ay + (by-ay)*t;
-      const n = _noise01(idxBase + i*5.9, seed);
-      const spike = (0.35 + 0.65*n) * px * 0.9;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + nx*spike, y + ny*spike);
-      ctx.stroke();
-    }
-    ctx.globalAlpha /= 0.65;
-  };
-
-  // normals point inward
-  drawSide(x0,y0, x1,y0, 0, +1, 1000);
-  drawSide(x1,y0, x1,y1, -1, 0, 2000);
-  drawSide(x1,y1, x0,y1, 0, -1, 3000);
-  drawSide(x0,y1, x0,y0, +1, 0, 4000);
-
-  ctx.restore();
-}
 
 // zoom: -3..+3 → blockPx ~ 1..7 (for base 4)
 // keep integer pixels for crispness
@@ -233,7 +169,7 @@ function mix(hexA, hexB, t){
 // small brightness tweak (-0.2..+0.2)
 function brighten(hex, amt){
   const c = hexToRgb(hex);
-  const k = 0.93 + amt;
+  const k = 0.90 + amt;
   return rgbToHex(c.r*k, c.g*k, c.b*k);
 }
 
@@ -571,7 +507,7 @@ function organSegmentColor(hex, segIndex, segLen, baseSeed, orgId, organIndex){
   if (segLen <= 1) return hex;
   const u = segIndex / (segLen-1);
   const jitter = (hash01(`${baseSeed}|grad|${orgId}|${organIndex}`) - 0.5) * 0.02; // ±1%
-  const amt = (u - 0.5) * 0.10 + jitter; // ~±5%
+  const amt = (u - 0.15) * 0.10 + jitter; // ~±5%
   return brighten(hex, amt);
 }
 
@@ -1580,28 +1516,40 @@ function limbPhalanxIndex(lengths, idx){
     boundaryRects.push({x:coreX, y:coreY, w:corePx, h:corePx});
   }
 
-  // EYES (always on top of body).
+    // EYES (always on top of body).
   const face = org?.face?.anchor;
   if (face){
     const eyeRadius = computeEyeRadius(org, bodyBlocks);
     const eyeColor = SH(getPartColor(org, "eye", 0) || "#e2e8f0");
-    const shape = org?.face?.eyeShape || (hash01(`${baseSeed}|eye-shape|${orgId}`) < 0.5 ? "diamond" : "sphere");
+
+    // Глаз всегда сферический
+    const shape = "sphere";
     const offsets = buildEyeOffsets(eyeRadius, shape);
     const blinkScale = eyeBlinkScale(orgId, baseSeed);
+
+    // Локальная occupancy только для глаза — чтобы corner-smoothing
+    // резал углы именно у «шара» глаза, независимо от тела.
     const eyeOcc = new Set();
+    const eyeCells = [];
+
     for (const [dx, dy] of offsets){
       const wx = face[0] + dx;
       const wy = face[1] + dy;
+      // не перекрываем ядро
       if (wx === core[0] && wy === core[1]) continue;
-      eyeOcc.add(`${wx},${wy}`);
+
+      eyeCells.push([wx, wy]);
+      eyeOcc.add(packXY(wx, wy)); // важно: Set из packXY, как у тела
     }
 
-    for (const key of eyeOcc){
-      const [wx, wy] = key.split(",").map((v) => parseInt(v, 10));
+    for (const [wx, wy] of eyeCells){
       const p = worldToScreenPx(cam, wx, wy, view);
       const x = p.x;
       const y = p.y + breathY;
+
+      // маска соседей внутри глаза → drawBlock режет углы под 45°
       const nm = neighMaskAt(eyeOcc, wx, wy);
+
       if (blinkScale !== 1){
         const cx = x + s / 2;
         const cy = y + s / 2;
@@ -1748,6 +1696,10 @@ export function renderGrid(state, canvas, gridEl, view){
   
   // Optional post-processing FX pipeline (view-only).
   const fx = getFxPipeline(view, canvas);
+
+  // радиус свечения в клетках мира
+  view.glowRadiusCells = 6;  // можно потом завести в конфиг/стейт
+
   const ctx = fx.begin(canvas);
 
   // Draw in CSS pixels (not device pixels), matching previous 2D setup.

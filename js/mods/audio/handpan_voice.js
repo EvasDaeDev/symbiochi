@@ -2,7 +2,7 @@
 // Один перкуссионный голос handpan для организма.
 
 let activeVoices = 0;
-const MAX_SIMULTANEOUS_VOICES = 16;
+const MAX_SIMULTANEOUS_VOICES = 8;
 
 let saturatorCurve = null;
 
@@ -51,6 +51,10 @@ export function triggerHandpanHit(audioCtx, destinationNode, params) {
 
     const frequency = params.frequency;
     let velocity = params.velocity;
+// лёгкий компрессор чувствительности: низкие vel остаются, высокие сглаживаются
+velocity = Math.pow(velocity, 0.8);
+
+const maxGain = Math.max(0.0001, Math.min(0.7, velocity)); // кэп на 0.7
     const stress = Math.max(0, Math.min(1, params.stress ?? 0));
     const hpRatio = Math.max(0, Math.min(1, params.hpRatio ?? 1));
 
@@ -59,46 +63,75 @@ export function triggerHandpanHit(audioCtx, destinationNode, params) {
 
     const now = audioCtx.currentTime;
 
-    const osc1 = audioCtx.createOscillator();
-    const osc2 = audioCtx.createOscillator();
-    const osc3 = audioCtx.createOscillator();
+const osc1 = audioCtx.createOscillator();
+const osc2 = audioCtx.createOscillator();
+const osc3 = audioCtx.createOscillator();
 
-    const gain = audioCtx.createGain();
-    const filter = audioCtx.createBiquadFilter();
-    const shaper = audioCtx.createWaveShaper();
+const gain1 = audioCtx.createGain();
+const gain2 = audioCtx.createGain();
+const gain3 = audioCtx.createGain();
 
-    osc1.type = "sine";
-    osc2.type = "sine";
-    osc3.type = "sine";
+const gain = audioCtx.createGain();
+const filter = audioCtx.createBiquadFilter();
+const shaper = audioCtx.createWaveShaper();
 
-    // Базовая частота + лёгкая расстройка
-    osc1.frequency.setValueAtTime(frequency, now);
-    osc2.frequency.setValueAtTime(
-        frequency * 2 * (1 + (Math.random() - 0.5) * 0.003),
-        now
-    );
-    osc3.frequency.setValueAtTime(
-        frequency * 3 * (1 + (Math.random() - 0.5) * 0.006),
-        now
-    );
+osc1.type = "sine";
+osc2.type = "sine";
+osc3.type = "sine";
+
+// Базовая частота + мягкая расстройка
+osc1.frequency.setValueAtTime(frequency, now);
+osc2.frequency.setValueAtTime(
+  frequency * 2 * (1 + (Math.random() - 0.5) * 0.001),
+  now
+);
+osc3.frequency.setValueAtTime(
+  frequency * 3 * (1 + (Math.random() - 0.5) * 0.002),
+  now
+);
+
+// Уровни: фундамент громкий, обертона мягче
+gain1.gain.value = 1.0;
+gain2.gain.value = 0.45; // было 1
+gain3.gain.value = 0.25; // было 1
+
+osc1.connect(gain1);
+osc2.connect(gain2);
+osc3.connect(gain3);
+
+gain1.connect(gain);
+gain2.connect(gain);
+gain3.connect(gain);
+
 
     // Envelope
-    const attack = 0.005 + Math.random() * 0.005; // мягкий Sanctuary-стиль
-    const baseDecay = 2.0 + Math.random() * 2.8; // 2.5–3.5 sec
-    const decay = baseDecay * (0.6 + 0.4 * hpRatio); // HP ↓ → decay короче
+// Мягкий, но быстрый щелчок (handpan vibe)
+const attack = 0.008 + Math.random() * 0.007; // 0.008–0.015
 
-    const maxGain = Math.max(0.0001, Math.min(1, velocity));
+// Более стабильный и длинный хвост для релакса
+const baseDecay = 1.1 + Math.random() * 2.5; // 4.5–7.0 сек
+const decay = baseDecay * (0.7 + 0.3 * hpRatio); 
+// HP ↓ чуть короче, но не радикально — чтобы не было "обрубков"
+
+    
 
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.exponentialRampToValueAtTime(maxGain, now + attack);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + decay);
 
     // Фильтр
-    filter.type = "lowpass";
-    const baseFreq = 700 + Math.random() * 1000; // 700–2400
-    const darkenFactor = 1 - 0.3 * stress;
-    filter.frequency.value = 1100 + Math.random() * 500; // Sanctuary range
-    filter.Q.value = 0.2 + Math.random() * 0.4; // 0.2–0.6
+filter.type = "lowpass";
+
+// Чем выше стресс — тем темнее звук
+const darkenFactor = 1 - 0.4 * stress;     // stress 0 → 1.0, stress 1 → 0.6
+
+// Базовый диапазон для "санктуарийного" тембру
+const baseCutoff = 350 + Math.random() * 250; // 350–600 Гц
+
+filter.frequency.setValueAtTime(baseCutoff * darkenFactor, now);
+
+// Низкий Q, чтобы не вылезали резкие пики
+filter.Q.setValueAtTime(0.15 + Math.random() * 0.25, now); // 0.15–0.4
 
     // Лёгкая сатурация
     shaper.curve = getSaturatorCurve();

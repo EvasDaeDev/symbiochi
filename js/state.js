@@ -7,7 +7,7 @@ import { COIN, coinCellOffsets } from "./mods/coins.js";
 import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor, repairDetachedModules, getOrganMaxLen } from "./creature.js";
 import { ensureBodyWave } from "./mods/body_wave.js";
-import { applyMutation, applyShrinkDecay } from "./state_mutation.js";
+import { applyMutation, applyShrinkDecay, reanchorModulesToPerimeter } from "./state_mutation.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
 
@@ -689,7 +689,19 @@ export function simulate(state, deltaSec){
     }
   }
 
+  // Сначала объединяем организмы (это может сильно изменить геометрию тела)
   mergeTouchingOrganisms(state);
+
+  // Пододвигаем все внешние органы к новому периметру тела,
+  // чтобы "старые" длинные органы не торчали из недр.
+  reanchorModulesToPerimeter(state, state);
+  if (Array.isArray(state.buds)){
+    for (const bud of state.buds){
+      if (!bud) continue;
+      reanchorModulesToPerimeter(bud, state);
+    }
+  }
+
 
   // Coins: check collisions with placed coins and apply mood bonus.
   processCoins(state);

@@ -2,7 +2,7 @@ export const EYE = {
   label: "Глаза",
   wind: false,
   growthDir: 8,
-  shapeOptions: ["diamond", "sphere"],
+  shapeOptions: ["sphere"],
   shapeWeights: [0.5, 0.5],
   smallBodyThreshold: 50,
   largeRadiusChance: 0.5,

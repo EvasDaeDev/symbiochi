@@ -44,7 +44,7 @@ class FxPipeline {
     this.barrelK = 0.060;
     this.barrelExp = 2.25;
     this.chromaticPx = 3.35;
-    this.vignette = 0.15;
+    this.vignette = 0.05;
     this.smooth = 0.0;
 
     // Ripple ring (локальная подсветка по кольцу)

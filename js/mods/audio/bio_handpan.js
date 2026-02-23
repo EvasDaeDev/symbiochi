@@ -20,15 +20,29 @@ export function debugPlayTestHit() {
   });
 }
 
+
+
 // === точки настройки (экспортируемые константы) ===
 
-export const MAX_HITS_PER_SEC = 1.4;
+export const MAX_HITS_PER_SEC = 1.6;      // было 1.4 — теперь организм может заводить кластеры чаще
 export const MASTER_GAIN = 0.08;
 export const COMPRESSOR_THRESHOLD = -24;
 export const BASE_VELOCITY = 0.35;
 export const STRESS_MULTIPLIER = 1.0;
-export const UPDATE_INTERVAL_MS = 200; // мс между "решениями" по ударам
-const GLOBAL_ACTIVITY_GAIN = 3.5;
+export const UPDATE_INTERVAL_MS = 200;    // было 200 — принимаем решения чуть чаще
+const GLOBAL_ACTIVITY_GAIN = 3.0;         // было 3.5 — общий буст активности
+
+// Целевой "мягкий" темп для общего ковра
+export const TARGET_BPM = 72;
+const TARGET_HITS_PER_SEC = TARGET_BPM / 60; // удара/сек
+const HIT_WINDOW_SEC = 4;                    // окно для измерения плотности
+const ADAPT_SPEED = 0.15;                    // скорость автоподстройки плотности
+
+let recentHits = [];
+let adaptiveActivityMul = 1.0;
+// Персональные фазовые сдвиги по биту для каждого организма
+const organismBeatOffsets = new Map();
+
 // === внутреннее состояние системы ===
 
 let audioCtx = null;
@@ -38,9 +52,61 @@ let compressorNode = null;
 let isEnabled = true;
 let lastDecisionTimeMs = 0;
 
+// Global conductor: чтобы организмы не играли все одновременно
+const conductor = {
+  untilMs: 0,        // до какого времени “сцена занята”
+  leaderOrgKey: null // кто сейчас ведущий (не обязательно, но полезно)
+};
+
+function canWorldStartPhrase(orgKey, plannedPhraseMs){
+  const nowMs = performance.now();
+
+  // если этот организм уже лидер и фраза ещё идёт — пусть продолжает
+  if (conductor.leaderOrgKey === orgKey && nowMs < conductor.untilMs){
+    return true;
+  }
+
+  // если сцена свободна — пускаем и бронируем
+  if (nowMs >= conductor.untilMs){
+    conductor.leaderOrgKey = orgKey;
+    conductor.untilMs = nowMs + plannedPhraseMs;
+    return true;
+  }
+
+  // сцена занята — в 25% случаев разрешаем "вход в середине"
+  const remaining = conductor.untilMs - nowMs;
+  const progress = 1 - (remaining / Math.max(1, plannedPhraseMs));
+  const allowMid = (Math.random() < 0.25) && (progress >= 0.25) && (progress <= 0.60);
+
+  return allowMid;
+}
+
 const organismHitTimestamps = new Map(); // per-organism hit limiter
 let organismFilterFn = null;
 let resumeHandlerInstalled = false;
+
+const organHitTimestamps = new WeakMap(); // per-organism per-organ-type limiter
+
+function canOrganEmitHit(orgKey, organType, minIntervalMs){
+  const nowMs = performance.now();
+  const type = String(organType || "").toUpperCase();
+
+  let perOrg = organHitTimestamps.get(orgKey);
+  if (!perOrg){
+    perOrg = new Map();
+    organHitTimestamps.set(orgKey, perOrg);
+  }
+
+  const lastMs = perOrg.get(type) ?? 0;
+  if (nowMs - lastMs < minIntervalMs) return false;
+
+  perOrg.set(type, nowMs);
+  return true;
+}
+
+// Адаптивная плотность и окно последних ударов
+
+
 
 // === утилиты ===
 
@@ -50,6 +116,47 @@ function clamp01(v) {
 
 function randChoice(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Регистрация ударов в скользящем окне
+function registerHit() {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  recentHits.push(now);
+
+  const cutoff = now - HIT_WINDOW_SEC;
+  while (recentHits.length && recentHits[0] < cutoff) {
+    recentHits.shift();
+  }
+}
+
+
+// Мягкий "магнит" к виртуальному биту (чем ближе к доле — тем выше коэффициент)
+function getBeatBias(nowMs) {
+  if (!Number.isFinite(nowMs)) return 1;
+
+  const beatMs = 60000 / TARGET_BPM;
+  const phase = nowMs % beatMs;                     // позиция внутри такта
+  const dist = Math.min(phase, beatMs - phase);     // расстояние до ближайшей доли
+  const norm = dist / (beatMs * 0.5 || 1);          // 0 на доле, 1 в середине между долями
+
+  // 0..1 → 1.4..0.4 (на доле — 1.4, вдалеке — 0.4)
+  const bias = 1.25 - 0.75 * Math.min(1, norm);
+  return bias;
+}
+
+// Персональный фазовый сдвиг организма относительно глобального бита
+function getOrganismBeatOffsetMs(orgKey) {
+  if (!orgKey) return 0;
+
+  let offset = organismBeatOffsets.get(orgKey);
+  if (offset == null) {
+    const beatMs = 60000 / TARGET_BPM;
+    // случайный сдвиг в пределах одного бита
+    offset = Math.random() * beatMs;
+    organismBeatOffsets.set(orgKey, offset);
+  }
+  return offset;
 }
 
 // === Маппинг размера тела в питч ===
@@ -89,16 +196,36 @@ function getOrganismPitchFactor(org){
   return 1.0 + (SIZE_PITCH_MIN_FACTOR - 1.0) * t;
 }
 
+function updateAdaptiveActivity() {
+  if (!audioCtx) return;
+  if (!recentHits.length) {
+    adaptiveActivityMul = 1.5; // лёгкий старт из тишины
+    return;
+  }
+
+  const hitsPerSec = recentHits.length / HIT_WINDOW_SEC;
+  const target = TARGET_HITS_PER_SEC;
+
+  // хотим, чтобы hitsPerSec стремилось к target
+  const desiredMul = target / Math.max(0.001, hitsPerSec);
+  adaptiveActivityMul += (desiredMul - adaptiveActivityMul) * ADAPT_SPEED;
+
+  adaptiveActivityMul = Math.max(0.3, Math.min(3.0, adaptiveActivityMul));
+}
 
  // === Мелодический движок ===
 
  // Паттерны в терминах ступеней пентатоники D minor:
  // 0=D, 1=F, 2=G, 3=A, 4=C
  const MELODIC_PATTERNS = [
-   [0, 2, 3, 0], // D G A D
-   [0, 1, 2, 0], // D F G D
-   [0, 2, 4, 2], // D G C G
-   [0, 3, 2, 0], // D A G D
+  [0, 2, 3, 2, 0, 2, 0, 0], // D G A G D G D D
+  [0, 1, 2, 1, 0, 2, 0, 0], // D F G F D G D D
+  [0, 2, 4, 2, 0, 3, 2, 0], // D G C G D A G D
+  [0, 3, 2, 1, 0, 2, 1, 0], // D A G F D G F D
+  [0, 0, 2, 0],   // D D G D
+  [0, 2, 2, 0],   // D G G D
+  [0, 1, 0, 2],   // D F D G
+  [0, 3, 3, 0],   // D A A D
  ];
 
  let currentPattern = null;
@@ -152,7 +279,7 @@ function getOrganismPitchFactor(org){
    const motifDegree = pickNextMotifDegree();
 
    // С шансом ~80% орган играет "по мотиву"
-   const followChance = 0.8;
+   const followChance = 0.67;
    if (Math.random() > followChance) {
      return randChoice(cfg.degrees);
    }
@@ -166,7 +293,7 @@ function getOrganismPitchFactor(org){
      } else if (d === motifDegree - 1 || d === motifDegree + 1) {
        candidates.push({ d, w: 2 }); // соседние ступени — тоже ок
      } else {
-       candidates.push({ d, w: 1 }); // дальние — редко, но возможны
+       candidates.push({ d, w: 0.2 }); // дальние — редко, но возможны
      }
    }
 
@@ -181,19 +308,33 @@ function getOrganismPitchFactor(org){
    return candidates[candidates.length - 1].d;
  }
 
+function pickFollowerDegreeNearLeader(leaderDeg, cfg){
+  const degrees = Array.isArray(cfg?.degrees) ? cfg.degrees : null;
+  if (!degrees || !degrees.length) return leaderDeg;
+
+  // аккордное окно: лидер или соседние ступени
+  const wanted = [leaderDeg, leaderDeg - 1, leaderDeg + 1];
+
+  for (const w of wanted){
+    if (degrees.includes(w)) return w;
+  }
+
+  // если совсем не подходит — fallback на текущий движок
+  return pickDegreeForOrgan(cfg);
+}
 
 // === Оркестровка: кто кому подпевает ===
 
 const ENSEMBLE_FOLLOWERS = {
   EYES: {
-    followers: ["TENTACLE", "WORM"],
-    followerProb: 0.9,   // шанс, что каждый подходящий орган подпоёт
-    velocityMul: 0.9     // фолловеры чуть тише
+    followers: ["TENTACLE", "WORM" , "SPIKE"],
+    followerProb: 0.55,   // шанс, что каждый подходящий орган подпоёт
+    velocityMul: 0.65     // фолловеры чуть тише
   },
   CORE: {
-    followers: ["TAIL", "TENTACLE", "ANTENNA"],
-    followerProb: 0.9,
-    velocityMul: 0.9
+    followers: ["TAIL", "TENTACLE", "ANTENNA" , "SHELL"],
+    followerProb: 0.45,
+    velocityMul: 0.65
   },
 
   
@@ -471,6 +612,9 @@ export function updateBioHandpan(gameState) {
   }
   lastDecisionTimeMs = nowMs;
 
+  // Обновляем адаптивный множитель активности перед генерацией ударов
+  updateAdaptiveActivity();
+
   const organisms = extractOrganisms(gameState);
   if (!organisms.length) return;
 
@@ -487,12 +631,11 @@ export function updateBioHandpan(gameState) {
   }
 
   const globalVoices = getActiveVoicesCount();
-  // const energyBudget = 1 / Math.sqrt(globalVoices + 1);
-  // ВРЕМЕННО: без глобального уменьшения громкости
-  const energyBudget = 1;
+  const energyBudget = 1 / Math.sqrt(globalVoices + 0.7);
+
 
   for (const org of activeOrganisms) {
-    maybeEmitHitForOrganism(org, totalActiveOrgans, energyBudget);
+    maybeEmitHitForOrganism(org, totalActiveOrgans, energyBudget, nowMs);
   }
 
   cleanupHitTracker(activeOrganisms);
@@ -500,7 +643,7 @@ export function updateBioHandpan(gameState) {
 
 // === генерация ударов по формулам ===
 
-function maybeEmitHitForOrganism(organism, totalActiveOrgans, energyBudget) {
+function maybeEmitHitForOrganism(organism, totalActiveOrgans, energyBudget, nowMs) {
   const organs = getOrganList(organism);
   if (!organs.length) return;
 
@@ -532,43 +675,61 @@ function maybeEmitHitForOrganism(organism, totalActiveOrgans, energyBudget) {
   // Коэффициент высоты, зависящий от размера тела (body.cells)
   const pitchFactor = getOrganismPitchFactor(organism);
 
+  // Персональный фазовый сдвиг для организма + "магнит" к биту
+  const beatOffsetMs = getOrganismBeatOffsetMs(orgKey);
+  const beatBias = getBeatBias(nowMs + beatOffsetMs);
+
   // --- 1) заранее проверяем, может ли организм вообще бить в этот тик ---
   if (!canOrganismEmitHit(orgKey)) {
     return;
   }
 
   // --- 2) собираем кандидатов с их шансами ---
-const candidates = [];
-const localDensityFactor = 1 / Math.sqrt(organs.length || 1);
+  const candidates = [];
+  const localDensityFactor = 1 / Math.sqrt(organs.length || 1);
 
-for (const organ of organs) {
-  const cfg = getOrganAudioConfig(organ);
-  if (!cfg) continue;
+  for (const organ of organs) {
+    const cfg = getOrganAudioConfig(organ);
+    if (!cfg) continue;
 
-  const rawLength =
-    typeof organ.length === "number"
-      ? organ.length
-      : (typeof organ.size === "number" ? organ.size : 10);
+    const rawLength =
+      typeof organ.length === "number"
+        ? organ.length
+        : (typeof organ.size === "number" ? organ.size : 10);
 
-  let lenFactor = rawLength / 20;
-  if (!Number.isFinite(lenFactor)) lenFactor = 0.5;
-  lenFactor = Math.max(0.2, Math.min(1, lenFactor));
+    let lenFactor = rawLength / 20;
+    if (!Number.isFinite(lenFactor)) lenFactor = 0.5;
+    lenFactor = Math.max(0.2, Math.min(1, lenFactor));
 
-  const densityFactor = Math.min(1, 1 / Math.sqrt(totalActiveOrgans * 0.6));
-  const stressFactor = 0.6 + 0.7 * stress * (cfg.stressBias ?? 1);
-  const hpActivityFactor = 0.4 + 0.6 * hpRatio;
+    // Глобальная плотность теперь почти не душит систему при большом количестве органов
+    const densityFactor = 0.6 + 0.4 / Math.sqrt(totalActiveOrgans || 1);
 
-  let P = cfg.baseRate * lenFactor * densityFactor * stressFactor * hpActivityFactor * GLOBAL_ACTIVITY_GAIN;
-P = Math.min(0.35, P); // safety cap оставляем, чтобы не совсем залить всё звуком
+    const stressFactor = 1.0 - 0.45 * stress;
+    const hpActivityFactor = 0.4 + 0.6 * hpRatio;
 
-  candidates.push({
-    organ,
-    cfg,
-    lenFactor,
-    P
-  });
-}
+    let P =
+      cfg.baseRate *
+      lenFactor *
+      densityFactor *
+      stressFactor *
+      hpActivityFactor *
+      GLOBAL_ACTIVITY_GAIN *
+      adaptiveActivityMul;
 
+    // мягкий "магнит" к биту (ближе к долям — чаще срабатывание)
+    P *= beatBias;
+
+    // safety cap — чуть выше, чем был
+    P = Math.min(0.5, P);
+
+    candidates.push({
+      organ,
+      cfg,
+      lenFactor,
+      P
+    });
+  }
+  
   if (!candidates.length) return;
 
   // немного перемешиваем, чтобы не всегда один и тот же тип был лидером
@@ -603,12 +764,29 @@ P = Math.min(0.35, P); // safety cap оставляем, чтобы не сов�
 
   const velocityLead = BASE_VELOCITY * energyBudget * leader.lenFactor;
 
+// Оценим длительность фразы (примерно по паттерну)
+// Если у тебя паттерны по 4 шага и шаг ~ (60/BPM)*1000 * subdivision — можно грубо так:
+const stepMs = (60_000 / TARGET_BPM);      // четверть
+const phraseSteps = (currentPattern?.length || 4);
+const plannedPhraseMs = Math.max(900, phraseSteps * stepMs);
+
+// Глобальный дирижёр: только один организм ведёт фразу
+// gate только на старте фразы (когда patternStep === 0)
+if (patternStep === 0){
+  const stepMs = (60_000 / TARGET_BPM) * 0.5; // считаем как восьмые, чтобы фразы не были "вечными"
+  const phraseSteps = (currentPattern?.length || 4);
+  const plannedPhraseMs = Math.max(600, phraseSteps * stepMs);
+
+  if (!canWorldStartPhrase(orgKey, plannedPhraseMs)) return;
+}
+
   triggerHandpanHit(audioCtx, compressorNode, {
     frequency: frequencyLead,
     velocity: velocityLead,
     stress,
     hpRatio
   });
+  registerHit();
 
   // --- 4) фолловеры: глаз → тентакли и т.п. ---
   const ensemble = getFollowersForLeaderType(leaderType);
@@ -627,8 +805,11 @@ P = Math.min(0.35, P); // safety cap оставляем, чтобы не сов�
     if (!followerTypesSet.has(oType)) continue;
 
     if (Math.random() > followerProb) continue;
+	
+	// лимитер на орган (фолловерам особенно нужен)
+if (!canOrganEmitHit(orgKey, oType, 350)) continue; // 350мс — “релакс всегда”
 
-    const degreeIndex = pickDegreeForOrgan(c.cfg);
+    const degreeIndex = pickFollowerDegreeNearLeader(degreeIndexLead, c.cfg);
     const octave = c.cfg.octave;
 
     const baseFrequency = getNoteFrequency(degreeIndex, octave);
@@ -642,5 +823,6 @@ P = Math.min(0.35, P); // safety cap оставляем, чтобы не сов�
       stress,
       hpRatio
     });
+    registerHit();
   }
 }

@@ -7,8 +7,8 @@ export const IdleWarpConfig = {
   enabled: true,
 
   // Пульс (секунды)
-  periodSecMin: 45,
-  periodSecMax: 90,
+  periodSecMin: 145,
+  periodSecMax: 190,
   durSecMin: 9,
   durSecMax: 18,
   
@@ -19,7 +19,7 @@ export const IdleWarpConfig = {
   // Амплитуда vs размер
   ampNorm: 0.25,
   ampPxMin: 0.3,
-  ampPxMax: 8,
+  ampPxMax: 18,
 
   // Сетка warp (узлов по большей стороне)
   gridMin: 8,

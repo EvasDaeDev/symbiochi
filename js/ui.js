@@ -554,7 +554,7 @@ export function attachDragPan(el, view) {
   // pinch state
   let pinchStartDist = null;
   let pinchStartZoom = 0;
-  const PINCH_SENSITIVITY = 1; // 1 = +1 zoom за 2x масштаб, можешь потом подрегулировать
+  const PINCH_SENSITIVITY = 0.5; // 1 = +1 zoom за 2x масштаб, можешь потом подрегулировать
 
   el.style.touchAction = "none";   // забираем себе жесты
   el.style.userSelect = "none";

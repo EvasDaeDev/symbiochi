@@ -228,7 +228,7 @@ function applyOrganTypeCapsToWeights(state, baseWeights, caps){
 // If cap reached: do NOT spawn new organs. Instead either:
 //  - grow existing organs (lengthen appendages), OR
 //  - grow body to create new perimeter.
-const MAX_PERIMETER_USAGE = 0.55;
+const MAX_PERIMETER_USAGE = 0.35;
 const EARLY_FAST_BODY_BLOCKS = 250; // early stage grows faster
 
 // We count *occupied perimeter anchors* (body perimeter cells that have an attached organ).
@@ -286,22 +286,53 @@ function outerBodyPerimeterSet(body){
 function computeModuleAnchorKeys(state, mod, bodySet, perimSet){
   const anchors = new Set();
   if (!state?.body || !Array.isArray(state.body.cells) || !mod || !Array.isArray(mod.cells) || !mod.cells.length) return anchors;
+
   // Internal/face modules don't consume perimeter.
   const t = mod.type;
   if (t === "eye" || t === "core") return anchors;
 
-  // Any body perimeter cell adjacent (4-neigh) to any module cell is considered occupied.
+  const core = Array.isArray(state.body.core) ? state.body.core : [0,0];
+
+  // 1) root = cell of module closest to core (Manhattan)
+  let root = mod.cells[0];
+  let best = Infinity;
+  for (const [x,y] of mod.cells){
+    const d = Math.abs(x - core[0]) + Math.abs(y - core[1]);
+    if (d < best){
+      best = d;
+      root = [x,y];
+    }
+  }
+
+  // 2) Prefer an OUTER-perimeter body cell adjacent to root
+  const nbs = [
+    [root[0] + 1, root[1]],
+    [root[0] - 1, root[1]],
+    [root[0], root[1] + 1],
+    [root[0], root[1] - 1],
+  ];
+
+  for (const [nx, ny] of nbs){
+    const k = key(nx, ny);
+    if (bodySet.has(k) && perimSet.has(k)){
+      anchors.add(k);
+      return anchors; // ровно 1 якорь на модуль
+    }
+  }
+
+  // 3) Fallback: если root не касается периметра, ищем ЛЮБУЮ соседнюю периметр-клетку вдоль модуля
   for (const [x, y] of mod.cells){
     const n1 = key(x + 1, y);
     const n2 = key(x - 1, y);
     const n3 = key(x, y + 1);
     const n4 = key(x, y - 1);
 
-    if (bodySet.has(n1) && perimSet.has(n1)) anchors.add(n1);
-    if (bodySet.has(n2) && perimSet.has(n2)) anchors.add(n2);
-    if (bodySet.has(n3) && perimSet.has(n3)) anchors.add(n3);
-    if (bodySet.has(n4) && perimSet.has(n4)) anchors.add(n4);
+    if (bodySet.has(n1) && perimSet.has(n1)) { anchors.add(n1); break; }
+    if (bodySet.has(n2) && perimSet.has(n2)) { anchors.add(n2); break; }
+    if (bodySet.has(n3) && perimSet.has(n3)) { anchors.add(n3); break; }
+    if (bodySet.has(n4) && perimSet.has(n4)) { anchors.add(n4); break; }
   }
+
   return anchors;
 }
 
@@ -336,6 +367,127 @@ function perimeterUsage(state){
 
 function canSpawnNewOrgan(state){
   return perimeterUsage(state) < MAX_PERIMETER_USAGE;
+}
+
+export function reanchorModulesToPerimeter(org, hostState){
+  if (!org || !org.body || !Array.isArray(org.body.cells) || !Array.isArray(org.modules) || !org.modules.length){
+    return;
+  }
+
+  const bodyCells = org.body.cells;
+  const bodySet = new Set(bodyCells.map(([x, y]) => key(x, y)));
+  const perimSet = outerBodyPerimeterSet(org.body);
+  if (!perimSet.size) return;
+
+  const core = Array.isArray(org.body.core) ? org.body.core : [0, 0];
+
+  // Кто живёт внутри и НЕ пододвигается
+  const SKIP_TYPES = new Set(["core", "eye", "mouth", "teeth"]);
+
+  // hostState — "мир" для коллизий: родитель + дети
+  // если не передали – считаем, что org самодостаточен
+  const host = hostState || org;
+
+  for (const m of (org.modules || [])){
+    if (!m || !Array.isArray(m.cells) || !m.cells.length) continue;
+    if (SKIP_TYPES.has(m.type)) continue;
+
+    const cells = m.cells;
+
+    // Находим "основание" — клетку модуля, ближайшую к ядру
+    let rootIdx = 0;
+    let bestCoreDist = Infinity;
+    for (let i = 0; i < cells.length; i++){
+      const [x, y] = cells[i];
+      const d = Math.abs(x - core[0]) + Math.abs(y - core[1]);
+      if (d < bestCoreDist){
+        bestCoreDist = d;
+        rootIdx = i;
+      }
+    }
+    const root = cells[rootIdx];
+
+    // Расстояние от основания до внешнего периметра тела
+    let minPerimDist = Infinity;
+    for (const pk of perimSet){
+      const [px, py] = parseKey(pk);
+      const d = Math.abs(px - root[0]) + Math.abs(py - root[1]);
+      if (d < minPerimDist) minPerimDist = d;
+    }
+    if (!Number.isFinite(minPerimDist)) continue;
+
+    // Если основание уже на периметре или вплотную к нему — ничего не делаем
+    if (minPerimDist <= 1) continue;
+
+    // Нужно "выкатить" модуль наружу вдоль направления от ядра к основанию
+    let [dxDir, dyDir] = clampDir(root[0] - core[0], root[1] - core[1]);
+    if (dxDir === 0 && dyDir === 0){
+      // fallback, если почему-то совпало с ядром
+      dyDir = -1;
+    }
+
+    // Строим карту занятости по всему миру (родитель + дети),
+    // и временно исключаем текущий модуль
+    const occ = occupiedSet(host);
+    for (const [x, y] of cells){
+      occ.delete(key(x, y));
+    }
+
+    let placed = false;
+    const maxShift = Math.max(1, minPerimDist - 1);
+
+    // Пробуем сдвиги от максимального к меньшему, чтобы пододвинуть как можно ближе к коже
+    for (let s = maxShift; s >= 1; s--){
+      const dx = dxDir * s;
+      const dy = dyDir * s;
+      const shifted = translateCells(cells, dx, dy);
+      if (!isFree(shifted, occ)) continue;
+
+      const newRoot = shifted[rootIdx];
+
+      // Проверяем, что новое основание реально прижато к ВНЕШНЕМУ периметру
+      let anchorOk = false;
+      const nbs = [
+        [newRoot[0] + 1, newRoot[1]],
+        [newRoot[0] - 1, newRoot[1]],
+        [newRoot[0], newRoot[1] + 1],
+        [newRoot[0], newRoot[1] - 1],
+      ];
+      for (const [nx, ny] of nbs){
+        const k = key(nx, ny);
+        if (bodySet.has(k) && perimSet.has(k)){
+          anchorOk = true;
+          break;
+        }
+      }
+      if (!anchorOk) continue;
+
+      // --- Успех: применяем сдвиг ---
+      m.cells = shifted;
+
+      if (shifted.length){
+        const last = shifted[shifted.length - 1];
+        m.growPos = [last[0], last[1]];
+        if (Number.isFinite(m.growStep)){
+          m.growStep = Math.min(m.growStep, Math.max(0, shifted.length - 1));
+        }
+      } else {
+        m.growPos = null;
+        if (Number.isFinite(m.growStep)) m.growStep = 0;
+      }
+
+      if (Number.isFinite(m.growTo)){
+        // не даём growTo стать меньше фактической длины
+        m.growTo = Math.max(m.growTo, m.cells.length);
+      }
+
+      placed = true;
+      break;
+    }
+
+    // Если подходящего сдвига не нашли — просто оставляем модуль как есть
+    // (редкий случай при очень плотной застройке).
+  }
 }
 
 function bodyBounds(body){
@@ -662,7 +814,7 @@ export function applyMutation(state, momentSec){
     ["limb",      (Number.isFinite(LIMB.spawnWeight) ? LIMB.spawnWeight : 0.10) + 0.35*pf],
     ["antenna",   (Number.isFinite(ANTENNA.spawnWeight) ? ANTENNA.spawnWeight : 0.12) + 0.85*ph],
     ["eye",       (Number.isFinite(EYE.spawnWeight) ? EYE.spawnWeight : 0.10) + 0.55*ph],
-    ["spike",     (Number.isFinite(SPIKE.spawnWeight) ? SPIKE.spawnWeight : 0.08) + 1.00*pn + 0.40*stressCurve],
+    ["spike",     (Number.isFinite(SPIKE.spawnWeight) ? SPIKE.spawnWeight : 0.08) + 0.70*pn + 0.40*stressCurve],
     ["shell",     (Number.isFinite(SHELL.spawnWeight) ? SHELL.spawnWeight : 0.06) + 0.85*pw + 0.25*stress]
   ];
 
@@ -1046,6 +1198,29 @@ export function applyMutation(state, momentSec){
           growBodyWithEarlyBoost("периметр занят — фолбэк на рост тела");
         } else {
           pushLog(state, `Эволюция: рост органов не удался.`, "mut_fail", { part: "appendage" });
+		  
+		  // === Attempt 2: reanchor modules to skin, then retry once (prevents "thick bald" spiral)
+if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
+  reanchorModulesToPerimeter(state, state);
+
+  const grownModules2 = [];
+  const grew2 = growPlannedModules(state, rng, {
+    target,
+    maxGrows: Math.max(1, Math.min(2, maxGrows)), // небольшой ретрай
+    strength,
+    shuffle: !target,
+    grownModules: grownModules2
+  });
+
+  if (grew2){
+    pushLog(state, `Эволюция: периметр занят → органы выкатились к коже и выросли.`, "mut_ok", {
+      part: "appendage",
+      mi: (grownModules2.length === 1) ? grownModules2[0] : null,
+      grownModules: grownModules2
+    });
+    continue;
+  }
+}
           growBodyWithEarlyBoost("фолбэк после неудачного роста отростка");
         }
       }
