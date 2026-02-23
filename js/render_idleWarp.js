@@ -17,8 +17,8 @@ export const IdleWarpConfig = {
   ampYScale: 1.5,
 
   // Амплитуда vs размер
-  ampNorm: 0.35,
-  ampPxMin: 0.4,
+  ampNorm: 0.25,
+  ampPxMin: 0.3,
   ampPxMax: 8,
 
   // Сетка warp (узлов по большей стороне)
@@ -43,7 +43,7 @@ export const IdleWarpConfig = {
   smallBodyAmpScale: 0.4,
 
   // Шум — крупные, плавные волны
-  spatialFreq: 0.01,
+  spatialFreq: 0.016,
   timeSpeed1: 0.5,
   timeSpeed2: 0.4,
 
@@ -177,7 +177,30 @@ export function renderBodyWithIdleWarp(ctx, params, drawBody){
   }
 
   const u = dur > 0 ? clamp(p / dur, 0, 1) : 0;
-  let env = Math.sin(Math.PI * u);
+
+  // Асимметричная огибающая:
+  //  - 0..0.5: вдох, как раньше (smooth sin)
+  //  - 0.5.. ≈0.83: выдох, в 3 раза быстрее
+  //  - дальше до u=1: тишина (env=0)
+  let env;
+  if (u <= 0.5){
+    // Вдох — оставляем исходный sin(pi*u)
+    env = Math.sin(Math.PI * u);
+  } else {
+    // Выдох — сжимаем вторую половину синуса в 3 раза по времени
+    const e = (u - 0.5) * 3; // 0..1 — "ускоренное время" выдоха
+
+    if (e >= 1){
+      // Выдох уже закончился, остаток пульса — без искажения
+      env = 0;
+    } else {
+      // Берём ту же форму, что была бы на обычном синусе во второй половине (0.5..1),
+      // но проигрываем её быстрее за счёт e
+      const uOrig = 0.5 + e * 0.5; // мапим 0..1 -> 0.5..1
+      env = Math.sin(Math.PI * uOrig);
+    }
+  }
+
   if (!Number.isFinite(env) || env < 1e-3) env = 0;
 
   if (env <= 0){
