@@ -3,7 +3,7 @@ export const EYE = {
   wind: false,
   growthDir: 8,
   shapeOptions: ["sphere"],
-  shapeWeights: [0.5, 0.5],
+  shapeWeights: [1.0],
   smallBodyThreshold: 50,
   largeRadiusChance: 0.5,
   spawnWeight: 0.1,

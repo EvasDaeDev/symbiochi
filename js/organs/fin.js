@@ -2,10 +2,10 @@ export const FIN = {
   label: "Плавник",
   wind: true,
   minLen: 3,
-  maxExtra: 15,
+  maxExtra: 25,
   maxLen: 10,
   spawnWeight: 0.08,
-  growthChance: 0.2,
+  growthChance: 0.3,
   width: 2,
   growthDir: 16,
   offsets: [
@@ -24,5 +24,5 @@ export const FIN = {
   },
   initialColor: "#60a5fa",
   shapeOptions: ["fan", "kite", "leaf"],
-  shapeWeights: [0.5, 0.3, 0.2]
+  shapeWeights: [0.5, 0.5, 0.5]
 };

@@ -5,7 +5,7 @@ export const TENTACLE = {
   wind: true,
   growthDir: 16,
   minLen: 7,
-  maxExtra: 36,
+  maxExtra: 56,
   spawnWeight: 0.15,
   growthChance: 0.3,
   width: 1,

@@ -274,11 +274,11 @@ export function getTotalBlocks(state){
 
 export function getStageName(state){
   const blocks = getTotalBlocks(state);
-  if (blocks <= 50) return "Клетка";
-  if (blocks <= 400) return "Существо";
-  if (blocks <= 800) return "Организм";
-  if (blocks <= 1200) return "Вид";
-  if (blocks <= 4200) return "Монстр";
+  if (blocks <= 250) return "Клетка";
+  if (blocks <= 800) return "Существо";
+  if (blocks <= 1200) return "Организм";
+  if (blocks <= 4200) return "Вид";
+  if (blocks <= 10000) return "Монстр";
   return "Форма жизни";
 }
 
