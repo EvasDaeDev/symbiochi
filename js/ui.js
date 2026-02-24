@@ -554,7 +554,7 @@ export function attachDragPan(el, view) {
   // pinch state
   let pinchStartDist = null;
   let pinchStartZoom = 0;
-  const PINCH_SENSITIVITY = 4.0; // 1 = +1 zoom за 2x масштаб, можешь потом подрегулировать
+  const PINCH_SENSITIVITY = 1.0; // 1 = +1 zoom за 2x масштаб, можешь потом подрегулировать
 
   el.style.touchAction = "none";   // забираем себе жесты
   el.style.userSelect = "none";
@@ -575,11 +575,11 @@ export function attachDragPan(el, view) {
 
     if (e.pointerType === "touch") {
       activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (activeTouches.size === 2) {
-        // старт pinch-жеста
-        pinchStartDist = getTouchDistance();
-        pinchStartZoom = Number.isFinite(view.zoom) ? view.zoom : 0;
-      }
+if (activeTouches.size === 2) {
+  pinchStartDist = getTouchDistance();
+  if (!pinchStartDist || pinchStartDist <= 0) pinchStartDist = null;
+  pinchStartZoom = Number.isFinite(view.zoom) ? view.zoom : 0;
+}
     }
 
     isDragging = true;
@@ -597,24 +597,29 @@ export function attachDragPan(el, view) {
     if (e.pointerType === "touch" && activeTouches.has(e.pointerId)) {
       activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      if (activeTouches.size >= 2 && pinchStartDist && pinchStartDist > 0) {
-        const dist = getTouchDistance();
-        if (dist > 0) {
-          const scale = dist / pinchStartDist; // 1.0 = без изменений
-          const baseZoom = pinchStartZoom;
-          const deltaZoom = Math.log2(scale) * PINCH_SENSITIVITY;
-          const nextZoom = clamp(baseZoom + deltaZoom, -3, 3);
-		  nextZoom = Math.round(nextZoom);
-          if (!Number.isNaN(nextZoom)) {
-            view.zoom = nextZoom;
-            // считаем это "drag", чтобы не было tap-клика
-            window._wasDrag = true;
-            if (view.camTarget) view.camTarget = null;
-          }
-        }
-        // при pinch не двигаем камеру как при обычном drag
-        return;
-      }
+if (activeTouches.size >= 2 && pinchStartDist && pinchStartDist > 0) {
+  const dist = getTouchDistance();
+  if (dist > 0) {
+    const scale = dist / pinchStartDist; // 1.0 = без изменений
+    const deltaZoom = Math.log2(scale) * PINCH_SENSITIVITY;
+
+    const raw = clamp(pinchStartZoom + deltaZoom, -3, 3);
+    const snapped = Math.round(raw);
+
+    if (!Number.isNaN(snapped) && snapped !== view.zoom) {
+      view.zoom = snapped;
+
+      // считаем это "drag", чтобы не было tap-клика
+      window._wasDrag = true;
+      if (view.camTarget) view.camTarget = null;
+
+      // ключ: перебазируем pinch, чтобы следующий "шаг" набирался дальше
+      pinchStartZoom = view.zoom;
+      pinchStartDist = dist;
+    }
+  }
+  return;
+}
     }
 
     // --- обычный drag / панорамирование ---
@@ -646,10 +651,10 @@ export function attachDragPan(el, view) {
   const stopDrag = (e) => {
     if (e.pointerType === "touch") {
       activeTouches.delete(e.pointerId);
-      if (activeTouches.size < 2) {
-        // жест закончился
-        pinchStartDist = null;
-      }
+if (activeTouches.size < 2) {
+  pinchStartDist = null;
+  pinchStartZoom = Number.isFinite(view.zoom) ? view.zoom : 0;
+}
     }
 
     if (!isDragging) return;
