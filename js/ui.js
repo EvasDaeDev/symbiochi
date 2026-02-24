@@ -604,7 +604,7 @@ export function attachDragPan(el, view) {
           const baseZoom = pinchStartZoom;
           const deltaZoom = Math.log2(scale) * PINCH_SENSITIVITY;
           const nextZoom = clamp(baseZoom + deltaZoom, -3, 3);
-		  nextZoom = Math.round(nextZoom * 2) / 2; // шаг 0.5
+		  nextZoom = Math.round(nextZoom);
           if (!Number.isNaN(nextZoom)) {
             view.zoom = nextZoom;
             // считаем это "drag", чтобы не было tap-клика
