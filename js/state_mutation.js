@@ -564,10 +564,10 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
   const cells = m.cells.slice();
   const len = cells.length;
 
-  // отрезаем "почку": не ближе чем 2/3 длины от отростка (от крепления),
+  // отрезаем "почку": не ближе чем 7/8 длины от отростка (от крепления),
   // при этом у родителя остаётся хотя бы несколько сегментов.
   // Минимум 4 клетки в почке.
-  const minCut = Math.max(2, Math.ceil(len * (2/3)));
+  const minCut = Math.max(2, Math.ceil(len * (7/8)));
   const maxCut = len - 4;
   if (minCut > maxCut) return false;
   const cut = (minCut === maxCut)
@@ -663,9 +663,6 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
     modules: [],
     face: {
       anchor: budCore.slice(),
-      eyeSize: 1,
-      eyeShape: rng() < 0.5 ? "diamond" : "sphere",
-      eyeRadius: 0
     },
     // Camera is view-only and should not be stored in organisms.
   };
@@ -934,11 +931,16 @@ export function applyMutation(state, momentSec){
   !!mutationContext?.offlineCatchup;
   const isOfflineGrowth = isOfflineSim || isOfflineRollup;
 
-  const canBud =
-    bigBody &&
-    !isOfflineGrowth &&
-    isHealthyEnoughForBud &&
-    pickBuddingModule(state, rng) !== -1;
+const lastBudAt = Number.isFinite(state.lastBudAt) ? state.lastBudAt : -Infinity;
+const budCooldown = Number.isFinite(BUD?.cooldownSec) ? BUD.cooldownSec : (15 * 60);
+const budOffCooldown = (momentSec - lastBudAt) >= budCooldown;
+
+const canBud =
+  bigBody &&
+  !isOfflineGrowth &&
+  isHealthyEnoughForBud &&
+  budOffCooldown &&
+  pickBuddingModule(state, rng) !== -1;
   const hasLongModule = (state.modules || []).some((m) => (m?.cells?.length || 0) >= 60);
   if (canBud){
     // добавляем отдельный тип мутации
@@ -1100,6 +1102,7 @@ export function applyMutation(state, momentSec){
       if (ok){
         state.bars.food = clamp01(state.bars.food - 0.20);
         state.bars.hp = clamp01(state.bars.hp - 0.20);
+		state.lastBudAt = momentSec;
         pushLog(state, `Эволюция: почкование — отделился новый организм.`, "bud_ok", { part: budType, mi: idx });
       } else {
         pushLog(

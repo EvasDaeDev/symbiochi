@@ -11,6 +11,7 @@ import { tentacleOffset as tentacleOffsetAnim } from "./organs/tentacle.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 import { RULES } from "./rules-data.js";
 import { moodEmoji, stateEmoji } from "../content/icons.js";
+import { computeEyeRadiusCells, getEyeShapeDefault } from "./organs/eye.js";
 
 /**
  * Canvas pixel-block renderer (procedural, no sprites).
@@ -727,18 +728,28 @@ function packedRectsCached(obj, cells, extraSig=""){
 // =====================
 // Core + Eyes scaling rules
 // =====================
-function computeCorePx(view, bodyBlocks){
-  // Core default: 3x3 blocks ("9 blocks").
-  // Corners are beveled at render-time (see CORE draw below) to read as a pseudo-sphere.
-  const base = Math.max(12, view.blockPx * 3);
-  // limit core area <= 10% body area (in pixels)
-  if (bodyBlocks < 20) return base; // allow early stages to violate
-  const bodyArea = bodyBlocks * view.blockPx * view.blockPx;
-  const maxCoreArea = bodyArea * 0.10;
-  const maxSide = Math.max(8, Math.floor(Math.sqrt(maxCoreArea)));
-  return Math.max(8, Math.min(base, maxSide));
+
+// Core size must depend on BODY AREA (cells), not on zoom (pixels).
+function computeCoreSideCells(bodyBlocks){
+  // default core: 3x3 cells
+  const base = 3;
+
+  // allow early stages to violate the 10% rule
+  if (bodyBlocks < 20) return base;
+
+  // limit core area <= 10% body area (IN CELLS)
+  const maxCoreAreaCells = bodyBlocks * 0.07;
+  const maxSide = Math.floor(Math.sqrt(maxCoreAreaCells));
+
+  // keep readable minimum
+  return clamp(maxSide, 3, 9999);
 }
 
+// Convert core side (cells) -> pixels for render
+function coreSideCellsToPx(coreSideCells, view){
+  const s = view.blockPx || 4;
+  return Math.max(1, (coreSideCells | 0) * s);
+}
 function computeEyeRadius(org, bodyBlocks){
   const raw = Number.isFinite(org?.face?.eyeRadius)
     ? org.face.eyeRadius
@@ -754,7 +765,11 @@ function buildEyeOffsets(radius, shape){
   for (let dy = -r; dy <= r; dy++){
     for (let dx = -r; dx <= r; dx++){
       if (shape === "sphere"){
-        if ((dx * dx + dy * dy) <= r * r) out.push([dx, dy]);
+        if ((dx*dx + dy*dy) <= r*r){
+          // extra bevel: remove the 4 far diagonal corners for r>=2
+          if (r >= 2 && Math.abs(dx) === r && Math.abs(dy) === r) continue;
+          out.push([dx, dy]);
+        }
       } else {
         if (Math.abs(dx) + Math.abs(dy) <= r) out.push([dx, dy]);
       }
@@ -764,9 +779,7 @@ function buildEyeOffsets(radius, shape){
   return out;
 }
 
-// =====================
-// Selection glow
-// =====================
+
 // =====================
 // Selection glow
 // =====================
@@ -1463,7 +1476,8 @@ function limbPhalanxIndex(lengths, idx){
 
   // CORE
   const bodyBlocks = (org?.body?.cells?.length || 0);
-  const corePx = computeCorePx(view, bodyBlocks);
+  const coreSideCells = computeCoreSideCells(bodyBlocks);
+  const corePx = coreSideCellsToPx(coreSideCells, view);
 
   const core = org?.body?.core || [0,0];
   const coreP = worldToScreenPx(cam, core[0], core[1], view);
@@ -1508,11 +1522,11 @@ function limbPhalanxIndex(lengths, idx){
     // EYES (always on top of body).
   const face = org?.face?.anchor;
   if (face){
-    const eyeRadius = computeEyeRadius(org, bodyBlocks);
     const eyeColor = SH(getPartColor(org, "eye", 0) || "#e2e8f0");
 
-    // Глаз всегда сферический
-    const shape = "sphere";
+    
+    const shape = getEyeShapeDefault(); // всегда sphere
+	const eyeRadius = computeEyeRadiusCells(org, bodyBlocks);
     const offsets = buildEyeOffsets(eyeRadius, shape);
     const blinkScale = eyeBlinkScale(orgId, baseSeed);
 
@@ -2099,11 +2113,11 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   // seed moved to settings
 
   els.hudMeta.innerHTML = `
-    <span class="pill stat ${barToneCls(target.bars.food)}" data-stat="food" title="еда: ${barPct(target.bars.food)}%"><span class="ico"></span><span class="val">${barPct(target.bars.food)}%</span></span>
-    <span class="pill stat ${barToneCls(target.bars.clean)}" data-stat="clean" title="чист: ${barPct(target.bars.clean)}%"><span class="ico"></span><span class="val">${barPct(target.bars.clean)}%</span></span>
-    <span class="pill stat ${barToneCls(target.bars.hp)}" data-stat="hp" title="здор: ${barPct(target.bars.hp)}%"><span class="ico"></span><span class="val">${barPct(target.bars.hp)}%</span></span>
-    <span class="pill stat ${barToneCls(target.bars.mood)}" data-stat="mood" title="настр: ${barPct(target.bars.mood)}%"><span class="ico">${moodEmoji(target.bars.mood)}</span><span class="val">${barPct(target.bars.mood)}%</span></span>
-    <span class="pill stat ${status.cls}" data-stat="state" title="сост: ${status.txt}"><span class="ico">${stateEmoji(status.txt)}</span></span>
+    <span class="pill stat ${barToneCls(target.bars.food)}" data-stat="food" title="сытость: ${barPct(target.bars.food)}%"><span class="ico"></span><span class="val">${barPct(target.bars.food)}%</span></span>
+    <span class="pill stat ${barToneCls(target.bars.clean)}" data-stat="clean" title="чистота: ${barPct(target.bars.clean)}%"><span class="ico"></span><span class="val">${barPct(target.bars.clean)}%</span></span>
+    <span class="pill stat ${barToneCls(target.bars.hp)}" data-stat="hp" title="здоровье: ${barPct(target.bars.hp)}%"><span class="ico"></span><span class="val">${barPct(target.bars.hp)}%</span></span>
+    <span class="pill stat ${barToneCls(target.bars.mood)}" data-stat="mood" title="настроение: ${barPct(target.bars.mood)}%"><span class="ico">${moodEmoji(target.bars.mood)}</span><span class="val">${barPct(target.bars.mood)}%</span></span>
+    <span class="pill stat ${status.cls}" data-stat="state" title="состояние: ${status.txt}"><span class="ico">${stateEmoji(status.txt)}</span></span>
       `;
 
   // second row: life time + carrots inventory (input is static in DOM)

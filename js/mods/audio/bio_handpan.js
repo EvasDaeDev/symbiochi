@@ -46,18 +46,19 @@ export function debugPlayTestHit() {
 
 // === Organ → musical parameters ===
 export const ORGAN_AUDIO_CONFIG = {
-  BODY:     { degrees: [0, 1],          octave: -1 },
+  CORE:     { degrees: [4],          octave:  1 },
+  BODY:     { degrees: [0, 1],       octave: -1 },
   EYE:      { degrees: [3, 4],       octave: -1 },
-  ANTENNA:  { degrees: [2, 3],       octave:  0 },
+  ANTENNA:  { degrees: [2, 3],       octave:  1 },
   TAIL:     { degrees: [1, 2],       octave:  0 },
-  LIMB:     { degrees: [0, 2],       octave:  0 },
+  LIMB:     { degrees: [0, 2],       octave:  1 },
   TENTACLE: { degrees: [1, 3, 1, 2], octave:  0 },
   WORM:     { degrees: [1, 3, 4],    octave:  0 },
   SHELL:    { degrees: [0],          octave: -1 },
-  SPIKE:    { degrees: [2, 3, 4],    octave:  0 },
+  SPIKE:    { degrees: [2, 3, 4],    octave:  1 },
 
   // late organs:
-  TEETH:    { degrees: [3, 4],       octave:  0 },
+  TEETH:    { degrees: [3, 4],       octave:  1 },
   CLAW:     { degrees: [2],          octave:  0 },
   FIN:      { degrees: [1, 2],       octave: -1 },
   MOUTH:    { degrees: [0, 2],       octave:  0 },

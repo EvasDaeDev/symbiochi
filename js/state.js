@@ -8,6 +8,7 @@ import { pushLog } from "./log.js";
 import { newGame, makeSmallConnectedBody, findFaceAnchor, repairDetachedModules, getOrganMaxLen } from "./creature.js";
 import { ensureBodyWave } from "./mods/body_wave.js";
 import { applyMutation, applyShrinkDecay, reanchorModulesToPerimeter } from "./state_mutation.js";
+import { normalizeFaceEye } from "./organs/eye.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
 
@@ -154,15 +155,11 @@ org.seed = seed;
 
     enforceAppendageRules();
 
-    if (!org.face) org.face = { anchor: findFaceAnchor(org.body, seed) };
-    if (!org.face.eyeShape){
-      const prng = mulberry32(hash32(seed, 9191));
-      org.face.eyeShape = prng() < 0.5 ? "diamond" : "sphere";
-    }
-    if (!Number.isFinite(org.face.eyeRadius)){
-      const size = Math.max(1, (org.face.eyeSize ?? 1) | 0);
-      org.face.eyeRadius = Math.max(0, size - 1);
-    }
+if (!org.face) org.face = { anchor: findFaceAnchor(org.body, seed) };
+// единый источник правды: eye.js
+const bodyBlocks = (org?.body?.cells?.length || 0);
+normalizeFaceEye(org, bodyBlocks);
+
     // Camera is a pure view concern and should NOT be persisted in save.
     // (Old saves may still contain org.cam; we remove it during migration.)
     if (org.cam !== undefined) delete org.cam;
@@ -172,6 +169,7 @@ org.seed = seed;
     if (!org.partHue) org.partHue = {};
     if (!org.partColor) org.partColor = {};
     if (!Number.isFinite(org.mutationDebt)) org.mutationDebt = 0;
+	if (!Number.isFinite(org.lastBudAt)) org.lastBudAt = -Infinity;
     if (org.growthTarget === undefined) org.growthTarget = null;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
     if (!Number.isFinite(org.growthTargetPower)) org.growthTargetPower = 0;

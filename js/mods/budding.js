@@ -6,4 +6,6 @@ export const BUD = {
   weightMult: 1.0, 
   bigParentSize: 1200,
   bigParentSuccessMult: 2,
+  
+  cooldownSec: 15 * 60, // NEW: 15 минут
 };

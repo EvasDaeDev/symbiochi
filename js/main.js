@@ -245,11 +245,11 @@ function rerenderAll(deltaSec){
           return `<span class="pill stat ${cls}" data-stat="${stat}" title="${escapeHtml(title)}">${icoSpan}${valSpan}</span>`;
         };
 
-        const f = pill("food",  `еда: ${barPct(b.food)}%`,  tone(b.food),  "", `${barPct(b.food)}%`);
-        const c = pill("clean", `чист: ${barPct(b.clean)}%`, tone(b.clean), "", `${barPct(b.clean)}%`);
-        const h = pill("hp",    `здор: ${barPct(b.hp)}%`,    tone(b.hp),    "", `${barPct(b.hp)}%`);
-        const m = pill("mood",  `настр: ${barPct(b.mood)}%`, tone(b.mood),  moodEmoji(Math.max(0, Math.min(1, b.mood ?? 0))), `${barPct(b.mood)}%`);
-        const s = pill("state", `сост: ${statusTxt}`,         tone(minBar),   stateEmoji(statusTxt), "");
+        const f = pill("food",  `сытость: ${barPct(b.food)}%`,  tone(b.food),  "", `${barPct(b.food)}%`);
+        const c = pill("clean", `чистота: ${barPct(b.clean)}%`, tone(b.clean), "", `${barPct(b.clean)}%`);
+        const h = pill("hp",    `здоровье: ${barPct(b.hp)}%`,    tone(b.hp),    "", `${barPct(b.hp)}%`);
+        const m = pill("mood",  `настроение: ${barPct(b.mood)}%`, tone(b.mood),  moodEmoji(Math.max(0, Math.min(1, b.mood ?? 0))), `${barPct(b.mood)}%`);
+        const s = pill("state", `состояние: ${statusTxt}`,         tone(minBar),   stateEmoji(statusTxt), "");
 
         return `<div class="orgCellPills">${f}${c}${h}${m}${s}</div>`;
       };
