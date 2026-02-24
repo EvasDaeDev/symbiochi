@@ -468,6 +468,40 @@ html, body {
   border-color: rgba(36,52,74,.5);
 }
 
+#symConfirmYes{
+  border-color: rgba(52, 211, 153, .9);        /* var(--ok) */
+  background: rgba(52, 211, 153, .10);
+  color: var(--text);
+}
+#saveSettings:hover,
+#symConfirmYes:hover{
+  border-color: rgba(52, 211, 153, 1);
+  background: rgba(52, 211, 153, .16);
+}
+#saveSettings:active,
+#symConfirmYes:active{
+  transform: translateY(1px);
+  background: rgba(52, 211, 153, .22);
+}
+
+/* Red "cancel"/"no" */
+#closeSettings,
+#symConfirmNo{
+  border-color: rgba(251, 113, 133, .9);       /* var(--danger) */
+  background: rgba(251, 113, 133, .08);
+  color: var(--text);
+}
+#closeSettings:hover,
+#symConfirmNo:hover{
+  border-color: rgba(251, 113, 133, 1);
+  background: rgba(251, 113, 133, .14);
+}
+#closeSettings:active,
+#symConfirmNo:active{
+  transform: translateY(1px);
+  background: rgba(251, 113, 133, .20);
+}
+
 /* Action buttons: icons + colored borders */
 .actBtn{
   display: inline-flex;

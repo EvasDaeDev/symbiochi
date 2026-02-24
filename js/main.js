@@ -11,9 +11,10 @@ import { getFxPipeline } from "./FX/pipeline.js";
 import { UI, PERF } from "./config.js";
 import {
   initBioHandpan,
-  updateBioHandpan,
   setOrganismFilter,
   debugPlayTestHit,
+  setBioHandpanEnabled,
+  playOrganTap,
 } from "./mods/audio/bio_handpan.js";
 
 import { applyIconCssVars, moodEmoji, stateEmoji } from "../content/icons.js";
@@ -102,6 +103,7 @@ const els = {
   carrotsInput: document.getElementById("carrotsInput"),
   coinsInput: document.getElementById("coinsInput"),
   fxEnabled: document.getElementById("fxEnabled"),
+  soundEnabled: document.getElementById("soundenabled"),  //звук
   newCreature: document.getElementById("newCreature"),
   symbiosisBtn: document.getElementById("symbiosisBtn"),
   symbiosisOverlay: document.getElementById("symbiosisOverlay"),
@@ -115,6 +117,8 @@ const els = {
   symConfirm: document.getElementById("symConfirm"),
   symConfirmYes: document.getElementById("symConfirmYes"),
   symConfirmNo: document.getElementById("symConfirmNo"),
+  
+ 
 };
 
 // Глобальные флаги
@@ -394,7 +398,6 @@ function startLoops(){
     tickMoving(view, view.state, dtSec);
     tickCamera(view, dtSec);
 
-	updateBioHandpan(view.state);
 
     const renderStart = performance.now();
     renderGrid(view.state, els.canvas, els.grid, view);
@@ -515,6 +518,94 @@ function screenToWorld(e, view, gridEl) {
   const wx = Math.floor((vx - Vx) + (view.cam?.ox || 0));
   const wy = Math.floor((vy - Vy) + (view.cam?.oy || 0));
   return [wx, wy];
+}
+
+function screenToWorldXY(clientX, clientY, view, gridEl) {
+  const rect = gridEl.getBoundingClientRect();
+  const px = (clientX - rect.left);
+  const py = (clientY - rect.top);
+
+  const s = Math.max(1, view.blockPx);
+  const vx = px / s;
+  const vy = py / s;
+
+  const Vx = (view.gridW - 1) / 2;
+  const Vy = (view.gridH - 1) / 2;
+
+  const wx = Math.floor((vx - Vx) + (view.cam?.ox || 0));
+  const wy = Math.floor((vy - Vy) + (view.cam?.oy || 0));
+  return [wx, wy];
+}
+
+function tryPlayTapOrganAtPointer(e, view, gridEl, tolerancePx = 5) {
+  if (!view?.state) return false;
+  const s = view.state;
+  const orgs = [s, ...(Array.isArray(s.buds) ? s.buds : [])];
+
+  // Семплируем несколько точек вокруг тапа, чтобы попасть по тонкому органу.
+  const samples = [];
+  const steps = [-tolerancePx, 0, tolerancePx];
+  for (const dx of steps) {
+    for (const dy of steps) {
+      samples.push([e.clientX + dx, e.clientY + dy]);
+    }
+  }
+
+  for (const [cx, cy] of samples) {
+    const [wx, wy] = screenToWorldXY(cx, cy, view, gridEl);
+
+    for (let i = 0; i < orgs.length; i++) {
+      const org = orgs[i];
+      if (!org || !Array.isArray(org.modules)) continue;
+
+      for (const mod of org.modules) {
+        const cells = mod?.cells;
+        if (!Array.isArray(cells) || cells.length === 0) continue;
+
+        // линейная проверка — простая и надёжная (органов немного)
+        for (let k = 0; k < cells.length; k++) {
+          const c = cells[k];
+          if (!c) continue;
+          if (c[0] === wx && c[1] === wy) {
+            const organLike = {
+              type: mod.type || mod.kind || mod.id || mod.name || mod.part || "UNKNOWN",
+              length: cells.length,
+            };
+
+            // key=mod → кулдаун и защита от спама по одному органу
+            playOrganTap(org, organLike, mod);
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  // --- BODY fallback: если не попали в орган, попробуем сыграть BODY по телу организма ---
+  for (const [cx, cy] of samples) {
+    const [wx, wy] = screenToWorldXY(cx, cy, view, gridEl);
+
+    for (let i = 0; i < orgs.length; i++) {
+      const org = orgs[i];
+      if (!org) continue;
+
+      // Попадание по телу: если у организма есть список клеток тела.
+      // Подстрой под свою структуру: чаще всего это org.body / org.cells / org.bodyBlocks.
+      const bodyCells = org.body?.cells || org.cells || org.bodyCells || null;
+      if (!Array.isArray(bodyCells) || bodyCells.length === 0) continue;
+
+      for (let k = 0; k < bodyCells.length; k++) {
+        const c = bodyCells[k];
+        if (!c) continue;
+        if (c[0] === wx && c[1] === wy) {
+          playOrganTap(org, { type: "BODY", length: bodyCells.length }, /*key=*/org);
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 function handleCarrotMode(view, wx, wy) {
@@ -658,11 +749,11 @@ function attachGridInteractions() {
     const [wx, wy] = screenToWorld(e, view, els.grid);
 
     // 1. ДВОЙНОЙ КЛИК: Всегда центрируем камеру (удобная навигация)
-     if (isDouble) {
-     if (clickTimer) clearTimeout(clickTimer);
-     view.camTarget = { x: wx, y: wy };
-     return; 
-    }
+//     if (isDouble) {
+//     if (clickTimer) clearTimeout(clickTimer);
+//     view.camTarget = { x: wx, y: wy };
+//     return; 
+//    }
 
     // 2. ОДИНОЧНЫЙ КЛИК: Логика зависит от выбранного режима (view.mode)
     if (clickTimer) clearTimeout(clickTimer);
@@ -678,6 +769,10 @@ function attachGridInteractions() {
     }
 
     // Если руки пустые (view.mode === null) — управляем выделением
+    // Сначала пробуем сыграть орган под тапом (в любом организме), с небольшой погрешностью.
+    // Не мешает выделению: оно отработает через таймер ниже.
+    tryPlayTapOrganAtPointer(e, view, els.grid, 5);
+
     clickTimer = setTimeout(() => {
       const found = selectOrganismAt(view, wx, wy);
       
@@ -758,6 +853,26 @@ async function startGame(){
   // --- Bio Handpan: init + фильтр состояний организмов ---
   // Создаём AudioContext и мастер-цепочку (gain + компрессор)
   initBioHandpan();
+
+  // --- Sound enabled toggle ---
+  const sndDefault = (view.state?.settings?.soundEnabled !== false); // default ON
+  if (els.soundEnabled){
+    els.soundEnabled.checked = sndDefault;
+    setBioHandpanEnabled(els.soundEnabled.checked);
+
+    els.soundEnabled.addEventListener("change", () => {
+      const on = !!els.soundEnabled.checked;
+      view.state.settings = view.state.settings || {};
+      view.state.settings.soundEnabled = on;
+
+      setBioHandpanEnabled(on);
+      saveGame(view.state);
+    });
+  } else {
+    // если чекбокса нет — просто включаем по умолчанию
+    setBioHandpanEnabled(sndDefault);
+  }
+  // --- end sound toggle ---
 
   // Организм звучит только если он "живой":
   // не в анабиозе и не в усыхании.

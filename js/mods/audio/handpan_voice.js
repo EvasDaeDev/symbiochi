@@ -106,10 +106,10 @@ gain3.connect(gain);
 
     // Envelope
 // Мягкий, но быстрый щелчок (handpan vibe)
-const attack = 0.008 + Math.random() * 0.007; // 0.008–0.015
+const attack = 0.008 + Math.random() * 0.015; // 0.008–0.015
 
 // Более стабильный и длинный хвост для релакса
-const baseDecay = 1.1 + Math.random() * 2.5; // 4.5–7.0 сек
+const baseDecay = 1.1 + Math.random() * 3.5; // 4.5–7.0 сек
 const decay = baseDecay * (0.7 + 0.3 * hpRatio); 
 // HP ↓ чуть короче, но не радикально — чтобы не было "обрубков"
 

@@ -1,7 +1,7 @@
 // js/render.js
 import { escapeHtml, barPct, clamp, key } from "./util.js";
 import { getOrgMotion } from "./moving.js";
-import { IdleWarpConfig, renderBodyWithIdleWarp } from "./render_idleWarp.js";
+//import { IdleWarpConfig, renderBodyWithIdleWarp } from "./render_idleWarp.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { COIN, coinCellOffsets } from "./mods/coins.js";
 import { getFxPipeline } from "./FX/pipeline.js";
@@ -1096,20 +1096,9 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
     }
   }
 
-  // Рендер тела (с idle warp pulse, если он сейчас активен)
-  const idleWarpState = renderBodyWithIdleWarp(
-    ctx,
-    {
-      org,
-      orgId,
-      baseSeed,
-      bodyCells,
-      bodyBBoxPx,
-      globalTimeSec,
-      gaitActive,
-    },
-    drawBody
-  );
+
+drawBody(ctx);
+const idleWarpState = null;
 
   // MODULES
   const modules = org?.modules || [];
