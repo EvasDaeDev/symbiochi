@@ -2163,11 +2163,11 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     els.hudMeta2.innerHTML = `
       <span class="invItem">
     <span class="hudIco" style="--ico: var(--ico-carrot)"></span>
-    <span class="invVal"> - ${Math.max(0, inv|0)}</span>
+    <span class="invVal">-${Math.max(0, inv|0)}</span>
   </span>
       <span class="invItem">
     <span class="hudIco" style="--ico: var(--ico-coin)"></span>
-    <span class="invVal"> - ${Math.max(0, coins|0)}</span>
+    <span class="invVal">-${Math.max(0, coins|0)}</span>
   </span>
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
