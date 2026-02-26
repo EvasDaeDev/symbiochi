@@ -10,7 +10,7 @@ import { wormOffset as wormOffsetAnim } from "./organs/worm.js";
 import { tentacleOffset as tentacleOffsetAnim } from "./organs/tentacle.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 import { RULES } from "./rules-data.js";
-import { moodEmoji, stateEmoji } from "../content/icons.js";
+import { moodEmoji, stateEmoji, applyIconCssVars } from "../content/icons.js";
 import { computeEyeRadiusCells, getEyeShapeDefault } from "./organs/eye.js";
 
 /**
@@ -2071,7 +2071,7 @@ export function renderLegend(org, legendEl){
     <div class="legendItem">
       <div class="${cls}" ${data} style="background:${escapeHtml(sw)}"></div>
       <div>
-        <div style="color: var(--text); font-weight:800; font-size:10px;">${escapeHtml(it.title)}</div>
+        <div style="color: var(--text); font-size:13px;">${escapeHtml(it.title)}</div>
         <div>${escapeHtml(it.desc)}</div>
       </div>
     </div>
@@ -2099,7 +2099,7 @@ export function renderRules(rulesEl){
   }).join("");
 
   rulesEl.innerHTML = `
-    <div style="font-weight:900; color:var(--text); margin-bottom:6px;">Правила и управление (обновлено)</div>
+    <div style="color:var(--text); margin-bottom:6px;">Правила и управление</div>
     ${sectionsHtml}
   `;
 }
@@ -2108,17 +2108,21 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   const target = org || state;
   const status = barStatus(target);
 
-  els.hudName.textContent = target.name;
-  els.hudStage.textContent = `• ${getStageName(target)}`;
+  // Legacy name/stage header may be absent in the new UI; keep null-safe.
+  if (els.hudName) els.hudName.textContent = target.name;
+  if (els.hudStage) els.hudStage.textContent = `• ${getStageName(target)}`;
   // seed moved to settings
 
-  els.hudMeta.innerHTML = `
-    <span class="pill stat ${barToneCls(target.bars.food)}" data-stat="food" title="сытость: ${barPct(target.bars.food)}%"><span class="ico"></span><span class="val">${barPct(target.bars.food)}%</span></span>
-    <span class="pill stat ${barToneCls(target.bars.clean)}" data-stat="clean" title="чистота: ${barPct(target.bars.clean)}%"><span class="ico"></span><span class="val">${barPct(target.bars.clean)}%</span></span>
-    <span class="pill stat ${barToneCls(target.bars.hp)}" data-stat="hp" title="здоровье: ${barPct(target.bars.hp)}%"><span class="ico"></span><span class="val">${barPct(target.bars.hp)}%</span></span>
-    <span class="pill stat ${barToneCls(target.bars.mood)}" data-stat="mood" title="настроение: ${barPct(target.bars.mood)}%"><span class="ico">${moodEmoji(target.bars.mood)}</span><span class="val">${barPct(target.bars.mood)}%</span></span>
-    <span class="pill stat ${status.cls}" data-stat="state" title="состояние: ${status.txt}"><span class="ico">${stateEmoji(status.txt)}</span></span>
-      `;
+  // Full stat row is no longer shown on the main screen; keep compatible if the node exists.
+  if (els.hudMeta){
+    els.hudMeta.innerHTML = `
+      <span class="pill stat ${barToneCls(target.bars.food)}" data-stat="food" title="сытость: ${barPct(target.bars.food)}%"><span class="ico"></span><span class="val">${barPct(target.bars.food)}%</span></span>
+      <span class="pill stat ${barToneCls(target.bars.clean)}" data-stat="clean" title="чистота: ${barPct(target.bars.clean)}%"><span class="ico"></span><span class="val">${barPct(target.bars.clean)}%</span></span>
+      <span class="pill stat ${barToneCls(target.bars.hp)}" data-stat="hp" title="здоровье: ${barPct(target.bars.hp)}%"><span class="ico"></span><span class="val">${barPct(target.bars.hp)}%</span></span>
+      <span class="pill stat ${barToneCls(target.bars.mood)}" data-stat="mood" title="настроение: ${barPct(target.bars.mood)}%"><span class="ico">${moodEmoji(target.bars.mood)}</span><span class="val">${barPct(target.bars.mood)}%</span></span>
+      <span class="pill stat ${status.cls}" data-stat="state" title="состояние: ${status.txt}"><span class="ico">${stateEmoji(status.txt)}</span></span>
+    `;
+  }
 
   // second row: life time + carrots inventory (input is static in DOM)
   if (els.lifePill){
@@ -2157,8 +2161,14 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const pTxt = t ? `${Math.round(power*100)}%` : "";
 
     els.hudMeta2.innerHTML = `
-      <span class="pill">морковки: ${Math.max(0, inv|0)}</span>
-      <span class="pill">монетки: ${Math.max(0, coins|0)}</span>
+      <span class="invItem">
+    <span class="hudIco" style="--ico: var(--ico-carrot)"></span>
+    <span class="invVal"> - ${Math.max(0, inv|0)}</span>
+  </span>
+      <span class="invItem">
+    <span class="hudIco" style="--ico: var(--ico-coin)"></span>
+    <span class="invVal"> - ${Math.max(0, coins|0)}</span>
+  </span>
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
   }

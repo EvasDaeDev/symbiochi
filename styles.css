@@ -21,12 +21,13 @@
   --cellSize: 4px; /* размер одной клетки в пикселях */
 }
 
+
 html, body {
   height: 100%;
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: "fixedsys-excelsior", monospace;
   display: grid;
   place-items: center;
 }
@@ -47,12 +48,13 @@ html, body {
   transform: translateY(0) scale(1);
 }
 
+/* Две колонки: слева центр (заголовок + игра), справа инфо-панель */
 #wrap.wrap2{
   display: grid;
-  /* Debug panel removed: keep only center + right info panel */
-  grid-template-columns: 1fr 355px;
+  grid-template-columns: auto auto;
   gap: 5px;
-  align-items: stretch;
+  align-items: start;
+  justify-content: center;
 }
 
 
@@ -60,36 +62,88 @@ html, body {
 
 #centerCol{
   display: grid;
-  grid-template-rows: var(--statusH) auto;
-  gap: 10px;
-  min-width: 400px;
-  max-width: 600px;
+  grid-template-rows: auto auto; /* title + mainPanel */
+  gap: 5px;
+}
+
+.mainTitle{
+  height: 15px;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 3px;
+  color: rgba(255,255,255,0.72);
+  user-select: none;
+}
+
+/* Левый верх внутри mainPanel: морковки/монетки/режим */
+.invOverlay{
+  position: absolute;
+  top: 16px;
+  left: 12px;
+  z-index: 6;
+  display: grid;
+  gap: 6px;
+  pointer-events: auto;
+  text-align: left;
+}
+
+.invOverlay .pill{
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: rgba(255,255,255,0.70);
+}
+
+.invOverlay .miniInput{
+  width: 56px;
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  color: rgba(255,255,255,0.82);
+  outline: none;
+}
+.invOverlay .miniInput:focus{
+  outline: 1px solid rgba(125,211,252,0.35);
+  border-radius: 6px;
 }
 
 #infoPanel{
+  border: 3px solid var(--border);
+  border-radius: 15px;
+  background: rgba(0,0,0,.10);
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto auto 1fr;
-  height: calc(var(--statusH) + var(--gameH) + 10px);
-  min-width: 390px;
-
-  /* fixed layout: no manual resize handle */
+  /* выравниваем верх инфо-панели по верхней кромке mainPanel (ниже заголовка) */
+  margin-top: 20px;
+  height: var(--gameH);
+  /* ширина — чтобы влезли все табы + ⚙ */
+  width: 420px;
+  max-width: 92vw;
+  min-width: 340px;
   resize: none;
-  overflow: hidden;
   min-height: 240px;
 }
 
 .tabs{
   display:flex;
-  gap:6px;
-  padding: 8px 10px;
+  gap:2px;
+  padding: 6px 6px;
   border-bottom: 1px solid var(--border);
   background: rgba(255,255,255,0.02);
+  /* если не влезает — можно прокрутить, вместо обрезания */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
 
 /* Settings button lives in the top-right corner of the info panel */
 .tabs .iconBtn{
   margin-left: auto;
   align-self: center;
+  flex: 0 0 auto;
 }
 
 .tabBtn{
@@ -97,10 +151,10 @@ html, body {
   background: rgba(255,255,255,0.02);
   color: var(--text);
   border-radius: 10px;
-  padding: 6px 10px;
+  padding: 6px 6px;
   cursor:pointer;
-  font-weight: 700;
-  font-size: 12px;
+  font-weight: 500;
+  font-size: 16px;
 }
 .tabBtn.isActive{ border-color: rgba(120,220,150,0.55); box-shadow: 0 0 0 2px rgba(120,220,150,0.10) inset; }
 
@@ -114,7 +168,7 @@ html, body {
   border-radius: 12px;
   background: rgba(255,255,255,0.02);
 }
-.hueTitle{ font-weight:800; margin-bottom:6px; }
+.hueTitle{ font-weight:500; margin-bottom:6px; }
 
 .orgInfo{ padding: 10px; color: rgba(255,255,255,0.85); text-align: center; font-size: 13px; line-height: 1.35; min-width: 210px; }
 
@@ -139,21 +193,19 @@ html, body {
   top: 16px;
   right: 19px;
   z-index: 5;
+  font-size: 12px;
   pointer-events: none;
   display: grid;
   gap: 4px;
-    justify-items: end;
+  justify-items: end;
   text-align: right;
 }
 
-.lifePill{
-  
-  }
 
 .perfStats{
   display: grid;
   gap: 2px;
-  font-size: 10px;
+  font-size: 13px;
   color:  #cc632c;
 }
 .perfItem{
@@ -167,14 +219,14 @@ html, body {
   user-select: none;
 }
 .hdr .t{
-  font-weight: 800;
-  font-size: 12px;
+  font-weight: 500;
+  font-size: 15px;
   letter-spacing: .4px;
   color: var(--accent);
 }
 .hdr .s{
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   line-height: 1.25;
 }
@@ -212,8 +264,8 @@ html, body {
   min-width: 0;
 }
 .hudName .nm{
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 15px;
+  font-weight: 500;
   color: var(--accent);
   white-space: nowrap;
   overflow: hidden;
@@ -221,7 +273,7 @@ html, body {
   text-overflow: ellipsis;
 }
 .hudName .stage{
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -229,12 +281,12 @@ html, body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
 }
 
 .pill {
-  font-size: 10px;
+  font-size: 13px;
   padding: 3px 6px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -268,7 +320,7 @@ html, body {
   background-repeat: no-repeat;
   background-size: contain;
   background-position: center;
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
 }
 .pill.stat .val{
@@ -306,7 +358,7 @@ html, body {
   border: 1px solid #24344a;
   background: linear-gradient(180deg, #121c2c, #0b1320);
   color: var(--text);
-  font-weight: 900;
+  font-weight: 600;
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -319,7 +371,7 @@ html, body {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 10px;
+  padding: 2px;
   box-sizing: border-box;
 }
 .gridWrap{
@@ -350,19 +402,17 @@ html, body {
   height: var(--cellSize);
   display: grid;
   place-items: center;
-  font-size: calc(var(--cellSize) - 2px);
+  font-size: calc(var(--cellSize) - 0px);
   line-height: 1;
 }
 
 
 .controlsOverlay{
   position: absolute;
-  left: 10px;
+  left: 3px;
   right: 10px;
   bottom: 10px;
   display: grid;
-  gap: 6px;
-  padding: 0;
   border: none;
   border-radius: 0;
   background: transparent; /* убрать подложку */
@@ -384,7 +434,7 @@ html, body {
   background: transparent; /* убрать подложку у кнопок */
   color: var(--text);
   font-weight: 500;
-  font-size: 10px;
+  font-size: 13px;
   cursor: pointer;
   user-select: none;
   min-width: 75px;
@@ -490,7 +540,7 @@ html, body {
 .smallbtn.actHeal.isActive{ border-color: rgba(239,68,68,0.7); box-shadow: 0 0 0 2px rgba(239,68,68,0.15) inset; }
 
 .footerNote {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   text-align: center;
   user-select: none;
@@ -500,7 +550,7 @@ html, body {
 .rulesBody{
   overflow: auto;
   padding: 8px 10px 10px 10px;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
 }
 
@@ -519,7 +569,7 @@ html, body {
 .legendBody{
   padding: 8px 10px;
   overflow: auto;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   line-height: 1.35;
 }
@@ -539,13 +589,13 @@ html, body {
   border: 1px solid rgba(31,42,58,.8);
   border-radius: 6px;
   background: rgba(0,0,0,.12);
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .logBody{
   padding: 8px 10px;
   overflow: auto;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--text);
   line-height: 1.35;
 }
@@ -555,7 +605,7 @@ html, body {
 }
 .logEntry .when{
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   margin-bottom: 2px;
 }
 
@@ -599,12 +649,12 @@ html, body {
 }
 .startBox h1{
   margin: 0 0 6px 0;
-  font-size: 20px;
+  font-size: 23px;
   letter-spacing: .6px;
 }
 .startBox p{
   margin: 0 0 10px 0;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   line-height: 1.35;
 }
@@ -615,8 +665,8 @@ html, body {
   border: 1px solid #24344a;
   background: linear-gradient(180deg, #142339, #0d1727);
   color: var(--text);
-  font-weight: 900;
-  letter-spacing: .8px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
   cursor: pointer;
   user-select: none;
 }
@@ -630,7 +680,7 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--text);
   text-align: center;
   width: fit-content;
@@ -686,14 +736,15 @@ html, body {
   user-select: none;
 }
 #offlineSummary .offlineTitle{
-  font-weight: 900;
+  font-weight: 600;
+  letter-spacing: 2px;
   font-size: 16px;
   text-align: center;
   color: var(--accent);
 }
 #offlineSummary .offlineSub{
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   line-height: 1.25;
 }
@@ -712,11 +763,11 @@ html, body {
   border: 1px solid rgba(255,255,255,0.03);
 }
 #offlineSummary .offlineRow .label{
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
 }
 #offlineSummary .offlineRow .value{
-  font-size: 11px;
+  font-size: 14px;
   color: rgba(255,255,255,0.9);
 }
 #offlineSummary .offlineRow.good .value{
@@ -771,7 +822,7 @@ html, body {
 }
 .modal h2{
   margin: 0 0 8px 0;
-  font-size: 13px;
+  font-size: 16px;
   text-align: center;
   letter-spacing: .4px;
   color: var(--accent);
@@ -780,7 +831,7 @@ html, body {
   display: grid;
   gap: 6px;
   margin: 8px 0 10px;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
 }
 .field input{
@@ -792,7 +843,7 @@ html, body {
   background: #0b1320;
   color: var(--text);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 16px;
   outline: none;
 }
 
@@ -809,7 +860,7 @@ html, body {
   gap: 10px;
   user-select: none;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 14px;
   justify-content: flex-start;
 }
 
@@ -837,7 +888,7 @@ button:disabled{
   border: 1px solid #24344a;
   color: var(--muted);
   padding: 6px 8px;
-  font-size: 10px;
+  font-size: 13px;
 }
 .symTabs .tabBtn.isActive{
   border-color: var(--accent);
@@ -851,7 +902,7 @@ button:disabled{
   margin-bottom: 10px;
 }
 .symHint{
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
   margin-bottom: 6px;
 }
@@ -863,13 +914,13 @@ button:disabled{
   background: #0b1320;
   color: var(--text);
   padding: 8px;
-  font-size: 10px;
+  font-size: 13px;
   box-sizing: border-box;
   resize: vertical;
 }
 .symTextAreaShare{
   min-height: 54px;
-  font-size: 9px;
+  font-size: 12px;
   color: var(--muted);
 }
 .symRow{
@@ -895,7 +946,7 @@ button:disabled{
   text-align: center;
 }
 .symConfirmTitle{
-  font-weight: 700;
+  font-weight: 400;
   margin-bottom: 6px;
   color: var(--accent);
 }
@@ -910,13 +961,13 @@ button:disabled{
   gap: 8px;
 }
 .hint{
-  font-size:10px;
+  font-size:13px;
   color: var(--muted);
   line-height:1.3;
 }
 .logEntry.good .msg { color: #34d399; }     /* зелёный */
 .logEntry.warn .msg { color: #fbbf24; opacity: .75; } /* бледно-оранжевый */
-.logEntry.alert .msg { color: #ef4444; font-weight: 700; } /* красный */
+.logEntry.alert .msg { color: #ef4444; font-weight: 400; } /* красный */
 
 
 /* Pixel renderer */
@@ -957,8 +1008,9 @@ html, body { overscroll-behavior: none; }
   }
 
   #infoPanel{
+    margin-top: 0;
     width: 100%;
-    max-height: 42vh;
+    max-height: 40vh;
     height: auto;
     resize: none;
   }
@@ -966,7 +1018,7 @@ html, body { overscroll-behavior: none; }
   .tabBody{ overflow:auto; -webkit-overflow-scrolling: touch; }
 }
 
-.logEntry.bud .msg { color: #38bdf8; font-weight: 700; }
+.logEntry.bud .msg { color: #38bdf8; font-weight: 400; }
 .logEntry.bud .when { color: #38bdf8; }
 .modalBtns #symbiosisBtn{
   color: var(--muted);
@@ -999,16 +1051,24 @@ html, body { overscroll-behavior: none; }
   gap:10px;
 }
 
+/* имена существ — голубым */
+.orgCellTop .orgCellName,
+.orgCellTop .orgName,
+.orgCellTop .nm,
+.orgCellTop b{
+  color: var(--accent);
+}
+
 .orgMetaInline{
   margin-left:auto;
-  font-size:10px;
+  font-size:13px;
   color:var(--muted);
   font-weight:400;
 }
 
 .orgCellStage{
-  font-weight:800;
-  font-size:10px;
+  font-weight:500;
+  font-size:13px;
   opacity:0.7;
 }
 .orgCellMeta{
@@ -1016,7 +1076,7 @@ html, body { overscroll-behavior: none; }
   align-items:center;
   gap:10px;
   margin-top:6px;
-  font-size:10px;
+  font-size:13px;
   color: var(--muted);
   flex-wrap:wrap;
 }
@@ -1045,4 +1105,44 @@ html, body { overscroll-behavior: none; }
 .orgDetails{
   border-top:1px solid var(--border);
   padding-top:10px;
+}
+
+.invItem{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-right:14px;
+  color: rgba(255,255,255,0.75);
+}
+
+.hudIco{
+  width: 14px;
+  height: 14px;
+  background-image: var(--ico);
+  background-size: 14px 14px;
+  background-repeat: no-repeat;
+  opacity: 1;
+}
+.invVal{
+  font-size: 13px;
+}
+
+/* === UI FONT OVERRIDE (должно быть в самом конце файла) === */
+
+@font-face{
+  font-family: "FixedsysExcelsior";
+  src: url("./fonts/fixedsys-excelsior.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root{
+  --ui-font: "FixedsysExcelsior", monospace;
+}
+
+html, body,
+button, input, select, textarea,
+.tabBtn, .tabBtn.isActive{
+  font-family: var(--ui-font);
 }

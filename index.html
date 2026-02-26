@@ -3,49 +3,34 @@
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-    <title>Symbiochi</title>
+    <title>SYMBIOCHI</title>
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon.svg">
     <link rel="stylesheet" href="styles.css">
+	
   </head>
   <body>
     <div id="wrap" class="wrap2">
-      <!-- Debug log (collapsible) -->
-    <!--  <div class="panel dbgPanel collapsed" id="dbgPanel" aria-label="Debug log">
-        <button class="dbgTail" id="dbgTail" title="Показать лог">◀</button>
-        <div class="dbgInner" id="dbgInner">
-          <div class="hdr">
-            <div class="t">ЛОГ ЭКРАНА</div>
-            <div class="s" id="dbgCount">0</div>
-          </div>
-          <div class="dbgBody" id="dbgBody"></div>
-        </div>
-      </div> -->
+     
       <div id="centerCol">
-        <div class="panel" id="statusPanel">
-          <div class="hud">
-            <div class="hudLeft">
-              <div class="hudName">
-                <div class="nm" id="hudName" style="text-align: center;">—</div>
-                <div class="stage" id="hudStage">—</div>
-              </div>
-              <div class="hudStatsRow">
-              <div class="hudBars" id="hudMeta"></div>
-              
-              <div class="hudBars" id="hudMeta2" style="text-align: center;"> <span
+        <!-- Заголовок над главной панелью -->
+        <div class="mainTitle">SYMBIOCHI</div>
 
-                  class="pill">морк: <input id="carrotHudInput" class="miniInput"
-
-                    min="0" step="1" value="0" type="number"></span> <span class="pill">мон:
-                  <input id="coinHudInput" class="miniInput" min="0" step="1" value="0"
-
-                    type="number"></span> </div>
-              </div>
-            </div>
-            <div class="hudRight"></div>
-          </div>
-        </div>
         <div class="panel" id="mainPanel">
+          <!-- Левый верх: морковки/монетки/режим (без статов организма) -->
+          <div class="invOverlay" id="invOverlay">
+            <!-- Сюда renderHud пишет строку вида: "морковки: 190  монетки: 99  режим: ..." -->
+            <div class="hudBars" id="hudMeta2"></div>
+
+            <!-- legacy ids для renderHud (скрыто) -->
+<!--           <div class="hudLegacy" aria-hidden="true">
+              <div id="hudName">—</div>
+              <div id="hudStage">—</div>
+              <input id="carrotHudInput" class="miniInput" min="0" step="1" value="0" type="number">
+              <input id="coinHudInput" class="miniInput" min="0" step="1" value="0" type="number">
+            </div>-->
+          </div> 
+
                   <div class="lifeOverlay">
           <div class="perfStats" id="perfStats">
             <div class="perfItem" id="lifePill">Возраст: 00:00:00</div>
@@ -76,7 +61,7 @@
           <div id="startOverlay">
             <div class="startBox modalAnim">
               <h1>SYMBIOCHI</h1>
-              <p>Ты не управляешь эволюцией напрямую...</p>
+              <p>Игра для тех кто помнит Dial-Up...</p>
               <button class="btn" id="playBtn">ИГРАТЬ!</button> </div>
           </div>
         </div>
@@ -143,6 +128,8 @@ readonly="readonly" placeholder="Здесь появится строка отп
           </div>
         </div>
       </div>
+
+      <!-- Правая инфо-панель -->
       <div class="panel" id="infoPanel">
         <div class="tabs" id="infoTabs"> <button class="tabBtn isActive" data-tab="org">ОРГАНИЗМ</button>
           <button class="tabBtn" data-tab="legend">ЛЕГЕНДА</button> <button class="tabBtn"
