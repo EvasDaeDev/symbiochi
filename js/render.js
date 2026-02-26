@@ -27,6 +27,11 @@ import { computeEyeRadiusCells, getEyeShapeDefault } from "./organs/eye.js";
 // =====================
 // Config
 // =====================
+
+const BODY_LIGHT = 0.24;   // сила света
+const BODY_SHADOW = 0.20;  // сила тени
+const BODY_ZONE = 0.35;    // доля зоны света/тени
+
 const MIN_GRID_W = 20;
 const MIN_GRID_H = 12;
 
@@ -177,6 +182,128 @@ function brighten(hex, amt){
 function scaleBrightness(hex, factor){
   const c = hexToRgb(hex);
   return rgbToHex(c.r * factor, c.g * factor, c.b * factor);
+}
+
+// =====================
+// Body macro shading helpers
+// =====================
+function buildBodyColumnStats(bodyCells){
+  let minX = Infinity;
+  for (const [x] of bodyCells){
+    if (x < minX) minX = x;
+  }
+  if (!Number.isFinite(minX)) return { minX:0, cols:new Map() };
+
+  const cols = new Map(); // colId -> {minY,maxY}
+  for (const [x,y] of bodyCells){
+    const colId = Math.floor((x - minX) / 2); // 2-block columns
+    let c = cols.get(colId);
+    if (!c){
+      c = { minY: y, maxY: y };
+      cols.set(colId, c);
+    } else {
+      if (y < c.minY) c.minY = y;
+      if (y > c.maxY) c.maxY = y;
+    }
+  }
+  return { minX, cols };
+}
+
+// Returns brightness factor k in [1-BODY_SHADOW .. 1+BODY_LIGHT]
+function macroShadeForBodyCell(wx, wy, stats){
+  const colId = Math.floor((wx - stats.minX) / 2);
+  const c = stats.cols.get(colId);
+  if (!c) return 1.0;
+
+  const h = Math.max(1, (c.maxY - c.minY + 1));
+  const u = (wy - c.minY) / h; // 0..~1
+
+  // Верхняя зона: плавно от (1+LIGHT) -> 1
+  if (u <= BODY_ZONE){
+    const t = u / BODY_ZONE; // 0..1
+    return (1 + BODY_LIGHT) + (1 - (1 + BODY_LIGHT)) * t;
+  }
+  // Нижняя зона: плавно от 1 -> (1-SHADOW)
+  if (u >= 1 - BODY_ZONE){
+    const t = (u - (1 - BODY_ZONE)) / BODY_ZONE; // 0..1
+    return 1 + ((1 - BODY_SHADOW) - 1) * t;
+  }
+  return 1.0;
+}
+
+// Auto-tint Color Burn shadow (returns HEX to keep pipeline consistent).
+function shadowBurn(hex, amount){
+  amount = Math.max(0, Math.min(1, amount));
+  if (amount <= 1e-6) return hex;
+
+  const c0 = hexToRgb(hex);
+  const r0 = c0.r|0, g0 = c0.g|0, b0 = c0.b|0;
+
+  // Warm vs cool heuristic (no HSL).
+  const warmScore = (r0 + g0) - (2 * b0);
+  const k = Math.max(0, Math.min(1, (warmScore + 255) / (2 * 255)));
+
+  // "Ink" endpoints.
+  const inkWarm = { r: 220, g: 70,  b: 35  };
+  const inkCool = { r: 55,  g: 75,  b: 170 };
+
+  const inkR = (inkCool.r + (inkWarm.r - inkCool.r) * k);
+  const inkG = (inkCool.g + (inkWarm.g - inkCool.g) * k);
+  const inkB = (inkCool.b + (inkWarm.b - inkCool.b) * k);
+
+  // Slightly tie tint to base.
+  const mixBase = 0.20;
+  const tintR = (inkR * (1 - mixBase) + r0 * mixBase);
+  const tintG = (inkG * (1 - mixBase) + g0 * mixBase);
+  const tintB = (inkB * (1 - mixBase) + b0 * mixBase);
+
+  // Blend goes from 255 (no effect) -> tint (max effect)
+  const br = 255 - amount * (255 - tintR);
+  const bg = 255 - amount * (255 - tintG);
+  const bb = 255 - amount * (255 - tintB);
+
+  const burn = (base, blend)=>{
+    // Photoshop-like Color Burn: 255 - (255-base)*255/(blend+1)
+    return 255 - Math.min(255, ((255 - base) * 255) / (blend + 1));
+  };
+
+  const rr = burn(r0, br);
+  const gg = burn(g0, bg);
+  const bb2 = burn(b0, bb);
+
+  return rgbToHex(rr, gg, bb2);
+}
+
+function applyBodyShade(baseHex, kShade){
+  if (kShade < 1){
+    const amount = Math.max(0, Math.min(1, (1 - kShade) / Math.max(1e-6, BODY_SHADOW)));
+    return shadowBurn(baseHex, amount);
+  }
+  return scaleBrightness(baseHex, kShade);
+}
+
+
+
+// === Body macro-shading (column-based) =========================
+// Columns: 2 cells wide. For each column, find minY/maxY over body cells.
+// Shade rule: top 1/4 -> light (smooth), bottom 1/4 -> shadow (smooth).
+
+function shadeToBin(k, bins){
+  // Dynamic range: cover exactly what BODY_LIGHT/BODY_SHADOW can produce
+  const lo = Math.max(0.05, 1 - BODY_SHADOW);
+  const hi = 1 + BODY_LIGHT;
+
+  const t = (k - lo) / Math.max(1e-6, (hi - lo));
+  const b = Math.round(t * (bins - 1));
+  return Math.max(0, Math.min(bins - 1, b));
+}
+
+function binToShade(bin, bins){
+  const lo = Math.max(0.05, 1 - BODY_SHADOW);
+  const hi = 1 + BODY_LIGHT;
+
+  const t = (bins <= 1) ? 0 : (bin / (bins - 1));
+  return lo + (hi - lo) * t;
 }
 
 // cheap deterministic hash → [0..1)
@@ -988,7 +1115,7 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
 
     // BODY blocks
   const bodyColor = SH(getPartColor(org, "body", 0));
-  const bodySkinColor = scaleBrightness(bodyColor, 1.15); // подсветка периметра
+  const bodySkinColor = scaleBrightness(bodyColor, 1.25); // подсветка периметра
   const bodyCells = org?.body?.cells || [];
   const bodyOcc = occPack.body; // body-only occupancy for perimeter detection
 
@@ -1013,57 +1140,88 @@ function gaitSinglePosition(wx, wy, wx0, wy0, wFrontOverride=null){
   function drawBody(ctxBody){
     const ctx = ctxBody;
 
-    if (!gaitActive){
-      const staticInner = [];
-      const staticSkin = [];
+if (!gaitActive){
+  const shadeStats = buildBodyColumnStats(bodyCells);
+
+  // Чтобы сохранить packedRects (и производительность), квантуем градиент в бины
+  const SHADE_BINS = 7; // 5..9 норм, 7 — хороший баланс
+  const bucketsInner = Array.from({ length: SHADE_BINS }, ()=>[]);
+  const bucketsSkin  = Array.from({ length: SHADE_BINS }, ()=>[]);
 
       for (const [wx, wy] of bodyCells){
         const nm = neighMaskAt(occ, wx, wy);
         const kGrow = animProgress(org, wx, wy);
-        const isSkin = isBoundary(bodyOcc, wx, wy);
-        const col = isSkin ? bodySkinColor : bodyColor;
+const isSkin = isBoundary(bodyOcc, wx, wy);
+const baseCol = isSkin ? bodySkinColor : bodyColor;
 
-        if (kGrow < 0.999){
-          const p = worldToScreenPx(cam, wx, wy, view);
-          const x = p.x;
-          const y = p.y + breathY;
-          drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
-        } else {
-          (isSkin ? staticSkin : staticInner).push([wx, wy]);
-        }
+// макро-шейдинг по колонке
+const kShade = macroShadeForBodyCell(wx, wy, shadeStats);
+let col = baseCol;
+
+if (kShade < 1){
+  const amount = Math.max(0, Math.min(1, (1 - kShade) / Math.max(1e-6, BODY_SHADOW)));
+  col = shadowBurn(baseCol, amount);
+} else {
+  col = scaleBrightness(baseCol, kShade);
+}
+
+if (kGrow < 0.999){
+  const p = worldToScreenPx(cam, wx, wy, view);
+  const x = p.x;
+  const y = p.y + breathY;
+  drawBlockAnim(ctx, x, y, s, col, breathK, nm, kGrow);
+} else {
+  // квантуем в бин, чтобы packedRects мог рисовать пачками
+  const bin = shadeToBin(kShade, SHADE_BINS);
+  (isSkin ? bucketsSkin : bucketsInner)[bin].push([wx, wy]);
+}
 
         if (isSelected && isBoundary(occ, wx, wy)){
           boundaryCells.push([wx, wy]);
         }
       }
 
-      const packInner = org.__packBodyInner || (org.__packBodyInner = {});
-      const packSkin  = org.__packBodySkin  || (org.__packBodySkin  = {});
+const packInnerBins = org.__packBodyInnerBins || (org.__packBodyInnerBins =
+  Array.from({ length: SHADE_BINS }, ()=>({}))
+);
+const packSkinBins = org.__packBodySkinBins || (org.__packBodySkinBins =
+  Array.from({ length: SHADE_BINS }, ()=>({}))
+);
 
-      const fillPacked = (cells, col, packObj)=>{
-        if (!cells.length) return;
-        const rects = packedRectsCached(packObj, cells);
-        ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
-        for (const r of rects){
-          const p = worldToScreenPx(cam, r.x, r.y, view);
-          const x = p.x;
-          const y = p.y + breathY;
-          ctx.fillRect(x, y, r.w * s, r.h * s);
-          if (isSelected){
-            boundaryRects.push({ x, y, w: r.w * s, h: r.h * s });
-          }
-        }
-      };
+const fillPacked = (cells, col, packObj)=>{
+  if (!cells.length) return;
+  const rects = packedRectsCached(packObj, cells);
+  ctx.fillStyle = breathK ? brighten(col, 0.04) : col;
+  for (const r of rects){
+    const p = worldToScreenPx(cam, r.x, r.y, view);
+    const x = p.x;
+    const y = p.y + breathY;
+    ctx.fillRect(x, y, r.w * s, r.h * s);
+    if (isSelected){
+      boundaryRects.push({ x, y, w: r.w * s, h: r.h * s });
+    }
+  }
+};
 
-      fillPacked(staticInner, bodyColor, packInner);
-      fillPacked(staticSkin, bodySkinColor, packSkin);
+// Рисуем пачками по бинам (каждый бин = свой оттенок)
+for (let b = 0; b < SHADE_BINS; b++){
+  const kB = binToShade(b, SHADE_BINS);
+  fillPacked(bucketsInner[b], scaleBrightness(bodyColor, kB), packInnerBins[b]);
+  fillPacked(bucketsSkin[b],  scaleBrightness(bodySkinColor, kB), packSkinBins[b]);
+}
     } else {
       // Gait render (бывший код из else оставляем, только переносим внутрь функции)
       const gaitTint = (col)=> (breathK ? brighten(col, 0.04) : col);
+      const shadeStats = buildBodyColumnStats(bodyCells);
 
       for (const [wx0, wy0] of bodyCells){
         const isSkin = isBoundary(bodyOcc, wx0, wy0);
-        const col = isSkin ? bodySkinColor : bodyColor;
+        const baseCol = isSkin ? bodySkinColor : bodyColor;
+
+// макро-шейдинг по колонке (плавный градиент)
+const kShade = macroShadeForBodyCell(wx0, wy0, shadeStats);
+
+const col = scaleBrightness(baseCol, kShade);
         const kGrow = animProgress(org, wx0, wy0);
 
         // 0..gaitDist
@@ -1648,14 +1806,14 @@ function drawGridOverlay(ctx, view, cam){
 
   const rootStyle = getComputedStyle(document.documentElement);
   const bgHex = rootStyle.getPropertyValue("--bg").trim() || "#070a0f";
-  const lineHex = scaleBrightness(bgHex, 1.15);
+  const lineHex = scaleBrightness(bgHex, 1.5);
 
   const startX = Math.floor(left / step) * step;
   const startY = Math.floor(top / step) * step;
 
   ctx.save();
   ctx.strokeStyle = lineHex;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 0.5;
 
   for (let wx = startX; wx <= right; wx += step){
     const p = worldToScreenPx(cam, wx, 0, view);
