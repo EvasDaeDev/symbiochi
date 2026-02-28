@@ -654,13 +654,13 @@ function drawBlock(ctx, x, y, s, colorHex, breathK, neighMask){
 
   // Corner smoothing: if an outer corner is free (no neighbors on the two touching sides)
   // cut a *single pixel* (per project rules). For tiny blocks (<=2px), skip smoothing.
-  const cut = (s >= 2) ? 1 : 0;
-  if (cut){
-    if (!(neighMask & 1) && !(neighMask & 8)) ctx.clearRect(x,         y,         cut, cut); // TL
-    if (!(neighMask & 1) && !(neighMask & 2)) ctx.clearRect(x + s-cut, y,         cut, cut); // TR
-    if (!(neighMask & 4) && !(neighMask & 8)) ctx.clearRect(x,         y + s-cut, cut, cut); // BL
-    if (!(neighMask & 4) && !(neighMask & 2)) ctx.clearRect(x + s-cut, y + s-cut, cut, cut); // BR
-  }
+//  const cut = (s >= 2) ? 1 : 0;
+// if (cut){
+//    if (!(neighMask & 1) && !(neighMask & 8)) ctx.clearRect(x,         y,         cut, cut); // TL
+//    if (!(neighMask & 1) && !(neighMask & 2)) ctx.clearRect(x + s-cut, y,         cut, cut); // TR
+//    if (!(neighMask & 4) && !(neighMask & 8)) ctx.clearRect(x,         y + s-cut, cut, cut); // BL
+//    if (!(neighMask & 4) && !(neighMask & 2)) ctx.clearRect(x + s-cut, y + s-cut, cut, cut); // BR
+//  }
 }
 
 function drawBlockAnim(ctx, x, y, s, baseHex, breathK, neighMask, k){
@@ -1867,7 +1867,7 @@ export function renderGrid(state, canvas, gridEl, view){
   // Offscreen scene buffer has the full DPR size; this transform keeps all
   // existing drawing code working unchanged.
   ctx.setTransform(view.dpr || 1, 0, 0, view.dpr || 1, 0, 0);
-  ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = true;
 
   // background (cached gradient to avoid per-frame allocations / GC spikes)
   ctx.clearRect(0, 0, view.rectW, view.rectH);
@@ -2319,14 +2319,15 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const pTxt = t ? `${Math.round(power*100)}%` : "";
 
     els.hudMeta2.innerHTML = `
+	      <span class="invItem">
+    <span class="hudIco" style="--ico: var(--ico-coin)"></span>
+    <span class="invVal">:${Math.max(0, coins|0)}</span>
+  </span>
       <span class="invItem">
     <span class="hudIco" style="--ico: var(--ico-carrot)"></span>
-    <span class="invVal">-${Math.max(0, inv|0)}</span>
+    <span class="invVal">:${Math.max(0, inv|0)}</span>
   </span>
-      <span class="invItem">
-    <span class="hudIco" style="--ico: var(--ico-coin)"></span>
-    <span class="invVal">-${Math.max(0, coins|0)}</span>
-  </span>
+
       <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
     `;
   }
