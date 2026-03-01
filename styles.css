@@ -1284,6 +1284,9 @@ button, input, select, textarea,
 #tab-inv .invLeft{
   display: inline-flex;
   align-items: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
   gap: 8px;
   min-width: 86px;
 }
