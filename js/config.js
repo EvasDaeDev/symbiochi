@@ -21,7 +21,7 @@ export function getMaxAppendageLen(bodyLen){
 
 export const UI = {
   // Как часто выполняется autoTick (симуляция + сейв + обновление HUD), мс.
-  AUTO_TICK_MS: 1000,
+  AUTO_TICK_MS: 500,
 
   // Дребезг ResizeObserver, мс.
   // Без этого браузер может дергать ресайз десятки раз за короткое время.

@@ -679,6 +679,7 @@ html, body {
   background: linear-gradient(180deg, #142339, #0d1727);
   color: var(--text);
   font-weight: 600;
+  font-size: 18px;
   letter-spacing: 1.2px;
   cursor: pointer;
   user-select: none;

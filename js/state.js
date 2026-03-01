@@ -457,10 +457,18 @@ export function simulate(state, deltaSec){
   // v2.2: Baits are eaten BETWEEN mutations (not inside applyMutationEvent).
   // Run this once per simulation step so close baits resolve quickly (≈1s delay).
   const tNow = now;
+
+  // IMPORTANT (multi-organism fix):
+  // Carrot eating must be resolved once per step for the whole colony.
+  // Otherwise different organisms overwrite car._eatBy/_eatAt and the 1s delay never completes.
+  eaten += processCarrotsTickColony(state, orgs, tNow);
+
+  // After eating is resolved, update per-organism growth targets (visual/growth bias).
   for (const org of orgs){
     if (!org) continue;
-    eaten += processCarrotsTick(state, org, tNow);
+    processCarrotsTick(state, org, tNow, { eat: false });
   }
+
   eaten += processCoinsTick(state, tNow);
 
 
@@ -1236,7 +1244,87 @@ function carrotCells(car){
   return out;
 }
 
-function processCarrotsTick(state, org = state, tNow = null){
+// Resolve carrot eating ONCE per simulate() step for the whole colony.
+// This avoids the "two organisms keep resetting _eatAt/_eatBy" bug.
+function processCarrotsTickColony(state, orgs, tNow = null){
+  if (!Array.isArray(state.carrots) || !state.carrots.length) return 0;
+  const nowT = Number.isFinite(tNow) ? tNow : nowSec();
+
+  // Precompute occupancy for each organism (cheap sets for hit tests).
+  const perOrg = [];
+  for (const org of orgs){
+    if (!org) continue;
+    const bodyOcc = new Set();
+    for (const [x,y] of (org.body?.cells || [])) bodyOcc.add(`${x},${y}`);
+    const moduleOcc = new Set();
+    for (const m of (org.modules || [])){
+      for (const [x,y] of (m?.cells || [])) moduleOcc.add(`${x},${y}`);
+    }
+    perOrg.push({ org, bodyOcc, moduleOcc });
+  }
+
+  const eaterKeyOf = (org)=>{
+    // parent = 0, buds = 1..N (stable while buds are indexed)
+    if (org === state) return 0;
+    const tag = (org && Number.isFinite(org.__orgTag)) ? (org.__orgTag|0) : 0;
+    return 1 + tag;
+  };
+
+  let eaten = 0;
+  const remaining = [];
+
+  for (const car of state.carrots){
+    // Deterministic: parent first, then buds in array order.
+    let hitOrg = null;
+    for (let i = 0; i < perOrg.length; i++){
+      const { org, bodyOcc, moduleOcc } = perOrg[i];
+      let hits = 0;
+      for (const [x,y] of carrotCells(car)){
+        const k = `${x},${y}`;
+        if (moduleOcc.has(k) || bodyOcc.has(k)) hits++;
+        if (hits >= 2) break;
+      }
+      if (hits >= 2){
+        hitOrg = org;
+        break;
+      }
+    }
+
+    if (!hitOrg){
+      // Lost contact: reset timer.
+      car._eatAt = null;
+      car._eatBy = null;
+      remaining.push(car);
+      continue;
+    }
+
+    const eaterKey = eaterKeyOf(hitOrg);
+
+    // 1s delay before "eat" (same semantics as coins)
+    if (car._eatBy !== eaterKey || !Number.isFinite(car._eatAt)){
+      car._eatBy = eaterKey;
+      car._eatAt = nowT + 1.0;
+      remaining.push(car);
+      continue;
+    }
+
+    if (nowT >= car._eatAt){
+      hitOrg.bars.food = clamp(hitOrg.bars.food + 0.22, 0, BAR_MAX);
+      hitOrg.bars.mood = clamp(hitOrg.bars.mood + 0.06, 0, MOOD_MAX);
+      pushLog(hitOrg, `Кормление: морковка съедена.`, "care");
+      updateVisualSaturation(hitOrg);
+      eaten++;
+      // consumed -> do not keep
+    } else {
+      remaining.push(car);
+    }
+  }
+
+  state.carrots = remaining;
+  return eaten;
+}
+
+function processCarrotsTick(state, org = state, tNow = null, opts = null){
   if (!Array.isArray(state.carrots) || !state.carrots.length){
     org.growthTarget = null;
     org.growthTargetMode = null;
@@ -1244,7 +1332,7 @@ function processCarrotsTick(state, org = state, tNow = null){
     return 0;
   }
   const nowT = Number.isFinite(tNow) ? tNow : nowSec();
-
+  const doEat = !(opts && opts.eat === false);
 
   let eaten = 0;
   const bodyOcc = new Set();
@@ -1302,6 +1390,7 @@ function processCarrotsTick(state, org = state, tNow = null){
   }
 
   // Eat only if touches >= 2 cells. If target is appendage, count only modules.
+  if (doEat){
   const remaining = [];
   for (const car of state.carrots){
     const cx = car.x + Math.floor((car.w ?? CARROT.w ?? 3) / 2);
@@ -1344,7 +1433,7 @@ function processCarrotsTick(state, org = state, tNow = null){
   }
   state.carrots = remaining;
   if (eaten > 0) updateVisualSaturation(org);
-
+  }
   if (!state.carrots.length){
     org.growthTarget = null;
     org.growthTargetMode = null;

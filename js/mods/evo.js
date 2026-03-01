@@ -15,9 +15,9 @@ export const EVO = {
   // If avg(food,clean,hp) <= sleepThreshold => stasis (no evolution; minEvoSpeed not applied)
   sleepThreshold: 0.15,
   // Anti-stall floor for evoSpeed when not in stasis (range 0.08..0.12)
-  minEvoSpeed: 0.10,
+  minEvoSpeed: 0.033,
   // Size slow-down hyperbola: sizeFactor = 1/(1+(bodyBlocks/S0)^p)
-  sizeS0: 650,
+  sizeS0: 1250,
   sizeP: 1.75,
   // Global ecological pressure: 1/(1+0.3*totalOrganisms)
   ecoPressureK: 0.30,
