@@ -2,7 +2,7 @@
 
 export const BUD = {
   minLen: 30,
-  probMult: 1/4,
+  probMult: 1/2,
   weightMult: 1.0, 
   bigParentSize: 1200,
   bigParentSuccessMult: 2,

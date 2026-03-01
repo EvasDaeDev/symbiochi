@@ -22,13 +22,7 @@
             <!-- Сюда renderHud пишет строку вида: "морковки: 190  монетки: 99  режим: ..." -->
             <div class="hudBars" id="hudMeta2"></div>
 
-            <!-- legacy ids для renderHud (скрыто) -->
-<!--           <div class="hudLegacy" aria-hidden="true">
-              <div id="hudName">—</div>
-              <div id="hudStage">—</div>
-              <input id="carrotHudInput" class="miniInput" min="0" step="1" value="0" type="number">
-              <input id="coinHudInput" class="miniInput" min="0" step="1" value="0" type="number">
-            </div>-->
+
           </div> 
 
                   <div class="lifeOverlay">
@@ -45,6 +39,7 @@
             <div class="actions"><button class="smallbtn actBtn actCoin" id="coin"><span class="actIco"
 
                   aria-hidden="true"></span><span class="actLbl">МОНЕТКА</span></button>
+              
 				  <button class="smallbtn actBtn actFeed" id="feed"><span
 
                   class="actIco" aria-hidden="true"></span><span class="actLbl">КОРМ</span></button>
@@ -69,37 +64,56 @@
         <div id="settingsOverlay">
           <div class="modal">
             <h2>Настройки</h2>
-            
-            <div class="field">
-              <div>Скорость эволюции (минуты)</div>
-              <input id="evoInput" min="0.1" step="0.1" type="number"> </div>
-            <div class="field">
-              <div>Приоритет длины органов (новые → длинные)</div>
-              <input id="lenPrio" min="0" max="100" step="1" type="range"> </div>
-            <div class="field">
-              <div style="display:flex; gap:10px; align-items:flex-end;">
-                <div style="flex:1;">
-                  <div>Морковок в запасе</div>
-                  <input id="carrotsInput" min="0" step="1" type="number"> </div>
-                <div style="flex:1;">
-                  <div>Монеток в запасе</div>
-                  <input id="coinsInput" min="0" step="1" type="number"> </div>
-              </div>
-            </div>
+
             <div class="fxRow">
   <label><input id="fxEnabled" type="checkbox"> <span>Эффекты</span></label>
   <label><input id="soundenabled" type="checkbox"> <span>Звуки</span></label>
 </div>
-            <div class="modalBtns"> <button class="smallbtn" id="newCreature">НОВАЯ
-                ИГРА</button> <button class="smallbtn" id="symbiosisBtn" disabled="disabled"
+            
+            <div class="modalBtns">
+              <button class="smallbtn" id="newCreature">НОВАЯ ИГРА</button>
+              <button class="smallbtn" id="rulesBtn">ПРАВИЛА</button>
+              <button class="smallbtn" id="symbiosisBtn" disabled="disabled" title="В разработке">СИМБИОЗ</button>
+              <button class="smallbtn" id="saveSettings">ПРИМЕНИТЬ</button>
+              <button class="smallbtn" id="closeSettings">ОТМЕНА</button>
+            </div>
 
-                title="В разработке">СИМБИОЗ</button> <button class="smallbtn"
-
-                id="saveSettings">ПРИМЕНИТЬ</button> <button class="smallbtn" id="closeSettings">ОТМЕНА</button>
+          </div>
+        </div>
+        
+        <div id="cosmeticsOverlay">
+          <div class="modal">
+            <h2>Косметика</h2>
+            <div class="field">
+              <div class="hint">Покупки — только визуал. Никаких баффов.</div>
+            </div>
+            <div class="shopGrid" id="shopGrid"></div>
+            <div class="field" style="margin-top:12px;">
+              <div style="display:flex; gap:10px; align-items:flex-end;">
+                <div style="flex:1;">
+                  <div>Экипировано (глобально)</div>
+                  <div class="equippedRow" id="equippedRowInv"></div>
+                </div>
+              </div>
+            </div>
+            <div class="modalBtns">
+              <button class="smallbtn" id="closeCosmetics">ЗАКРЫТЬ</button>
             </div>
           </div>
         </div>
-        <div id="symbiosisOverlay">
+
+        
+        <div id="rulesOverlay">
+          <div class="modal">
+            <h2>Правила</h2>
+            <div class="rulesBody" id="rulesBody"></div>
+            <div class="modalBtns">
+              <button class="smallbtn" id="closeRules">ЗАКРЫТЬ</button>
+            </div>
+          </div>
+        </div>
+
+<div id="symbiosisOverlay">
           <div class="modal symModal">
             <h2>Симбиоз</h2>
             <div class="symBody" id="symBody">
@@ -130,23 +144,89 @@ readonly="readonly" placeholder="Здесь появится строка отп
         </div>
       </div>
 
+
+
       <!-- Правая инфо-панель -->
       <div class="panel" id="infoPanel">
-        <div class="tabs" id="infoTabs"> <button class="tabBtn isActive" data-tab="org">ОРГАНИЗМ</button>
-          <button class="tabBtn" data-tab="legend">ЛЕГЕНДА</button> <button class="tabBtn"
-
-            data-tab="log">ЖУРНАЛ</button> <button class="tabBtn" data-tab="rules">ПРАВИЛА</button>
-         <button class="iconBtn" id="settingsBtn" title="Настройки">⚙</button>
-        </div>
+        <div class="tabs" id="infoTabs">
+ <button class="tabBtn isActive" data-tab="org">ОРГАНИЗМ</button>
+          <button class="tabBtn" data-tab="log">ЖУРНАЛ</button>
+          <button class="tabBtn" data-tab="legend">ЛЕГЕНДА</button>
+		  <button class="tabBtn" data-tab="inv">ИНВЕНТАРЬ</button>
+          <button class="iconBtn" id="settingsBtn" title="Настройки">⚙</button>
+</div>
         <div class="tabBody isActive" id="tab-org">
           <div class="orgInfo" id="orgInfo"></div>
         </div>
+
+<div class="tabBody" id="tab-inv">
+  <div class="orgInfo invPanel">
+    <div class="invGrid">
+
+      <!-- Food row -->
+      <div class="invRow">
+        <div class="invLeft">
+          <span class="invIco invFood" aria-hidden="true"></span>
+          <span id="foodValue" class="invValue">0</span>
+        </div>
+        <button class="smallbtn actBtn actFeed invExchangeBtn" id="exchangeFood" title="1 монета = 10 еды">
+          1 <span class="invIco invCoin" aria-hidden="true"></span>
+          = 10 <span class="invIco invFood" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <!-- Water row -->
+      <div class="invRow">
+        <div class="invLeft">
+          <span class="invIco invWater" aria-hidden="true"></span>
+          <span id="waterValue" class="invValue">0</span>
+        </div>
+        <button class="smallbtn actBtn actWash invExchangeBtn" id="exchangeWater" title="1 монета = 10 воды">
+          1 <span class="invIco invCoin" aria-hidden="true"></span>
+          = 10 <span class="invIco invWater" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <!-- Heal row -->
+      <div class="invRow">
+        <div class="invLeft">
+          <span class="invIco invHeal" aria-hidden="true"></span>
+          <span id="healValue" class="invValue">0</span>
+        </div>
+        <button class="smallbtn actBtn actHeal invExchangeBtn" id="exchangeHeal" title="1 монета = 10 лечения">
+          1 <span class="invIco invCoin" aria-hidden="true"></span>
+          = 10 <span class="invIco invHeal" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <!-- Coins (display only) -->
+      <div class="invRow invRowCoins">
+        <div class="invLeft">
+          <span class="invIco invCoin" aria-hidden="true"></span>
+          <span id="coinsValue" class="invValue">0</span>
+        </div>
+        
+      </div>
+
+    </div>
+
+    <div class="field invActions">
+      <button class="smallbtn" id="cosmeticsBtn">КОСМЕТИКА (заглушка)</button>
+    </div>
+
+    <div class="field">
+      <div>Экипировано (глобально)</div>
+      <div class="equippedRow" id="equippedRowInv"></div>
+    </div>
+  </div>
+</div>
+
         <div class="tabBody" id="tab-legend">
           <div class="legendBody" id="legendBody"></div>
           <div class="huePicker" id="huePicker" style="display:none;">
             <div class="hueTitle" id="hueTitle">Цвет</div>
             <input id="hueRange" type="color">
-            <div class="hint">Подбери цвет по вкусу.</div>
+            <div class="hint">Выбери новый цвет.</div>
           </div>
         </div>
         <div class="tabBody" id="tab-log">
@@ -155,10 +235,7 @@ readonly="readonly" placeholder="Здесь появится строка отп
             <div class="s" id="logFooter" style="margin:0;">—</div>
           </div>
         </div>
-        <div class="tabBody" id="tab-rules">
-          <div class="rulesBody" id="rulesBody"></div>
-        </div>
-      </div>
+</div>
     </div>
     <script type="module" src="js/main.js"></script>
   </body>

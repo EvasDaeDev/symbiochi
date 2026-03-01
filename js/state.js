@@ -1,7 +1,7 @@
 import { clamp, clamp01, key, nowSec, mulberry32, hash32, pick } from "./util.js";
 import { BAR_MAX } from "./world.js";
 import { DECAY, ACTION_GAIN } from "./mods/stats.js";
-import { EVO } from "./mods/evo.js";
+import { EVO, computeEvoSpeed, evoIntervalSecFromSpeed } from "./mods/evo.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { COIN, coinCellOffsets } from "./mods/coins.js";
 import { pushLog } from "./log.js";
@@ -11,6 +11,20 @@ import { applyMutation, applyShrinkDecay, reanchorModulesToPerimeter } from "./s
 import { normalizeFaceEye } from "./organs/eye.js";
 
 export const STORAGE_KEY = "symbiochi_v6_save";
+
+// Balance v2.2 inventory defaults
+export const INV_DEFAULTS = {
+  food: 100,
+  water: 100,
+  heal: 100,
+  coins: 10,
+};
+
+export const MOOD_MAX = 1.10;
+
+function clampMood(x){
+  return clamp(x, 0, MOOD_MAX);
+}
 
 export function loadSave(){
   try{
@@ -43,12 +57,20 @@ export function deleteSave(){
 
 export function migrateOrNew(){
   let state = loadSave();
-  if (!state){
-    state = newGame();
-    clampAppendageLengths(state);
-    saveGame(state);
-    return state;
-  }
+if (!state){
+  state = newGame();
+
+  // v2.2: inventory defaults must exist even for a fresh save
+  state.inv = state.inv || {};
+  if (!Number.isFinite(state.inv.food))  state.inv.food  = INV_DEFAULTS.food;
+  if (!Number.isFinite(state.inv.water)) state.inv.water = INV_DEFAULTS.water;
+  if (!Number.isFinite(state.inv.heal))  state.inv.heal  = INV_DEFAULTS.heal;
+  if (!Number.isFinite(state.inv.coins)) state.inv.coins = INV_DEFAULTS.coins;
+
+  clampAppendageLengths(state);
+  saveGame(state);
+  return state;
+}
 
   function normalizeOrg(org, fallbackSeed){
     if (!org) return;
@@ -169,6 +191,16 @@ normalizeFaceEye(org, bodyBlocks);
     if (!org.partHue) org.partHue = {};
     if (!org.partColor) org.partColor = {};
     if (!Number.isFinite(org.mutationDebt)) org.mutationDebt = 0;
+    // v2.2 economy: persist per-organism mutation-to-coin accumulator.
+    if (!Number.isFinite(org.coinEarnAcc)){
+      if (Number.isFinite(org._coinEarnAcc)) org.coinEarnAcc = org._coinEarnAcc;
+      else org.coinEarnAcc = 0;
+    }
+    if (org._coinEarnAcc !== undefined) delete org._coinEarnAcc;
+
+    // v2.2: smooth offline catch-up queue (events to play back on return).
+    if (!Number.isFinite(org.offlineCatchup)) org.offlineCatchup = 0;
+    if (!Number.isFinite(org.offlineCatchupAcc)) org.offlineCatchupAcc = 0;
 	if (!Number.isFinite(org.lastBudAt)) org.lastBudAt = -Infinity;
     if (org.growthTarget === undefined) org.growthTarget = null;
     if (org.growthTargetMode === undefined) org.growthTargetMode = null;
@@ -202,9 +234,38 @@ normalizeFaceEye(org, bodyBlocks);
   // Feeding / shaping system (carrots)
   if (!Array.isArray(state.carrots)) state.carrots = [];
   state.coins = Array.isArray(state.coins) ? state.coins : [];
-  state.inv = state.inv || { carrots: CARROT.startInventory, coins: COIN.startInventory };
-  if (!Number.isFinite(state.inv.carrots)) state.inv.carrots = CARROT.startInventory;
-  if (!Number.isFinite(state.inv.coins)) state.inv.coins = COIN.startInventory;
+  // Global inventory (shared for the whole save / colony)
+  // Legacy: state.inv.carrots may exist in old saves; keep it but stop relying on it.
+  state.inv = state.inv || {};
+  if (!Number.isFinite(state.inv.food)) state.inv.food = INV_DEFAULTS.food;
+  if (!Number.isFinite(state.inv.water)) state.inv.water = INV_DEFAULTS.water;
+  if (!Number.isFinite(state.inv.heal)) state.inv.heal = INV_DEFAULTS.heal;
+  if (!Number.isFinite(state.inv.coins)) state.inv.coins = INV_DEFAULTS.coins;
+
+  // Cosmetics sinks (v2.2): purely visual slots, no buffs.
+  // Cosmetics (v2.2 sinks). Global per-save collection, no buffs.
+  // Structure:
+  //   cosmetics = { equipped:{eyes,hat,jewel}, owned:{eyes:[],hat:[],jewel:[]} }
+  if (!state.cosmetics || typeof state.cosmetics !== "object") state.cosmetics = {};
+  // Migrate legacy flat slots {eyes,hat,jewel}
+  if (!("equipped" in state.cosmetics)){
+    const legacy = state.cosmetics;
+    state.cosmetics = {
+      equipped: { eyes: legacy.eyes ?? null, hat: legacy.hat ?? null, jewel: legacy.jewel ?? null },
+      owned:    { eyes: [], hat: [], jewel: [] },
+    };
+  }
+  if (!state.cosmetics.equipped || typeof state.cosmetics.equipped !== "object"){
+    state.cosmetics.equipped = { eyes: null, hat: null, jewel: null };
+  }
+  if (!state.cosmetics.owned || typeof state.cosmetics.owned !== "object"){
+    state.cosmetics.owned = { eyes: [], hat: [], jewel: [] };
+  }
+  for (const k of ["eyes","hat","jewel"]){
+    if (!Array.isArray(state.cosmetics.owned[k])) state.cosmetics.owned[k] = [];
+    if (!(k in state.cosmetics.equipped)) state.cosmetics.equipped[k] = null;
+  }
+
   state.carrotTick = state.carrotTick || { id: 0, used: 0 };
   state.coinTick = state.coinTick || { id: 0, used: 0 };
   if (state.growthTarget === undefined) state.growthTarget = null;
@@ -263,40 +324,30 @@ function clampAppendageLengths(org){
   }
 }
 
-function applyNonLinearDecay(value, ratePerSec, deltaSec){
-  if (!Number.isFinite(value) || !Number.isFinite(ratePerSec) || !Number.isFinite(deltaSec)) return 0;
-  if (value <= 0 || ratePerSec <= 0 || deltaSec <= 0) return Math.max(0, value || 0);
-  const threshold = 0.1;
-  const baseRate = ratePerSec;
-  if (value > threshold){
-    const timeToThreshold = (value - threshold) / baseRate;
-    if (deltaSec <= timeToThreshold){
-      return Math.max(0, value - baseRate * deltaSec);
-    }
-    const remaining = deltaSec - timeToThreshold;
-    const slowedRate = baseRate * 0.5;
-    return Math.max(0, threshold - slowedRate * remaining);
-  }
-  const slowedRate = baseRate * 0.5;
-  return Math.max(0, value - slowedRate * deltaSec);
-}
 
-const HUNGER_STOP = 0.10;   // 10% (normalized 0..1)
-const HUNGER_RESUME = 0.30; // 30%
+function applyNonLinearDecay(value, baseRate, deltaSec){
+  // New balance v2.2:
+  // >70%  : softer drain
+  // 70..40: faster drain
+  // <40%  : noticeably faster drain (to make stasis meaningful)
+  if (!Number.isFinite(value) || !Number.isFinite(baseRate) || !Number.isFinite(deltaSec) || deltaSec <= 0) return value;
 
-function minBarValue(org){
-  const b = org?.bars || {};
-  return Math.min(b.food ?? 0, b.clean ?? 0, b.hp ?? 0, b.mood ?? 0);
-}
-function updateHungerGate(org){
-  const minBar = minBarValue(org);
-  if (!org) return { minBar, paused: false };
-  if (!org.evoPausedByHunger){
-    if (minBar <= HUNGER_STOP) org.evoPausedByHunger = true;
+  const v = clamp(value, 0, BAR_MAX);
+
+  let k = 1.0;
+  if (v > 0.70){
+    k = 0.70; // soft
+  } else if (v > 0.40){
+    // ramp 1.10..1.35 as we go down from 70% to 40%
+    const t = clamp01((0.70 - v) / 0.30);
+    k = 1.10 + 0.25 * t;
   } else {
-    if (minBar >= HUNGER_RESUME) org.evoPausedByHunger = false;
+    // ramp 1.45..1.85 as we go down from 40% to 0%
+    const t = clamp01((0.40 - v) / 0.40);
+    k = 1.45 + 0.40 * t;
   }
-  return { minBar, paused: !!org.evoPausedByHunger };
+
+  return Math.max(0, v - baseRate * k * deltaSec);
 }
 
 // =====================
@@ -317,7 +368,7 @@ function applyDecayStep(org, dt){
 
   org.bars.food  = clamp(applyNonLinearDecay(org.bars.food,  DECAY.food_per_sec,  dt), 0, BAR_MAX);
   org.bars.clean = clamp(applyNonLinearDecay(org.bars.clean, DECAY.clean_per_sec, dt), 0, BAR_MAX);
-  org.bars.mood  = clamp(applyNonLinearDecay(org.bars.mood,  DECAY.mood_per_sec,  dt), 0, BAR_MAX);
+  org.bars.mood  = clamp(applyNonLinearDecay(org.bars.mood,  DECAY.mood_per_sec,  dt), 0, MOOD_MAX);
 
   const hungerFactor = clamp01(1 - org.bars.food);
   const dirtFactor   = clamp01(1 - org.bars.clean);
@@ -330,23 +381,7 @@ function applyDecayStep(org, dt){
   const neglectStress = stress > 0.25 ? stress : 0;
   org.care.neglect += dt * (0.00012 * neglectStress);
 
-  // Hunger gate (mutations pause/resume with hysteresis)
-  updateHungerGate(org);
-
-  // Shrink accumulator: if ANY bar reaches 0 and stays critical long enough,
-  // shrink every 60 minutes. We accumulate steps here and apply the actual
-  // shrink AFTER catch-up.
-  if (minBarValue(org) <= 0){
-    org._offlineZeroAccSec = (org._offlineZeroAccSec || 0) + dt;
-    const stepSec = 60 * 60;
-    const steps = Math.floor(org._offlineZeroAccSec / stepSec);
-    if (steps > 0){
-      org._offlineZeroAccSec -= steps * stepSec;
-      org._offlineShrinks = (org._offlineShrinks || 0) + steps;
-    }
-  } else {
-    org._offlineZeroAccSec = 0;
-  }
+    // (v2.2) Evolution gating is handled by evoSpeed/stasis (see simulate).
 }
 
 function allBarsZero(org){
@@ -397,7 +432,7 @@ function updateVisualSaturation(org){
 }
 
 export function simulate(state, deltaSec){
-  if (deltaSec <= 0) return { deltaSec: 0, mutations: 0, budMutations: 0, eaten: 0, skipped: 0, dueSteps: 0 };
+  if (deltaSec <= 0) return { deltaSec: 0, mutations: 0, budMutations: 0, queuedCatchup: 0, eaten: 0, skipped: 0, dueSteps: 0 };
 
   const now = (state.lastSeen || nowSec()) + deltaSec;
   pruneExpiredCarrots(state, now);
@@ -415,6 +450,19 @@ export function simulate(state, deltaSec){
 
   // decay for parent + buds
   const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+
+  // Counters (must be initialized before any per-step processing).
+  let eaten = 0;
+
+  // v2.2: Baits are eaten BETWEEN mutations (not inside applyMutationEvent).
+  // Run this once per simulation step so close baits resolve quickly (≈1s delay).
+  const tNow = now;
+  for (const org of orgs){
+    if (!org) continue;
+    eaten += processCarrotsTick(state, org, tNow);
+  }
+  eaten += processCoinsTick(state, tNow);
+
 
   // Track block deltas for offline report.
   const countBlocks = (org)=>{
@@ -437,246 +485,284 @@ export function simulate(state, deltaSec){
     for (const org of orgs) applyDecayStep(org, deltaSec);
   }
 
-  const intervalSec = Math.max(1, Math.floor(Number(state.evoIntervalMin || 12) * 60));
-  const ANABIOSIS_DELAY_SEC = 45 * 60;
-  const ANABIOSIS_INTERVAL_SEC = 30 * 60;
-  const anabiosisIntervalSec = Math.max(intervalSec, ANABIOSIS_INTERVAL_SEC);
-  const offlineStart = state.lastSeen || nowSec();
-  const anabiosisStart = offlineStart + ANABIOSIS_DELAY_SEC;
+  
+  // =====================
+  // New balance v2.2: continuous per-organism evolution (no evoIntervalMin ticks)
+  // =====================
 
-  // feeding tick == mutation tick (reset per tick carrot limit)
-  const tickId = Math.floor(state.lastSeen / intervalSec);
-  if (!state.carrotTick) state.carrotTick = { id: tickId, used: 0 };
-  if (state.carrotTick.id !== tickId){
-    state.carrotTick.id = tickId;
+  // Ensure per-organism persistent fields exist.
+  for (const org of orgs){
+    if (!org) continue;
+    if (!Number.isFinite(org.evoProgress)) org.evoProgress = 0;
+    if (!Number.isFinite(org.mutationDebt)) org.mutationDebt = 0;
+    // v2.2 economy: persist per-organism mutation-to-coin accumulator.
+    if (!Number.isFinite(org.coinEarnAcc)){
+      if (Number.isFinite(org._coinEarnAcc)) org.coinEarnAcc = org._coinEarnAcc;
+      else org.coinEarnAcc = 0;
+    }
+    if (org._coinEarnAcc !== undefined) delete org._coinEarnAcc;
+
+    // v2.2: smooth offline catch-up queue (events to play back on return).
+    if (!Number.isFinite(org.offlineCatchup)) org.offlineCatchup = 0;
+    if (!Number.isFinite(org.offlineCatchupAcc)) org.offlineCatchupAcc = 0;
+    if (!Number.isFinite(org.coinEarnAcc)) org.coinEarnAcc = 0;
+    if (!Number.isFinite(org._shrinkAccSec)) org._shrinkAccSec = 0;
+  }
+
+  // Reset per-second "ticks" (legacy counters used by mods).
+  // NOTE: New balance removes hard per-tick placement limits; we keep these counters only for backward compatibility.
+  const secTickId = Math.floor((state.lastSeen || nowSec()) + deltaSec);
+  if (!state.carrotTick) state.carrotTick = { id: secTickId, used: 0 };
+  if (state.carrotTick.id !== secTickId){
+    state.carrotTick.id = secTickId;
     state.carrotTick.used = 0;
   }
-  if (!state.coinTick) state.coinTick = { id: tickId, used: 0 };
-  if (state.coinTick.id !== tickId){
-    state.coinTick.id = tickId;
+  if (!state.coinTick) state.coinTick = { id: secTickId, used: 0 };
+  if (state.coinTick.id !== secTickId){
+    state.coinTick.id = secTickId;
     state.coinTick.used = 0;
   }
 
   let mutations = 0;
   let budMutations = 0;
-  let eaten = 0;
+  let queuedCatchup = 0; // v2.2 offline catch-up events queued for smooth playback
+  // `eaten` is initialized earlier (before bait processing) to avoid TDZ issues.
   let skipped = 0;
   let dueSteps = 0;
   let simShrinks = 0;
 
-  // OFFLINE: apply instantly (no debt)
-  const MAX_OFFLINE_STEPS = 666;
-  const normalWindowEnd = Math.min(now, anabiosisStart);
-
-  const applySteps = (org, windowEnd, stepIntervalSec, onTick)=>{
-    if (windowEnd <= (org.lastMutationAt || 0)) return { due: 0, applied: 0, skipped: 0 };
-    const due = Math.floor((windowEnd - (org.lastMutationAt || 0)) / stepIntervalSec);
-    if (due <= 0) return { due: 0, applied: 0, skipped: 0 };
-    const applied = Math.min(due, org._remainingOfflineSteps ?? MAX_OFFLINE_STEPS);
-
-    for (let k=0; k<applied; k++){
-      const nextT = (org.lastMutationAt || 0) + stepIntervalSec;
-      if (isOffline){
-        const cursor = Number.isFinite(org._decayCursor) ? org._decayCursor : (org.lastSeen || offlineStart);
-        const dt = Math.max(0, nextT - cursor);
-        if (dt > 0) applyDecayStep(org, dt);
-        org._decayCursor = nextT;
-      }
-      org.lastMutationAt = nextT;
-      onTick(org);
-    }
-
-    org._remainingOfflineSteps = (org._remainingOfflineSteps ?? MAX_OFFLINE_STEPS) - applied;
-
-    let skippedLocal = 0;
-    if (due > applied){
-      skippedLocal = due - applied;
-      const nextT = (org.lastMutationAt || 0) + skippedLocal * stepIntervalSec;
-      if (isOffline){
-        const cursor = Number.isFinite(org._decayCursor) ? org._decayCursor : (org.lastSeen || offlineStart);
-        const dt = Math.max(0, nextT - cursor);
-        if (dt > 0) applyDecayStep(org, dt);
-        org._decayCursor = nextT;
-      }
-      org.lastMutationAt = nextT;
-    }
-    if (skippedLocal > 0){
-      org.mutationDebt = Math.max(0, (org.mutationDebt || 0) + skippedLocal);
-    }
-
-    return { due, applied, skipped: skippedLocal };
-  };
-
-  const maxPerTick = Math.max(1, Math.floor(EVO.maxMutationsPerTick || 2));
+  // Context shared between mutations in the same "moment bucket".
   const getMutationContext = (momentSec)=>{
-    const tickIndex = Math.floor(momentSec / intervalSec);
+    const base = Math.max(1, Number(EVO.baseIntervalSec) || 25);
+    const tickIndex = Math.floor(momentSec / base);
     if (!state._mutationContext || state._mutationContext.tickIndex !== tickIndex){
-   state._mutationContext = {
-     tickIndex,
-     appendageBudget: 200,
-     offlineSim: isOffline,       // весь оффлайн catch-up
-     offlineRollup: false         // выставим точечно на "накат"
-   };
+      state._mutationContext = {
+        tickIndex,
+        appendageBudget: 200,
+        offlineSim: isOffline,
+        offlineRollup: false,
+      };
+    } else {
+      // Update offline flag (can switch if the user returns mid-session).
+      state._mutationContext.offlineSim = isOffline;
     }
     return state._mutationContext;
   };
-  const runMutationTick = (org, momentSec)=>{
-    // Movement lock: if organism is moving (view-driven), do not mutate now.
-    // Accumulate mutation debt to apply after full stop.
-    if (org && org.__moving){
+
+const applyShrinkIfNeeded = (org, dt)=>{
+  if (!org || !(dt > 0)) return 0;
+  const b = org.bars || {};
+
+  // Усыхание только при глубоком истощении: хотя бы один core-бар <= 0
+  if ((b.food ?? 0) > 0 && (b.clean ?? 0) > 0 && (b.hp ?? 0) > 0) return 0;
+
+  org._shrinkAccSec = (org._shrinkAccSec || 0) + dt;
+
+  const stepSec = 10 * 60; // 1 шаг усыхания ~ каждые 10 минут
+  const steps = Math.floor(org._shrinkAccSec / stepSec);
+  if (steps <= 0) return 0;
+
+  // списываем ТОЛЬКО то, что реально превратилось в "шаги"
+  org._shrinkAccSec -= steps * stepSec;
+
+  // ВАЖНО: не применяем shrink тут.
+  // Только копим "долг" на применение в общем блоке ниже (с логом и учётом статистики).
+  org._offlineShrinks = (org._offlineShrinks || 0) + steps;
+
+  return steps; // вернём сколько шагов начислили (для отладки, если надо)
+};
+
+  const maxPerTick = Math.max(1, Math.floor(EVO.maxMutationsPerTick || 2));
+
+  const applyMutationEvent = (org, momentSec, isRollup)=>{
+    if (!org) return 0;
+
+    // Movement lock: do not mutate now, convert to debt.
+    if (org.__moving){
       org.mutationDebt = Math.max(0, (org.mutationDebt || 0) + 1);
       return 0;
     }
 
-    const gate = updateHungerGate(org);
-    if (gate.minBar <= 0){
-      // Zero is allowed; mutations are simply paused by the hunger gate.
-      // (Shrink is handled separately and only for offline all-zero.)
-    }
-    if (gate.paused) return 0;
+    // Gate by stasis (avg(food,clean,hp) <= sleepThreshold).
+    const speedInfo = computeEvoSpeed(org, orgs.length);
+    if (speedInfo.inStasis) return 0;
 
+    // Feeding/eating happens between mutations, so do it immediately BEFORE mutating (legacy behavior).
+
+    // Apply mutation (+ optional debt, up to maxPerTick).
     let applied = 0;
- const applyOnce = (isRollup = false)=>{
-   org._mutationContext = getMutationContext(momentSec);
-   // важно: выставлять ПОСЛЕ getMutationContext (он может вернуть новый объект)
-   org._mutationContext.offlineRollup = !!isRollup;
-   applyMutation(org, momentSec);
-   applied += 1;
- };
+    const applyOnce = (rollup)=>{
+      org._mutationContext = getMutationContext(momentSec);
+      org._mutationContext.offlineRollup = !!rollup;
+      org._mutationContext.offlineCatchup = !!org.__offlineCatchupNow;
+      applyMutation(org, momentSec);
+      applied += 1;
+
+      // Economy v2.2: every 14 mutations of each organism -> +1 coin.
+      org.coinEarnAcc = (org.coinEarnAcc || 0) + 1;
+      if (org.coinEarnAcc >= 14){
+        const n = Math.floor(org.coinEarnAcc / 14);
+        org.coinEarnAcc -= n * 14;
+        state.inv = state.inv || {};
+        state.inv.coins = (state.inv.coins || 0) + n;
+      }
+    };
 
     applyOnce(false);
 
     let debt = Number.isFinite(org.mutationDebt) ? org.mutationDebt : 0;
-    const remainingBudget = Math.max(0, maxPerTick - applied);
-    if (debt > 0 && remainingBudget > 0){
-      const extra = Math.min(debt, remainingBudget);
+    const budget = Math.max(0, maxPerTick - applied);
+    if (debt > 0 && budget > 0){
+      const extra = Math.min(debt, budget);
       for (let i = 0; i < extra; i++){
-        applyOnce(isOffline); // если сейчас оффлайн-симуляция — это именно "накат"
+        applyOnce(!!isRollup);
       }
-      debt -= extra;
-      org.mutationDebt = debt;
+      org.mutationDebt = Math.max(0, debt - extra);
     }
+
     return applied;
   };
 
-  state._remainingOfflineSteps = MAX_OFFLINE_STEPS;
-  {
-    if (isOffline && !Number.isFinite(state._decayCursor)) state._decayCursor = (state.lastSeen || offlineStart);
-    const normalResult = applySteps(state, normalWindowEnd, intervalSec, ()=>{
-      eaten += processCarrotsTick(state, state);
-      processCoins(state);
-      // Mutate only while standing; while moving we accumulate debt.
-      mutations += runMutationTick(state, state.lastMutationAt);
-      eatBudAppendage(state);
-    });
-    dueSteps += normalResult.due;
-    skipped += normalResult.skipped;
+  // Apply evolution for each organism.
+  const MAX_EVENTS_PER_ORG = 200; // safety cap (v2.2)
+  const CATCHUP_INTERVAL_SEC = 2.5; // v2.2: 'форсировано, но плавно' on return
+  const endT = now;
 
-    if (now > normalWindowEnd){
-      const slowResult = applySteps(state, now, anabiosisIntervalSec, ()=>{
-        eaten += processCarrotsTick(state, state);
-        const bars = state.bars || {};
-        const minBar = Math.min(
-          bars.food ?? 0,
-          bars.clean ?? 0,
-          bars.hp ?? 0,
-          bars.mood ?? 0
-        );
-        if (minBar <= 0){
-          applyShrinkDecay(state, state.lastMutationAt);
-        } else {
-          mutations += runMutationTick(state, state.lastMutationAt);
-        }
-        eatBudAppendage(state);
-      });
-      dueSteps += slowResult.due;
-      skipped += slowResult.skipped;
-    }
-
-    // Finish remaining offline decay to "now" (handles the remainder < tick interval
-    // or cases when there were 0 mutation ticks).
-    if (isOffline){
-      const cursor = Number.isFinite(state._decayCursor) ? state._decayCursor : (state.lastSeen || offlineStart);
-      const dt = Math.max(0, now - cursor);
-      if (dt > 0) applyDecayStep(state, dt);
-      state._decayCursor = now;
-    }
-  }
-  delete state._remainingOfflineSteps;
-  if (isOffline) delete state._decayCursor;
-
-  // buds: evolve instantly too
-  if (Array.isArray(state.buds)){
-    for (const bud of state.buds){
-      if (!bud) continue;
-      const budUpTo = (bud.lastSeen || state.lastSeen) + deltaSec;
-      bud.lastMutationAt = Number.isFinite(bud.lastMutationAt) ? bud.lastMutationAt : state.lastMutationAt;
-      bud._remainingOfflineSteps = MAX_OFFLINE_STEPS;
-      if (isOffline && !Number.isFinite(bud._decayCursor)) bud._decayCursor = (bud.lastSeen || offlineStart);
-      const budNormalEnd = Math.min(budUpTo, anabiosisStart);
-
-      applySteps(bud, budNormalEnd, intervalSec, ()=>{
-        eaten += processCarrotsTick(state, bud);
-        budMutations += runMutationTick(bud, bud.lastMutationAt);
-        eatParentAppendage(state, bud);
-      });
-      if (budUpTo > budNormalEnd){
-        applySteps(bud, budUpTo, anabiosisIntervalSec, ()=>{
-          eaten += processCarrotsTick(state, bud);
-          const bars = bud.bars || {};
-          const minBar = Math.min(
-            bars.food ?? 0,
-            bars.clean ?? 0,
-            bars.hp ?? 0,
-            bars.mood ?? 0
-          );
-          if (minBar <= 0){
-            applyShrinkDecay(bud, bud.lastMutationAt);
-          } else {
-            budMutations += runMutationTick(bud, bud.lastMutationAt);
-          }
-          eatParentAppendage(state, bud);
-        });
-      }
-      delete bud._remainingOfflineSteps;
-
-      if (isOffline){
-        const cursor = Number.isFinite(bud._decayCursor) ? bud._decayCursor : (bud.lastSeen || offlineStart);
-        const dt = Math.max(0, budUpTo - cursor);
-        if (dt > 0) applyDecayStep(bud, dt);
-        bud._decayCursor = budUpTo;
-      }
-
-      if (isOffline) delete bud._decayCursor;
-
-      // IMPORTANT: advance bud.lastSeen, иначе оффлайн будет считаться снова и снова
-      bud.lastSeen = budUpTo;
-    }
-  }
-
-  // Offline report: фиксируем количество блоков ПОСЛЕ роста/мутаций, но ДО усыхания.
-  // Это нужно, чтобы рост не «обнулялся» в отчёте, если затем началось усыхание.
-  const blocksAfterMutations = orgs.map(countBlocks);
-
-  // Apply accumulated shrink steps (every 20 min at all-zero bars).
-  // Done AFTER time fast-forward, so shrink does not interfere with per-tick mutation placement.
   for (const org of orgs){
-    const steps = (org && org._offlineShrinks) ? (org._offlineShrinks|0) : 0;
-    if (steps > 0){
-      let local = 0;
-      for (let i=0;i<steps;i++){
-        if (applyShrinkDecay(org, org.lastMutationAt || now)){
-          simShrinks++;
-          local++;
+    if (!org) continue;
+
+    if (!isOffline){
+      // ONLINE: one continuous update, then apply up to MAX_EVENTS_PER_ORG events.
+      const info = computeEvoSpeed(org, orgs.length);
+      org.evoSpeed = info.evoSpeed;
+      org.inStasis = info.inStasis;
+
+if (info.inStasis){
+  // No evolution; queue shrink debt if exhausted.
+  org.evoProgress = 0;
+  applyShrinkIfNeeded(org, deltaSec);
+  continue;
+}
+
+      // v2.2: smooth offline catch-up playback (1 event per ~2–3 sec).
+      if ((org.offlineCatchup|0) > 0){
+        org.offlineCatchupAcc = (org.offlineCatchupAcc || 0) + (deltaSec / CATCHUP_INTERVAL_SEC);
+        // Important: never apply multiple catch-up mutations in a single simulate() call.
+        // Otherwise a large deltaSec (tab resume / hiccup) creates a burst of mutations at the same timestamp.
+        let n = Math.min(org.offlineCatchup|0, Math.min(1, Math.floor(org.offlineCatchupAcc)));
+        if (n > 0){
+          org.offlineCatchupAcc -= n;
+          let appliedTotal = 0;
+          for (let i=0; i<n && appliedTotal < MAX_EVENTS_PER_ORG; i++){
+            org.__offlineCatchupNow = true;
+            const applied = applyMutationEvent(org, endT, false);
+            org.__offlineCatchupNow = false;
+            if (applied > 0){
+              appliedTotal += applied;
+              if (org === state) mutations += applied; else budMutations += applied;
+            } else {
+              skipped += 1;
+            }
+            org.offlineCatchup = Math.max(0, (org.offlineCatchup|0) - 1);
+          }
+        }
+        // While catch-up is pending, we do not accumulate normal evoProgress to avoid double-speed.
+        if ((org.offlineCatchup|0) > 0) continue;
+      }
+
+      const intervalSec = evoIntervalSecFromSpeed(info.evoSpeed);
+      if (!Number.isFinite(intervalSec) || intervalSec <= 0) continue;
+
+      org.evoProgress += deltaSec / intervalSec;
+
+      let events = 0;
+      while (org.evoProgress >= 1 && events < MAX_EVENTS_PER_ORG){
+        org.evoProgress -= 1;
+        dueSteps += 1;
+        const applied = applyMutationEvent(org, endT, false);
+        if (applied > 0){
+          events += applied;
+          if (org === state) mutations += applied; else budMutations += applied;
+        } else {
+          // If we couldn't apply (e.g., moving), count as skipped/debt already.
+          skipped += 1;
+          events += 1;
         }
       }
-      if (local > 0){
-        // Red log entry
-        pushLog(org, `Организм усыхает (-${local} блок.)`, "alert");
+    } else {
+      // OFFLINE: simulate along the timeline so evolution stops when stats run out.
+      let t = (state.lastSeen || nowSec());
+      let events = 0;
+
+      // Make sure cursor starts at the offline start for correct decay.
+      if (!Number.isFinite(org._decayCursor)) org._decayCursor = t;
+
+      while (t < endT && events < MAX_EVENTS_PER_ORG){
+        // Compute speed at the current moment.
+        const info = computeEvoSpeed(org, orgs.length);
+        org.evoSpeed = info.evoSpeed;
+        org.inStasis = info.inStasis;
+
+if (info.inStasis){
+  // Apply decay for the remaining time, then queue shrink debt if needed.
+  const dt = Math.max(0, endT - t);
+  if (dt > 0) applyDecayStep(org, dt);
+  applyShrinkIfNeeded(org, dt);
+  t = endT;
+  break;
+}
+
+        const intervalSec = evoIntervalSecFromSpeed(info.evoSpeed);
+        if (!Number.isFinite(intervalSec) || intervalSec <= 0) break;
+
+        // Advance to next event boundary (or to end).
+        const nextT = Math.min(endT, t + intervalSec);
+        const dt = Math.max(0, nextT - t);
+        if (dt > 0) applyDecayStep(org, dt);
+        t = nextT;
+        org._decayCursor = t;
+
+        if (t >= endT) break;
+
+        // Queue one catch-up event (do not apply instantly; play back smoothly after return).
+        dueSteps += 1;
+        org.offlineCatchup = Math.min(MAX_EVENTS_PER_ORG, (org.offlineCatchup|0) + 1);
+        queuedCatchup += 1;
+        events += 1;
       }
-      org._offlineShrinks = 0;
+
+      // If we hit the cap, we intentionally do NOT accumulate debt; v2.2 wants safety cap.
+      if (events >= MAX_EVENTS_PER_ORG) skipped += 0;
     }
   }
+
+  // Keep compatibility fields used by old UI/offline summary.
+  state.lastMutationAt = now;
+const blocksAfterMutations = orgs.map(countBlocks);
+
+// Apply accumulated shrink steps.
+// Done AFTER time fast-forward, so shrink does not interfere with per-tick mutation placement.
+for (const org of orgs){
+  const pending = (org && org._offlineShrinks) ? (org._offlineShrinks|0) : 0;
+  if (pending <= 0) continue;
+
+  // Safety cap per simulate() call (чтобы не вырубить огромным dt)
+  const cap = Math.min(pending, 20);
+
+  let applied = 0;
+  for (let i = 0; i < cap; i++){
+    if (applyShrinkDecay(org, org.lastMutationAt || now)) applied++;
+    else break;
+  }
+
+  if (applied > 0){
+    simShrinks += applied;
+    pushLog(org, `Организм усыхает (-${applied} блок.)`, "alert");
+  }
+
+  // ВАЖНО: остаток НЕ сжигаем — оставляем долг на следующий simulate()
+  org._offlineShrinks = Math.max(0, pending - applied);
+}
 
   // Repair invariant after offline catch-up: no floating modules disconnected from body.
   // Offline fast-forward can produce detached appendages due to skipped intermediate growth/placement.
@@ -700,9 +786,6 @@ export function simulate(state, deltaSec){
     }
   }
 
-
-  // Coins: check collisions with placed coins and apply mood bonus.
-  processCoins(state);
 
   // Reward: +1 coin when any organism reaches perfect (140%) food+clean+hp.
   rewardCoinForMaxedBars(state);
@@ -734,7 +817,7 @@ export function simulate(state, deltaSec){
   }
 
 
-  return { deltaSec, mutations, budMutations, eaten, skipped, dueSteps, shrinks: simShrinks, grownBlocks, shrunkBlocks };
+  return { deltaSec, mutations, budMutations, queuedCatchup, eaten, skipped, dueSteps, shrinks: simShrinks, grownBlocks, shrunkBlocks };
 }
 
 function reportCriticalState(org, momentSec){
@@ -1035,7 +1118,7 @@ function coreHitsCoin(org, coin){
   const x1 = x0 + w - 1;
   const y1 = y0 + h - 1;
 
-  const R = 1; // радиус в блоках
+  const R = 4; // радиус в блоках (v2.2: "пересечение телом" ~4 блока)
 
   // Быстрая проверка: если клетка тела попадает в расширенный AABB (прямоугольник монетки + R)
   // — считаем, что "пересечение телом" произошло.
@@ -1057,13 +1140,14 @@ function addMoodFromCoin(state, org, coin){
   const baseSeed = (state.seed || 1) >>> 0;
   const prng = mulberry32(hash32(baseSeed, 7777, (coin.id || 0) >>> 0, (coin.x|0), (coin.y|0), (org.__orgTag ?? -1) + 10));
   const add = COIN.moodMin + prng() * (COIN.moodMax - COIN.moodMin);
-  org.bars.mood = clamp(org.bars.mood + add, 0, BAR_MAX);
+  org.bars.mood = clamp(org.bars.mood + add, 0, MOOD_MAX);
   pushLog(org, `Монетка: +${Math.round(add*100)}% к настроению.`, "care");
 }
 
-function processCoins(state){
+function processCoinsTick(state, tNow){
   if (!Array.isArray(state.coins) || !state.coins.length) return 0;
   const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
+  const nowT = Number.isFinite(tNow) ? tNow : nowSec();
 
   let eaten = 0;
   const remaining = [];
@@ -1077,7 +1161,25 @@ function processCoins(state){
         break;
       }
     }
-    if (hitOrg){
+
+    if (!hitOrg){
+      // Lost contact: reset timer.
+      coin._eatAt = null;
+      coin._eatBy = null;
+      remaining.push(coin);
+      continue;
+    }
+
+    const eaterKey = (hitOrg.__orgTag ?? (hitOrg === state ? 0 : 1)) | 0;
+
+    if (coin._eatBy !== eaterKey || !Number.isFinite(coin._eatAt)){
+      coin._eatBy = eaterKey;
+      coin._eatAt = nowT + 1.0; // v2.2: 1s delay before "eat"
+      remaining.push(coin);
+      continue;
+    }
+
+    if (nowT >= coin._eatAt){
       addMoodFromCoin(state, hitOrg, coin);
       eaten++;
     } else {
@@ -1087,6 +1189,7 @@ function processCoins(state){
   state.coins = remaining;
   return eaten;
 }
+
 
 // Player gets +1 coin each time ANY organism reaches 140% for (food, clean, hp).
 // Reward triggers only on the transition into the "all max" state.
@@ -1101,7 +1204,14 @@ function rewardCoinForMaxedBars(rootState){
     if (allMax){
       if (!org._coinRewardedMax){
         org._coinRewardedMax = true;
-        rootState.inv = rootState.inv || { carrots: CARROT.startInventory, coins: COIN.startInventory };
+                rootState.inv = rootState.inv || {};
+
+        // IMPORTANT: inventory must be fully initialized (otherwise feeding/wash/heal become locked)
+        if (!Number.isFinite(rootState.inv.food))  rootState.inv.food  = INV_DEFAULTS.food;
+        if (!Number.isFinite(rootState.inv.water)) rootState.inv.water = INV_DEFAULTS.water;
+        if (!Number.isFinite(rootState.inv.heal))  rootState.inv.heal  = INV_DEFAULTS.heal;
+        if (!Number.isFinite(rootState.inv.coins)) rootState.inv.coins = INV_DEFAULTS.coins;
+
         rootState.inv.coins = Math.max(0, (rootState.inv.coins|0) + 1);
         gained += 1;
 
@@ -1126,13 +1236,15 @@ function carrotCells(car){
   return out;
 }
 
-function processCarrotsTick(state, org = state){
+function processCarrotsTick(state, org = state, tNow = null){
   if (!Array.isArray(state.carrots) || !state.carrots.length){
     org.growthTarget = null;
     org.growthTargetMode = null;
     org.growthTargetPower = 0;
     return 0;
   }
+  const nowT = Number.isFinite(tNow) ? tNow : nowSec();
+
 
   let eaten = 0;
   const bodyOcc = new Set();
@@ -1209,11 +1321,24 @@ function processCarrotsTick(state, org = state){
       if (hits >= 2) break;
     }
     if (hits >= 2){
-      org.bars.food = clamp(org.bars.food + 0.22, 0, BAR_MAX);
-      org.bars.mood = clamp(org.bars.mood + 0.06, 0, BAR_MAX);
-      pushLog(org, `Кормление: морковка съедена.`, "care");
-      eaten++;
+      const eaterKey = (org.__orgTag ?? (org === state ? 0 : 1)) | 0;
+
+      if (car._eatBy !== eaterKey || !Number.isFinite(car._eatAt)){
+        car._eatBy = eaterKey;
+        car._eatAt = nowT + 1.0; // v2.2: 1s delay before "eat"
+        remaining.push(car);
+      } else if (nowT >= car._eatAt){
+        org.bars.food = clamp(org.bars.food + 0.22, 0, BAR_MAX);
+        org.bars.mood = clamp(org.bars.mood + 0.06, 0, MOOD_MAX);
+        pushLog(org, `Кормление: морковка съедена.`, "care");
+        eaten++;
+      } else {
+        remaining.push(car);
+      }
     } else {
+      // Lost contact: reset timer.
+      car._eatAt = null;
+      car._eatBy = null;
       remaining.push(car);
     }
   }
@@ -1299,27 +1424,55 @@ function addBar(target, key, add){
   return after - before; // реальный прирост (0 если упёрлись в кап)
 }
 
-function applyCareAction(target, kind, rng, logFn, label){
+function applyCareAction(rootState, target, kind, rng, logFn, label){
   if (!target || !target.bars || !target.care) return 0;
   const add = addRandom01(rng);
 
+  // Inventory gating (balance v2.2): consumables are global for the save.
+  const inv = rootState?.inv;
+  const spend = (key, n)=>{
+    if (!inv) return true;
+
+    // If inventory exists but is not fully initialized, patch it in-place.
+    if (key === "food"  && !Number.isFinite(inv.food))  inv.food  = INV_DEFAULTS.food;
+    if (key === "water" && !Number.isFinite(inv.water)) inv.water = INV_DEFAULTS.water;
+    if (key === "heal"  && !Number.isFinite(inv.heal))  inv.heal  = INV_DEFAULTS.heal;
+
+    const cur = (inv[key] ?? 0) | 0;
+    if (cur < n) return false;
+    inv[key] = cur - n;
+    return true;
+  };
+
   if (kind === "feed"){
+    if (!spend("food", 1)){
+      logFn?.(`Кормление${label || ""}: нет еды.`);
+      return 0;
+    }
     const real = addBar(target, "food", add);
-    target.bars.mood = clamp(target.bars.mood + real * 0.35, 0, BAR_MAX);
+    target.bars.mood = clamp(target.bars.mood + real * 0.35, 0, MOOD_MAX);
     target.care.feed += 1.0;
     logFn?.(`Кормление${label || ""}: +${Math.round(real * 100)}% к еде.`);
     return real;
   }
   if (kind === "wash"){
+    if (!spend("water", 1)){
+      logFn?.(`Мытьё${label || ""}: нет воды.`);
+      return 0;
+    }
     const real = addBar(target, "clean", add);
-    target.bars.mood = clamp(target.bars.mood + real * 0.20, 0, BAR_MAX);
+    target.bars.mood = clamp(target.bars.mood + real * 0.20, 0, MOOD_MAX);
     target.care.wash += 1.0;
     logFn?.(`Мытьё${label || ""}: +${Math.round(real * 100)}% к чистоте.`);
     return real;
   }
   if (kind === "heal"){
+    if (!spend("heal", 1)){
+      logFn?.(`Лечение${label || ""}: нет лечения.`);
+      return 0;
+    }
     const real = addBar(target, "hp", add);
-    target.bars.mood = clamp(target.bars.mood + real * 0.15, 0, BAR_MAX);
+    target.bars.mood = clamp(target.bars.mood + real * 0.15, 0, MOOD_MAX);
     target.care.heal += 1.0;
     logFn?.(`Лечение${label || ""}: +${Math.round(real * 100)}% к HP.`);
     return real;
@@ -1330,13 +1483,7 @@ function applyCareAction(target, kind, rng, logFn, label){
 export function act(state, kind){
   const rng = mulberry32(hash32(state.seed, nowSec()));
 
-  applyCareAction(
-    state,
-    kind,
-    rng,
-    (msg)=>pushLog(state, msg, "care"),
-    ""
-  );
+  applyCareAction(state, state, kind, rng, (msg)=>pushLog(state, msg, "care"), "");
 
   // Update visual-only derived fields immediately so UI reacts without waiting for the next simulate tick.
   updateVisualSaturation(state);
@@ -1365,7 +1512,26 @@ export function actOn(rootState, org, kind){
     if (prevTag === undefined) delete target.__orgTag; else target.__orgTag = prevTag;
   };
 
-  applyCareAction(target, kind, rng, withTargetLog, label);
+  // Inventory cost (v2.2)
+  const inv = rootState.inv || (rootState.inv = {});
+  if (kind === "wash"){
+    inv.water = inv.water|0;
+    if (inv.water <= 0){
+      pushLog(rootState, `Нет воды для мытья.${label}`, "care");
+      return;
+    }
+    inv.water -= 1;
+  }
+  if (kind === "heal"){
+    inv.heal = inv.heal|0;
+    if (inv.heal <= 0){
+      pushLog(rootState, `Нет лечения.${label}`, "care");
+      return;
+    }
+    inv.heal -= 1;
+  }
+
+  applyCareAction(rootState, target, kind, rng, withTargetLog, label);
 
   // Immediate reward check (so UI actions can grant coins without waiting for the next simulate tick).
   rewardCoinForMaxedBars(rootState);

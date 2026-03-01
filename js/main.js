@@ -61,6 +61,12 @@ const els = {
   saveSettings: document.getElementById("saveSettings"),
   closeSettings: document.getElementById("closeSettings"),
 
+  cosmeticsBtn: document.getElementById("cosmeticsBtn"),
+  cosmeticsOverlay: document.getElementById("cosmeticsOverlay"),
+  closeCosmetics: document.getElementById("closeCosmetics"),
+  shopGrid: document.getElementById("shopGrid"),
+  equippedRow: document.getElementById("equippedRow"),
+
   hudName: document.getElementById("hudName"),
   hudStage: document.getElementById("hudStage"),
   hudMeta: document.getElementById("hudMeta"),
@@ -95,13 +101,21 @@ const els = {
 
   feed: document.getElementById("feed"),
   coin: document.getElementById("coin"),
+  move: document.getElementById("move"),
   wash: document.getElementById("wash"),
   heal: document.getElementById("heal"),
   seedInput: document.getElementById("seedInput"),
   planInfo: document.getElementById("planInfo"),
   lenPrio: document.getElementById("lenPrio"),
-  carrotsInput: document.getElementById("carrotsInput"),
-  coinsInput: document.getElementById("coinsInput"),
+  // legacy
+  carrotsValue: document.getElementById("carrotsValue"),
+  foodValue: document.getElementById('foodValue'),
+  waterValue: document.getElementById("waterValue"),
+  healValue: document.getElementById("healValue"),
+  exchangeFood: document.getElementById("exchangeFood"),
+  exchangeWater: document.getElementById("exchangeWater"),
+  exchangeHeal: document.getElementById("exchangeHeal"),
+  coinsValue: document.getElementById("coinsValue"),
   fxEnabled: document.getElementById("fxEnabled"),
   soundEnabled: document.getElementById("soundenabled"),  //звук
   newCreature: document.getElementById("newCreature"),
@@ -129,6 +143,7 @@ applyIconCssVars();
 const toast = makeToast();
 
 const view = {
+  els,
   state: null,
   cam: { ox: 0, oy: 0 },
   camTarget: null,
@@ -152,6 +167,8 @@ const view = {
   lastActive: null,
   _ro: null,
   flash: null,
+  // Lightweight, render-only icon FX (no state mutation).
+  fxIcons: [],
 };
 
 window.debugPlayTestHit = debugPlayTestHit;
@@ -315,9 +332,203 @@ function getLogLine(entry){
   return String(entry);
 }
 
+
+function snapshotBlocks(root){
+  const orgs = [root, ...(Array.isArray(root?.buds) ? root.buds : [])];
+  let body = 0, mods = 0;
+  for (const o of orgs){
+    body += (o?.body?.cells?.length || 0);
+    const ms = Array.isArray(o?.modules) ? o.modules : [];
+    for (const m of ms) mods += (m?.cells?.length || 0);
+  }
+  return { total: body + mods, body, mods };
+}
+
+function pickInt(obj, keys){
+  if (!obj) return null;
+  for (const k of keys){
+    const v = obj[k];
+    if (Number.isFinite(v)) return (v|0);
+  }
+  return null;
+}
+
+function normalizeSim(sim, beforeSnap, afterSnap){
+  const grownRaw = pickInt(sim, ["grownBlocks","grown","blocksGrown","addedBlocks","growBlocks"]);
+  const shrunkRaw = pickInt(sim, ["shrunkBlocks","shrunk","blocksShrunk","removedBlocks","shrinkBlocks"]);
+  const mutations = pickInt(sim, ["mutations","mutationCount","evoMutations"]) || 0;
+  const budMutations = pickInt(sim, ["budMutations","mutationsBuds","budEvos","budsMutations"]) || 0;
+
+  let grown = grownRaw;
+  let shrunk = shrunkRaw;
+
+  if (grown === null || shrunk === null){
+    const diff = (afterSnap?.total || 0) - (beforeSnap?.total || 0);
+    if (grown === null) grown = Math.max(0, diff|0);
+    if (shrunk === null) shrunk = Math.max(0, (-diff)|0);
+  }
+
+  const dueSteps = pickInt(sim, ["dueSteps","steps","evoSteps"]) ?? (mutations + budMutations);
+  const queuedCatchup = pickInt(sim, ["queuedCatchup","catchupQueued","offlineQueued","catchup"]) || 0;
+
+  return {
+    dueSteps: dueSteps|0,
+    queuedCatchup: queuedCatchup|0,
+    mutations: mutations|0,
+    budMutations: budMutations|0,
+    grownBlocks: grown|0,
+    shrunkBlocks: shrunk|0,
+  };
+}
+
+function pickupSnapshot(state){
+  const snap = {
+    carrots: new Set(),
+    coins: new Set(),
+    invCoins: ((state?.inv?.coins ?? 0) | 0),
+  };
+  if (Array.isArray(state?.carrots)){
+    for (const c of state.carrots){
+      const x = (c?.x|0), y = (c?.y|0);
+      snap.carrots.add(`${x},${y}`);
+    }
+  }
+  if (Array.isArray(state?.coins)){
+    for (const c of state.coins){
+      const x = (c?.x|0), y = (c?.y|0);
+      snap.coins.add(`${x},${y}`);
+    }
+  }
+  return snap;
+}
+
+function nearestOrgCoreToCell(state, x, y){
+  const orgs = [state, ...(Array.isArray(state?.buds) ? state.buds : [])];
+  let best = null;
+  let bestD = Infinity;
+  for (let i = 0; i < orgs.length; i++){
+    const org = orgs[i];
+    const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
+    const cx = core[0] || 0;
+    const cy = core[1] || 0;
+    const dx = cx - x;
+    const dy = cy - y;
+    const d2 = dx*dx + dy*dy;
+    if (d2 < bestD){
+      bestD = d2;
+      best = { orgIndex: i === 0 ? -1 : (i-1), wx: cx, wy: cy };
+    }
+  }
+  return best || { orgIndex: -1, wx: 0, wy: 0 };
+}
+
+function getHudCoinTargetPx(view){
+  const canvas = view?.els?.canvas;
+  if (!canvas) return { x: 18, y: 18 };
+  const cRect = canvas.getBoundingClientRect();
+
+  const coinEl =
+    document.querySelector("#invOverlay .invIco.invCoin") ||
+    document.querySelector("#invOverlay .invIco.coin") ||
+    document.querySelector("#invOverlay .coinIcon");
+
+  const targetEl = coinEl || view?.els?.hudMeta2 || document.getElementById("hudMeta2");
+  if (!targetEl) return { x: 18, y: 18 };
+
+  const r = targetEl.getBoundingClientRect();
+  const x = (r.left + r.width * 0.5) - cRect.left;
+  const y = (r.top + r.height * 0.5) - cRect.top;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return { x: 18, y: 18 };
+  return { x, y };
+}
+
+function pushIconFx(view, fx){
+  if (!view) return;
+  if (!Array.isArray(view.iconFx)) view.iconFx = [];
+  view.iconFx.push(fx);
+  if (view.iconFx.length > 120) view.iconFx.splice(0, view.iconFx.length - 120);
+}
+
+function spawnFloatIconAtCore(view, kind, core){
+  const now = Date.now() / 1000;
+  pushIconFx(view, {
+    type: "float",
+    kind,
+    wx: core.wx,
+    wy: core.wy,
+    org: core.orgIndex,
+    t0: now,
+    dur: 1.0,
+    risePx: 42,
+  });
+}
+
+function spawnFlyCoinToHud(view, core){
+  const now = Date.now() / 1000;
+  const tgt = getHudCoinTargetPx(view);
+  pushIconFx(view, {
+    type: "fly",
+    kind: "coinReward",
+    wx: core.wx,
+    wy: core.wy,
+    org: core.orgIndex,
+    t0: now,
+    dur: 1.5,
+    tx: tgt.x,
+    ty: tgt.y,
+  });
+}
+
+function applyPickupFxDiff(view, state, before, after){
+  // Detect "eaten" pickups by diffing carrot/coin sets and spawn a float icon
+  // over the nearest organism core. Also detect inventory coin gain and spawn
+  // a fly-to-HUD coin.
+  if (!view || !state || !before || !after) return;
+
+  // helper: which index in our convention (-1 parent, 0.. buds)
+  const whichNearest = (x, y)=>{
+    const c = nearestOrgCoreToCell(state, x, y);
+    return Number.isFinite(c?.orgIndex) ? c.orgIndex : -1;
+  };
+
+  // Carrot eaten
+  for (const k of before.carrots){
+    if (!after.carrots.has(k)){
+      const [xS, yS] = k.split(",");
+      const x = xS|0, y = yS|0;
+      spawnFx({ type: "float", icon: "carrot", which: whichNearest(x, y) });
+    }
+  }
+
+  // Coin eaten
+  for (const k of before.coins){
+    if (!after.coins.has(k)){
+      const [xS, yS] = k.split(",");
+      const x = xS|0, y = yS|0;
+      spawnFx({ type: "float", icon: "coin", which: whichNearest(x, y) });
+    }
+  }
+
+  // Coin reward / inventory increase (periodic reward, etc.)
+  const dCoins = (after.invCoins|0) - (before.invCoins|0);
+  if (dCoins > 0){
+    // Spawn one fly per coin gained; distribute across orgs for visual variety.
+    const orgs = [state, ...(Array.isArray(state?.buds) ? state.buds : [])];
+    const n = Math.max(1, orgs.length);
+    for (let i = 0; i < dCoins; i++){
+      const which = (i % n) === 0 ? -1 : ((i % n) - 1);
+      spawnFx({ type: "fly", icon: "coin", which, target: "hud" });
+    }
+  }
+}
+
+
 function autoTick(){
   if (!view.state) return;
   const state = view.state;
+
+  // Snapshot coin count to detect rewards from simulation.
+  const coinsBefore = (state?.inv?.coins|0) || 0;
 
   {
     const orgs = [state, ...(Array.isArray(state.buds) ? state.buds : [])];
@@ -339,27 +550,143 @@ function autoTick(){
   }
 
   const logBefore = (state.log || []).length;
+  const beforeSnap = snapshotBlocks(state);
+  const pickBefore = pickupSnapshot(state);
   const sim = simulate(state, delta);
+  const afterSnap = snapshotBlocks(state);
+  const pickAfter = pickupSnapshot(state);
+  applyPickupFxDiff(view, state, pickBefore, pickAfter);
+  view._pickupPrev = pickAfter;
+  const simN = normalizeSim(sim, beforeSnap, afterSnap);
   state.lastSeen = now;
   saveGame(state);
   rerenderAll(delta);
 
-  if (delta >= 15 && sim.dueSteps > 0){
-    showOfflineSummary(delta, sim);
+  if (delta >= 15 && ((simN.dueSteps|0) > 0 || (simN.grownBlocks|0) > 0 || (simN.shrunkBlocks|0) > 0 || (simN.mutations|0) > 0 || (simN.budMutations|0) > 0 || (simN.queuedCatchup|0) > 0)){
+    showOfflineSummary(delta, simN);
+  }
+
+  if (delta >= 15 && (simN.queuedCatchup|0) > 0){
+    toast(`Накоплено эволюций: <b>${simN.queuedCatchup|0}</b>. Прогресс догоняется…`);
   }
 
   const logAfter = (state.log || []).length;
   const addedLogs = Math.max(0, logAfter - logBefore);
+
+  // === Visual FX from simulation-side events (eating resources, coin rewards, etc.) ===
+  if (addedLogs > 0){
+    const newEntries = state.log.slice(logBefore);
+    for (const e of newEntries){
+      if (!e) continue;
+      const msg = String(e.msg ?? e.text ?? e.message ?? "");
+      const kind = String(e.kind ?? "");
+      const meta = (e && typeof e === "object") ? (e.meta || {}) : {};
+      const which = Number.isFinite(meta.org) ? meta.org : -1; // same convention as log flash
+
+      // Float icons for resource consumption.
+      if (/морковк/i.test(msg) && /(съел|съед|поглот|съеден)/i.test(msg)){
+        spawnFx({ type: "float", icon: "carrot", which });
+      }
+      if (/монет/i.test(msg) && /(съел|съед|поглот|съеден)/i.test(msg)){
+        spawnFx({ type: "float", icon: "coin", which });
+      }
+
+      // Coin reward: fly coin from organism core to top-left of field.
+      // We intentionally match several phrasings to be robust to copy changes.
+      if ((/\+\s*1\s*монет/i.test(msg) || /монет\w*\s*\+\s*1/i.test(msg) || /награда.*монет/i.test(msg) || /получил.*монет/i.test(msg))
+          && !/поставлен/i.test(msg)){
+        spawnFx({ type: "fly", icon: "coin", which, target: "hud" });
+      }
+
+      // Some implementations may encode it in kind rather than message.
+      if (/reward_coin|coin_reward|money_reward/i.test(kind)){
+        spawnFx({ type: "fly", icon: "coin", which, target: "hud" });
+      }
+    }
+  } else {
+    // Fallback: if coins increased without a log entry, still show at least one fly.
+    const coinsAfter = (state?.inv?.coins|0) || 0;
+    const diff = (coinsAfter - coinsBefore)|0;
+    if (diff > 0){
+      spawnFx({ type: "fly", icon: "coin", which: -1, target: "hud" });
+    }
+  }
+
   if (addedLogs > 0){
     const last = state.log?.[logAfter - 1];
     const line = shorten(getLogLine(last), 76);
     const extras = [];
-    if ((sim.mutations|0) > 1) extras.push(`×${sim.mutations|0}`);
+    if ((simN.mutations|0) > 1) extras.push(`×${simN.mutations|0}`);
     if (addedLogs > 1) extras.push(`+${addedLogs-1}`);
     const suffix = extras.length ? ` <span style="opacity:.7">${extras.join(" ")}</span>` : "";
     toast(`${escapeHtml(line)}${suffix}`);
-  } else if ((sim.mutations|0) > 0){
-    toast(`Эволюций: <b>${sim.mutations|0}</b>.`);
+  } else if ((simN.mutations|0) > 0){
+    toast(`Эволюций: <b>${simN.mutations|0}</b>.`);
+  }
+}
+
+// =====================
+// Render-only icon FX
+// =====================
+function spawnFx({ type, icon, which, target }={}){
+  if (!view) return;
+  view.fxIcons = Array.isArray(view.fxIcons) ? view.fxIcons : [];
+  const now = performance.now() / 1000;
+  const t = (type === "fly") ? 1.5 : 1.0;
+
+  // If we are flying into HUD, compute the destination in CANVAS pixel space.
+  // We target the HUD coin area (top-left overlay) so the coin visibly lands there.
+  let tx = null, ty = null;
+  if (type === "fly" && target === "hud"){
+    const dest = getHudCoinTargetCanvasPx();
+    if (dest){
+      tx = dest.x;
+      ty = dest.y;
+    }
+  }
+
+  view.fxIcons.push({
+    type: (type === "fly") ? "fly" : "float",
+    icon: icon || "coin",
+    which: Number.isFinite(which) ? which : -1,
+    target: target || null,
+    tx, ty,
+    t0: now,
+    dur: t,
+  });
+
+  // avoid unbounded growth
+  if (view.fxIcons.length > 120) view.fxIcons.splice(0, view.fxIcons.length - 120);
+}
+
+function getHudCoinTargetCanvasPx(){
+  try {
+    if (!els?.canvas) return null;
+    const canvasRect = els.canvas.getBoundingClientRect();
+
+    // Prefer an explicit coin icon in HUD if it exists.
+    // (In current UI we may only have a text bar; in that case use the whole HUD meta area.)
+    const explicit = document.querySelector("#invOverlay .invIco.invCoin")
+                  || document.querySelector("#invOverlay .invCoin")
+                  || null;
+    const el = explicit || els.hudMeta2 || document.getElementById("invOverlay");
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+
+    let x = (r.left + r.width * 0.5) - canvasRect.left;
+    let y = (r.top + r.height * 0.5) - canvasRect.top;
+
+    // Clamp into canvas bounds to avoid off-canvas targets on narrow screens.
+    const w = els.canvas.width || 0;
+    const h = els.canvas.height || 0;
+    if (w > 0 && h > 0){
+      x = Math.max(10, Math.min(w - 10, x));
+      y = Math.max(10, Math.min(h - 10, y));
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  } catch {
+    return null;
   }
 }
 
@@ -610,30 +937,27 @@ function tryPlayTapOrganAtPointer(e, view, gridEl, tolerancePx = 5) {
 
 function handleCarrotMode(view, wx, wy) {
   const s = view.state;
-  const inv = s.inv || (s.inv = { carrots: 0 });
-  if (inv.carrots <= 0) {
-    toast("Нет морковок.");
+  const inv = s.inv || (s.inv = {});
+  if ((inv.food|0) <= 0) {
+    toast("Нет еды.");
     return;
   }
 
-  const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
-  const tickId = Math.floor(nowSec() / intervalSec);
-  s.carrotTick = s.carrotTick || { id: tickId, used: 0 };
-  if (s.carrotTick.id !== tickId) { 
-    s.carrotTick.id = tickId; 
-    s.carrotTick.used = 0; 
-  }
-  if (s.carrotTick.used >= CARROT.maxPerTick) {
-    toast(`Лимит: ${CARROT.maxPerTick} морковки за тик.`, "bad");
+  const tNow = nowSec();
+  const cd = 0.5; // v2.2: cooldown placing objects
+  s._placeCooldownUntil = Number.isFinite(s._placeCooldownUntil) ? s._placeCooldownUntil : 0;
+  if (tNow < s._placeCooldownUntil){
+    toast("Слишком быстро. Подожди чуть-чуть…");
     return;
   }
+  s._placeCooldownUntil = tNow + cd;
 
   s.carrots = Array.isArray(s.carrots) ? s.carrots : [];
   s.carrots.push({ x: wx, y: wy, w: CARROT.w, h: CARROT.h, t: nowSec() });
   s.carrotTick.used++;
-  inv.carrots--;
+  inv.food = Math.max(0, (inv.food|0) - 1);
 
-  pushLog(s, `Морковка: брошена. Осталось: ${Math.max(0, inv.carrots|0)}.`, "carrot");
+  pushLog(s, `Еда: -1 (морковка). Осталось еды: ${Math.max(0, inv.food|0)}.`, "carrot");
   toast(`Морковка: (${wx},${wy}).`);
   
   saveGame(s);
@@ -642,30 +966,27 @@ function handleCarrotMode(view, wx, wy) {
 
 function handleCoinMode(view, wx, wy) {
   const s = view.state;
-  const inv = s.inv || (s.inv = { carrots: 0, coins: 0 });
+  const inv = s.inv || (s.inv = {});
   if ((inv.coins|0) <= 0) {
     toast("Нет монеток.");
     return;
   }
 
-  const intervalSec = Math.max(1, Math.floor(Number(s.evoIntervalMin || 12) * 60));
-  const tickId = Math.floor(nowSec() / intervalSec);
-  s.coinTick = s.coinTick || { id: tickId, used: 0 };
-  if (s.coinTick.id !== tickId) { 
-    s.coinTick.id = tickId; 
-    s.coinTick.used = 0; 
-  }
-  if (s.coinTick.used >= COIN.maxPerTick) {
-    toast(`Лимит: ${COIN.maxPerTick} монетки за тик.`, "bad");
+  const tNow = nowSec();
+  const cd = 0.5; // v2.2: cooldown placing objects
+  s._placeCooldownUntil = Number.isFinite(s._placeCooldownUntil) ? s._placeCooldownUntil : 0;
+  if (tNow < s._placeCooldownUntil){
+    toast("Слишком быстро. Подожди чуть-чуть…");
     return;
   }
+  s._placeCooldownUntil = tNow + cd;
 
   s.coins = Array.isArray(s.coins) ? s.coins : [];
   const t = nowSec();
   const id = ((t & 0xffff) << 16) ^ ((wx & 0xff) << 8) ^ (wy & 0xff);
   s.coins.push({ x: wx, y: wy, w: COIN.w, h: COIN.h, t, id });
   s.coinTick.used++;
-  inv.coins--;
+  inv.coins = Math.max(0, (inv.coins|0) - 1);
 
   const orgs = [s, ...(Array.isArray(s.buds) ? s.buds : [])];
   let bestId = 0;
@@ -697,6 +1018,28 @@ function handleCoinMode(view, wx, wy) {
   pushLog(s, `Монетка: поставлена. Осталось: ${Math.max(0, inv.coins|0)}.`, "coin");
   toast(`Монетка: (${wx},${wy}) → цель: ${bestId === 0 ? "родитель" : `почка ${bestId}`}.`);
   
+  saveGame(s);
+  rerenderAll(0);
+}
+
+
+function handleMoveMode(view, wx, wy){
+  const s = view.state;
+  const inv = s.inv || (s.inv = {});
+  if ((inv.coins|0) <= 0){
+    toast("Нужно 1 монета, чтобы отправить в движение.");
+    return;
+  }
+
+  // Determine active organism: -1/undefined -> parent; 0.. -> bud index
+  const a = s.active;
+  const orgId = (Number.isFinite(a) && a >= 0) ? (a + 1) : 0;
+
+  // Pay and move
+  inv.coins = Math.max(0, (inv.coins|0) - 1);
+  setMoveTarget(view, s, orgId, wx, wy, { stopTolBlocks: 10 });
+  pushLog(s, `Движение: -1 монета. Осталось: ${Math.max(0, inv.coins|0)}.`, "coin");
+  toast(`Движение → цель: ${orgId === 0 ? "родитель" : `почка ${orgId}`}.`);
   saveGame(s);
   rerenderAll(0);
 }
@@ -765,6 +1108,10 @@ function attachGridInteractions() {
     } 
     if (view.mode === 'coin') {
       handleCoinMode(view, wx, wy);
+      return;
+    }
+    if (view.mode === 'move') {
+      handleMoveMode(view, wx, wy);
       return;
     }
 
@@ -916,7 +1263,7 @@ async function startGame(){
   // hooks
   attachDebugPanel(view, els);
   attachSettings(view, els, toast);
-  attachActions(view, els, toast, rerenderAll);
+  attachActions(view, els, toast, rerenderAll, spawnFx);
   attachDragPan(els.grid, view);
   attachZoomWheel(els.grid, view);
   attachDisableDoubleTapZoom(els);
@@ -937,30 +1284,24 @@ async function startGame(){
 
 function showOfflineSummary(deltaSec, sim){
   let el = document.getElementById("offlineSummary");
-
   if (!el){
     el = document.createElement("div");
     el.id = "offlineSummary";
     el.className = "overlay offlineOverlay";
-
     el.innerHTML = `
       <div class="offlineCard modalAnim">
         <div class="offlineHeader">
           <div class="offlineTitle">ОФФЛАЙН СВОДКА</div>
           <div class="offlineSub">Пока тебя не было, симуляция продолжалась.</div>
         </div>
-
         <div class="offlineBody" id="offlineText"></div>
-
         <div class="offlineFooter">
           <button class="btn" id="offlineOk">OK</button>
         </div>
       </div>
     `;
-
     document.body.appendChild(el);
     requestAnimationFrame(()=> el.classList.add("show"));
-
     el.querySelector("#offlineOk").onclick = ()=>{
       el.classList.remove("show");
       setTimeout(()=> el.remove(), 200);
@@ -968,16 +1309,57 @@ function showOfflineSummary(deltaSec, sim){
   }
 
   const mins = Math.round(deltaSec/60);
+
+  // ФАКТИЧЕСКИ применённые мутации (могут быть 0 при catchup)
   const mutTotal = (sim.mutations|0) + (sim.budMutations|0);
+
+  // ДОЛГ / догоняем оффлайн
+  const queued = (sim.queuedCatchup|0);
+  const due = (sim.dueSteps|0);
+
   const grown = sim.grownBlocks|0;
   const shrunk = sim.shrunkBlocks|0;
 
-  el.querySelector("#offlineText").innerHTML = `
-    <div class="offlineRow neutral"><span class="label">Тебя не было</span><span class="value"><b>${mins} мин</b></span></div>
-    <div class="offlineRow neutral"><span class="label">Циклов эволюции</span><span class="value"><b>${mutTotal}</b></span></div>
-    <div class="offlineRow good"><span class="label">Появилось</span><span class="value"><b>+${grown}</b> блок.</span></div>
-    <div class="offlineRow bad"><span class="label">Усохло</span><span class="value"><b>-${shrunk}</b> блок.</span></div>
-  `;
+  // Статус организма (берём выбранный, если есть buds)
+  const root = view?.state;
+  let statusTxt = "—";
+  if (root){
+    const a = root.active;
+    const sel = (Number.isFinite(a) && a >= 0 && Array.isArray(root.buds) && a < root.buds.length)
+      ? root.buds[a]
+      : root;
+    const b = sel?.bars || {};
+    const food  = Number.isFinite(b.food)  ? b.food  : 1;
+    const clean = Number.isFinite(b.clean) ? b.clean : 1;
+    const hp    = Number.isFinite(b.hp)    ? b.hp    : 1;
+    const mood  = Number.isFinite(b.mood)  ? b.mood  : 1;
+    const minBar = Math.min(food, clean, hp, mood);
+
+    statusTxt =
+      (minBar <= 0.01) ? "усыхание" :
+      (minBar <= 0.10) ? "анабиоз" :
+      (minBar <= 0.15) ? "критично" :
+      (minBar <= 0.35) ? "плохо" :
+      (minBar <= 0.65) ? "норма" :
+      "хорошо";
+  }
+
+  // Собираем строки — и не показываем “нулевую” ерунду, если важное = queued/due
+  const rows = [];
+  rows.push(`<div class="offlineRow neutral"><span class="label">Тебя не было</span><span class="value"><b>${mins} мин</b></span></div>`);
+  rows.push(`<div class="offlineRow neutral"><span class="label">Статус</span><span class="value"><b>${statusTxt}</b></span></div>`);
+
+  if (queued > 0){
+    rows.push(`<div class="offlineRow good"><span class="label">Накоплено эволюций</span><span class="value"><b>${queued}</b></span></div>`);
+  } else if (due > 0){
+    rows.push(`<div class="offlineRow good"><span class="label">К догону (steps)</span><span class="value"><b>${due}</b></span></div>`);
+  }
+
+  rows.push(`<div class="offlineRow neutral"><span class="label">Применено мутаций</span><span class="value"><b>${mutTotal}</b></span></div>`);
+  rows.push(`<div class="offlineRow good"><span class="label">Появилось</span><span class="value"><b>+${grown}</b> блок.</span></div>`);
+  rows.push(`<div class="offlineRow bad"><span class="label">Усохло</span><span class="value"><b>-${shrunk}</b> блок.</span></div>`);
+
+  el.querySelector("#offlineText").innerHTML = rows.join("\n");
 }
 
 els.playBtn.addEventListener("click", startGame);

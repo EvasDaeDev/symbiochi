@@ -155,7 +155,35 @@ export function attachDebugPanel(view, els){
   });
 }
 
+const DEFAULT_INV = { food: 100, water: 300, heal: 300, coins: 10 };
+
+function ensureInventoryDefaults(state){
+  if (!state) return;
+  state.inv = (state.inv && typeof state.inv === "object") ? state.inv : {};
+  for (const [k, def] of Object.entries(DEFAULT_INV)){
+    const v = state.inv[k];
+    if (!Number.isFinite(v)) state.inv[k] = def;
+  }
+}
+
 export function attachSettings(view, els, toast){
+  // Some UI elements may be moved between panels; fall back to DOM lookups.
+  els = els || {};
+  els.foodValue ||= document.getElementById("foodValue");
+  els.waterValue ||= document.getElementById("waterValue");
+  els.healValue ||= document.getElementById("healValue");
+  els.coinsInput ||= document.getElementById("coinsInput");
+  els.exchangeFood ||= document.getElementById("exchangeFood");
+  els.exchangeWater ||= document.getElementById("exchangeWater");
+  els.exchangeHeal ||= document.getElementById("exchangeHeal");
+  els.cosmeticsBtn ||= document.getElementById("cosmeticsBtn");
+  els.cosmeticsOverlay ||= document.getElementById("cosmeticsOverlay");
+  els.shopGrid ||= document.getElementById("shopGrid");
+  els.equippedRow ||= document.getElementById("equippedRow");
+  els.equippedRowInv = document.getElementById("equippedRowInv");
+  els.rulesBtn ||= document.getElementById("rulesBtn");
+  els.rulesOverlay ||= document.getElementById("rulesOverlay");
+  els.closeRules ||= document.getElementById("closeRules");
  function getActiveOrg(state){
     // Selection model:
     // - state.active === -1 OR null/undefined -> parent
@@ -176,10 +204,48 @@ export function attachSettings(view, els, toast){
     return `eco: ${eco}\naxis: ${ax}\nsym: ${sym}\nwig: ${wig}`;
   }
 
+function refreshInventoryUI(state){
+  if (!state) return;
+
+  const inv = state.inv || {};
+
+  const food  = Number.isFinite(inv.food)  ? (inv.food  | 0) : 0;
+  const water = Number.isFinite(inv.water) ? (inv.water | 0) : 0;
+  const heal  = Number.isFinite(inv.heal)  ? (inv.heal  | 0) : 0;
+  const coins = Number.isFinite(inv.coins) ? (inv.coins | 0) : 0;
+
+  if (els.foodValue)  els.foodValue.textContent  = String(food);
+  if (els.waterValue) els.waterValue.textContent = String(water);
+  if (els.healValue)  els.healValue.textContent  = String(heal);
+  if (els.coinsValue) els.coinsValue.textContent = String(coins);
+
+  // Покупка ресурсов за монеты
+  const noCoins = coins < 1;
+  if (els.exchangeFood)  els.exchangeFood.disabled  = noCoins;
+  if (els.exchangeWater) els.exchangeWater.disabled = noCoins;
+  if (els.exchangeHeal)  els.exchangeHeal.disabled  = noCoins;
+
+  // Экипировка в инвентаре (если есть отдельный контейнер)
+  if (els.equippedRowInv){
+    const eq = state.cosmetics?.equipped || {};
+    const slotOrder = ["eyes", "hat", "jewel"];
+    els.equippedRowInv.innerHTML = "";
+
+    for (const slot of slotOrder){
+      const pill = document.createElement("div");
+      pill.className = "equipPill";
+      pill.textContent = `${slot}: ${eq[slot] || "—"}`;
+      els.equippedRowInv.appendChild(pill);
+    }
+  }
+}
+
   function openSettings(state){
     if (!state) return;
 
-    els.evoInput.value = String(state.evoIntervalMin || 12);
+    if (els.evoInput){
+  els.evoInput.value = String(state.evoIntervalMin || 12);
+}
     if (els.seedInput){
       els.seedInput.value = String(state.seed ?? 0);
       // informational only
@@ -188,8 +254,22 @@ export function attachSettings(view, els, toast){
     }
 
     if (els.carrotsInput){
+      // legacy
       const invC = state?.inv?.carrots;
       els.carrotsInput.value = String(isFinite(invC) ? (invC|0) : 0);
+    }
+
+    if (els.foodInput){
+      const v = state?.inv?.food;
+      els.foodInput.value = String(isFinite(v) ? (v|0) : 0);
+    }
+    if (els.waterInput){
+      const v = state?.inv?.water;
+      els.waterInput.value = String(isFinite(v) ? (v|0) : 0);
+    }
+    if (els.healInput){
+      const v = state?.inv?.heal;
+      els.healInput.value = String(isFinite(v) ? (v|0) : 0);
     }
 
     if (els.coinsInput){
@@ -222,11 +302,13 @@ export function attachSettings(view, els, toast){
   }
   function saveSettings(){
     if (!view.state) return;
-    const v = parseFloat(els.evoInput.value);
-    view.state.evoIntervalMin = clamp(isFinite(v) ? v : 12, 0.1, 240);
-	
-	if (!view.state.settings) view.state.settings = {};
-	view.state.settings.evoIntervalMin = view.state.evoIntervalMin;
+    if (els.evoInput){
+  const v = parseFloat(els.evoInput.value);
+  view.state.evoIntervalMin = clamp(isFinite(v) ? v : 12, 0.1, 240);
+
+  if (!view.state.settings) view.state.settings = {};
+  view.state.settings.evoIntervalMin = view.state.evoIntervalMin;
+}
 	
     if (els.lenPrio){
       const parsed = parseInt(els.lenPrio.value, 10);
@@ -249,13 +331,33 @@ export function attachSettings(view, els, toast){
       view.state.inv.carrots = Math.max(0, isFinite(c) ? c : 0);
     }
 
+    if (els.foodInput){
+      const v = parseInt(els.foodInput.value, 10);
+      if (!view.state.inv) view.state.inv = {};
+      view.state.inv.food = Math.max(0, isFinite(v) ? v : 0);
+    }
+    if (els.waterInput){
+      const v = parseInt(els.waterInput.value, 10);
+      if (!view.state.inv) view.state.inv = {};
+      view.state.inv.water = Math.max(0, isFinite(v) ? v : 0);
+    }
+    if (els.healInput){
+      const v = parseInt(els.healInput.value, 10);
+      if (!view.state.inv) view.state.inv = {};
+      view.state.inv.heal = Math.max(0, isFinite(v) ? v : 0);
+    }
+
     if (els.coinsInput){
       const k = parseInt(els.coinsInput.value, 10);
       if (!view.state.inv) view.state.inv = { carrots: 0, coins: 0 };
       view.state.inv.coins = Math.max(0, isFinite(k) ? k : 0);
     }
 
-    pushLog(view.state, `Настройки: интервал мутации = ${view.state.evoIntervalMin} мин.`, "system");
+    if (els.evoInput){
+  pushLog(view.state, `Настройки: (legacy) evoIntervalMin = ${view.state.evoIntervalMin} мин (в v2.2 темп задаётся evoSpeed).`, "system");
+} else {
+  pushLog(view.state, `Настройки сохранены.`, "system");
+}
     view.state.lastSeen = nowSec();
     saveGame(view.state);
     closeSettings();
@@ -273,9 +375,155 @@ export function attachSettings(view, els, toast){
   els.closeSettings.addEventListener("click", closeSettings);
   els.saveSettings.addEventListener("click", saveSettings);
   if (els.newCreature) els.newCreature.addEventListener("click", newCreature);
-  els.settingsOverlay.addEventListener("click", (e)=>{
-    if (e.target === els.settingsOverlay) closeSettings();
-  });
+
+// Exchanges (buy resources with coins; v2.2)
+const doExchange = (kind)=>{
+  if (!view.state) return;
+  view.state.inv = view.state.inv || {};
+  const inv = view.state.inv;
+
+  const coins = (inv.coins ?? 0) | 0;
+  if (coins < 1) return toast("Нужна 1 монета.");
+
+  if (kind === "food"){
+    inv.coins = coins - 1;
+    inv.food = ((inv.food ?? 0) | 0) + 10;
+    toast("Покупка: +10 еды.");
+  }
+  if (kind === "water"){
+    inv.coins = coins - 1;
+    inv.water = ((inv.water ?? 0) | 0) + 15;
+    toast("Покупка: +15 воды.");
+  }
+  if (kind === "heal"){
+    inv.coins = coins - 1;
+    inv.heal = ((inv.heal ?? 0) | 0) + 15;
+    toast("Покупка: +15 лечения.");
+  }
+
+  view.state.lastSeen = nowSec();
+  saveGame(view.state);
+  refreshInventoryUI(view.state); // ← важно: обновляем вкладку, а не settings
+};
+  if (els.exchangeFood) els.exchangeFood.addEventListener("click", ()=>doExchange("food"));
+  if (els.exchangeWater) els.exchangeWater.addEventListener("click", ()=>doExchange("water"));
+  if (els.exchangeHeal) els.exchangeHeal.addEventListener("click", ()=>doExchange("heal"));
+
+  // Cosmetics shop (sinks; visuals only)
+  const openCosmetics = ()=>{
+    if (!view.state) return;
+    ensureCosmetics(view.state);
+    if (!els.cosmeticsOverlay) return;
+    renderCosmeticsShop();
+    els.cosmeticsOverlay.style.display = "grid";
+  };
+  const closeCosmetics = ()=>{
+    if (!els.cosmeticsOverlay) return;
+    els.cosmeticsOverlay.style.display = "none";
+  };
+
+  const renderCosmeticsShop = ()=>{
+    if (!view.state) return;
+    ensureCosmetics(view.state);
+    const inv = view.state.inv || {};
+    const coins = (inv.coins|0);
+    if (els.shopGrid){
+      els.shopGrid.innerHTML = "";
+      for (const item of COSMETICS_CATALOG){
+        const owned = view.state.cosmetics.owned[item.slot]?.includes(item.id);
+        const equipped = view.state.cosmetics.equipped[item.slot] === item.id;
+
+        const el = document.createElement("div");
+        el.className = "shopItem";
+
+        const name = document.createElement("div");
+        name.className = "name";
+        name.textContent = item.name;
+        el.appendChild(name);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = `Слот: ${item.slot} · Цена: ${item.price} мон.`;
+        el.appendChild(meta);
+
+        const row = document.createElement("div");
+        row.className = "row";
+
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = owned ? (equipped ? "экипировано" : "куплено") : "в продаже";
+        row.appendChild(tag);
+
+        const btn = document.createElement("button");
+        btn.className = "smallbtn";
+        if (!owned){
+          btn.textContent = "КУПИТЬ";
+          btn.disabled = coins < item.price;
+          btn.addEventListener("click", ()=>{
+            const inv = view.state.inv = (view.state.inv || {});
+            const c = (inv.coins|0);
+            if (c < item.price) return toast("Не хватает монет.");
+            ensureCosmetics(view.state);
+            if (!view.state.cosmetics.owned[item.slot].includes(item.id)){
+              view.state.cosmetics.owned[item.slot].push(item.id);
+            }
+            inv.coins = c - item.price;
+            // Auto-equip first item in slot
+            if (!view.state.cosmetics.equipped[item.slot]) view.state.cosmetics.equipped[item.slot] = item.id;
+            view.state.lastSeen = nowSec();
+            saveGame(view.state);
+            renderCosmeticsShop();
+            toast(`Куплено: ${item.name}.`);
+          });
+        } else {
+          btn.textContent = equipped ? "СНЯТЬ" : "ЭКИП.";
+          btn.addEventListener("click", ()=>{
+            ensureCosmetics(view.state);
+            view.state.cosmetics.equipped[item.slot] = equipped ? null : item.id;
+            view.state.lastSeen = nowSec();
+            saveGame(view.state);
+            renderCosmeticsShop();
+            toast(equipped ? "Снято." : "Экипировано.");
+          });
+        }
+        row.appendChild(btn);
+
+        el.appendChild(row);
+        els.shopGrid.appendChild(el);
+      }
+    }
+
+    if (els.equippedRow){
+      const eq = view.state.cosmetics.equipped || {};
+      els.equippedRow.innerHTML = "";
+      for (const slot of ["eyes","hat","jewel"]){
+        const pill = document.createElement("div");
+        pill.className = "equipPill";
+        const v = eq[slot] ? COSMETICS_CATALOG.find(x=>x.id===eq[slot])?.name || eq[slot] : "—";
+        pill.textContent = `${slot}: ${v}`;
+        els.equippedRow.appendChild(pill);
+      }
+    }
+
+    // keep Inventory tab numbers in sync when shop changes coins/equipment
+    refreshInventoryUI(view.state);
+  };
+
+  if (els.cosmeticsBtn) els.cosmeticsBtn.addEventListener("click", openCosmetics);
+  if (els.closeCosmetics) els.closeCosmetics.addEventListener("click", closeCosmetics);
+  if (els.cosmeticsOverlay) els.cosmeticsOverlay.addEventListener("click", (e)=>{ if (e.target === els.cosmeticsOverlay) closeCosmetics(); });
+
+  els.settingsOverlay.addEventListener("click", (e)=>{ if (e.target === els.settingsOverlay) closeSettings(); });
+
+  // Rules overlay (opened from Settings)
+  const openRules = ()=>{ if (els.rulesOverlay) els.rulesOverlay.style.display = "grid"; };
+  const closeRules = ()=>{ if (els.rulesOverlay) els.rulesOverlay.style.display = "none"; };
+  if (els.rulesBtn) els.rulesBtn.addEventListener("click", openRules);
+  if (els.closeRules) els.closeRules.addEventListener("click", closeRules);
+  if (els.rulesOverlay) els.rulesOverlay.addEventListener("click", (e)=>{ if (e.target === els.rulesOverlay) closeRules(); });
+
+  // Initial sync for inventory fields (now live in Inventory tab)
+  refreshInventoryUI(view.state);
 }
 
 export function attachSymbiosisUI(view, els, toast){
@@ -412,10 +660,10 @@ export function attachInfoTabs(els){
     const tab = btn.dataset.tab;
     for (const b of root.querySelectorAll(".tabBtn")) b.classList.toggle("isActive", b === btn);
     const bodies = [
-      ["org", els.tabOrg],
-      ["legend", els.tabLegend],
-      ["log", els.tabLog],
-      ["rules", els.tabRules],
+      ["org", els.tabOrg || document.getElementById("tab-org")],
+      ["inv", els.tabInv || document.getElementById("tab-inv")],
+      ["legend", els.tabLegend || document.getElementById("tab-legend")],
+      ["log", els.tabLog || document.getElementById("tab-log")],
     ];
     for (const [name, el] of bodies){
       if (!el) continue;
@@ -500,7 +748,7 @@ export function attachCoinHudInput(view, els, rerenderAll){
   });
 }
 
-export function attachActions(view, els, toast, rerenderAll){
+export function attachActions(view, els, toast, rerenderAll, spawnFx){
   els.feed.addEventListener("click", ()=>{
     if (!view.state) return;
     // Feeding is now interactive: click "КОРМ" to enter carrot-throw mode,
@@ -527,15 +775,37 @@ export function attachActions(view, els, toast, rerenderAll){
       rerenderAll(0);
     });
   }
+  if (els.move){
+    els.move.addEventListener("click", ()=>{
+      if (!view.state) return;
+      view.mode = (view.mode === "move") ? null : "move";
+      // mutual exclusivity
+      if (view.mode === "move"){
+        els.feed.classList.remove("isActive");
+        if (els.coin) els.coin.classList.remove("isActive");
+      }
+      els.move.classList.toggle("isActive", view.mode === "move");
+      toast(view.mode === "move" ? "Кликни в поле, чтобы отправить выбранного в движение (−1 монета)." : "Движение: выкл.");
+      rerenderAll(0);
+    });
+  }
   els.wash.addEventListener("click", ()=>{
     if (!view.state) return;
     actOn(view.state, getActiveOrg(view.state), "wash");
+    // Visual feedback: float water icon above selected organism core.
+    if (typeof spawnFx === "function"){
+      spawnFx({ type: "float", icon: "wash", which: view.state.active });
+    }
     toast("Чисто.");
     rerenderAll(0);
   });
   els.heal.addEventListener("click", ()=>{
     if (!view.state) return;
     actOn(view.state, getActiveOrg(view.state), "heal");
+    // Visual feedback: float heal icon above selected organism core.
+    if (typeof spawnFx === "function"){
+      spawnFx({ type: "float", icon: "heal", which: view.state.active });
+    }
     toast("Полегчало.");
     rerenderAll(0);
   });
@@ -747,4 +1017,27 @@ export function attachDisableDoubleTapZoom(els){
     }
     lastTap = now;
   }, { passive: false });
+}
+
+// =====================
+// Cosmetics shop (v2.2 sinks; visuals only)
+// =====================
+const COSMETICS_CATALOG = [
+  { id: "eyes_neon",   slot: "eyes",  name: "Неоновые глазки",   price: 5,  tag: "eyes" },
+  { id: "eyes_glass",  slot: "eyes",  name: "Стеклянные глазки", price: 7,  tag: "eyes" },
+  { id: "hat_dialup",  slot: "hat",   name: "Шапка Dial‑Up",     price: 6,  tag: "hat"  },
+  { id: "hat_warm",    slot: "hat",   name: "Тёплая шапка",      price: 8,  tag: "hat"  },
+  { id: "jewel_chain", slot: "jewel", name: "Бижутерия: цепь",   price: 9,  tag: "jewel"},
+  { id: "jewel_pin",   slot: "jewel", name: "Брошь‑значок",      price: 4,  tag: "jewel"},
+];
+
+function ensureCosmetics(state){
+  if (!state) return;
+  if (!state.cosmetics || typeof state.cosmetics !== "object") state.cosmetics = {};
+  if (!state.cosmetics.equipped) state.cosmetics.equipped = { eyes: null, hat: null, jewel: null };
+  if (!state.cosmetics.owned) state.cosmetics.owned = { eyes: [], hat: [], jewel: [] };
+  for (const k of ["eyes","hat","jewel"]){
+    if (!Array.isArray(state.cosmetics.owned[k])) state.cosmetics.owned[k] = [];
+    if (!(k in state.cosmetics.equipped)) state.cosmetics.equipped[k] = null;
+  }
 }

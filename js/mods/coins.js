@@ -7,7 +7,7 @@ export const COIN = {
   h: 3,
 
   // Инвентарь по умолчанию
-  startInventory: 100,
+  startInventory: 10,
 
   // Лимит постановки за один цикл мутации
   maxPerTick: 3,

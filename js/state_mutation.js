@@ -119,14 +119,14 @@ export function applyShrinkDecay(state, momentSec){
     return true;
   }
 
-  if (state.body.cells.length <= 16) return false;
+  if (state.body.cells.length <= 1) return false;
   const coreKey = key(state.body.core[0], state.body.core[1]);
   const removable = state.body.cells.filter(([x, y]) => key(x, y) !== coreKey);
   if (!removable.length) return false;
   const pick = removable[Math.floor(rng() * removable.length)];
   const pickKey = key(pick[0], pick[1]);
   const remaining = state.body.cells.filter(([x, y]) => key(x, y) !== pickKey);
-  if (remaining.length < 16) return false;
+  if (remaining.length < 1) return false;
   state.body.cells = remaining;
   return true;
 }
@@ -647,7 +647,16 @@ function createBudFromModule(state, modIdx, rng, triesMult=1){
     seed: budSeed,
     createdAt: state.lastSeen,
     lastSeen: state.lastSeen,
-	mutationDebt: 0,
+    // v2.2 persistent evo fields (per-organism)
+    evoProgress: 0,
+    evoSpeed: 0,
+    inStasis: false,
+    mutationDebt: 0,
+    offlineCatchup: 0,
+    offlineCatchupAcc: 0,
+    coinEarnAcc: 0,
+    _shrinkAccSec: 0,
+    // legacy fields kept for compatibility only:
     lastMutationAt: state.lastSeen,
     evoIntervalMin: state.evoIntervalMin,
     name: pick(rng, ["Почка", "Отпрыск", "Доча", "Малыш", "Клон"]),
@@ -794,7 +803,11 @@ export function applyMutation(state, momentSec){
 
   // Late game thresholds
   const isGiant = M.bodyBlocks >= 800;
-  const isBigForBud = M.bodyBlocks >= 500;
+  const bigParentSize = Number.isFinite(BUD?.bigParentSize) ? BUD.bigParentSize : 1200;
+const isBigForBud = M.bodyBlocks >= bigParentSize;
+  // Early body stage (balance v2.2): guarantee body growth bias when the organism is small.
+  // Used for growthCount staging and the first-step body-growth guarantee.
+  const earlyBody = M.bodyBlocks < 250;
 
   const bodyGrowWeight = Number.isFinite(BODY.growWeight) ? BODY.growWeight : 0.32;
   const appendageGrowBase = Number.isFinite(BODY.appendageGrowWeight) ? BODY.appendageGrowWeight : 0.12;
@@ -942,14 +955,21 @@ const canBud =
   budOffCooldown &&
   pickBuddingModule(state, rng) !== -1;
   const hasLongModule = (state.modules || []).some((m) => (m?.cells?.length || 0) >= 60);
-  if (canBud){
-    // добавляем отдельный тип мутации
-    const budBase = 0.05 + 0.20*pf + 0.10*(M.mobilityScore);
-    // If parent is large enough, budding is easier/more successful in practice,
-    // so we allow it to happen more often (and we'll also try harder to place it).
-    const longBoost = hasLongModule ? 2.0 : 1.0;
-    weights.push(["bud", budBase * (isBigForBud ? 2.0 : 1.0) * longBoost]);
-  }
+if (canBud){
+  const budBase = 0.05 + 0.20*pf + 0.10*(M.mobilityScore);
+
+  const probMult = Number.isFinite(BUD?.probMult) ? BUD.probMult : 1.0;
+  const weightMult = Number.isFinite(BUD?.weightMult) ? BUD.weightMult : 1.0;
+
+  // “Большой родитель” = чаще + успешнее (и через вес, и через больше попыток размещения ниже)
+  const bigMult = isBigForBud
+    ? (Number.isFinite(BUD?.bigParentSuccessMult) ? BUD.bigParentSuccessMult : 2.0)
+    : 1.0;
+
+  const longBoost = hasLongModule ? 2.0 : 1.0;
+
+  weights.push(["bud", budBase * probMult * weightMult * bigMult * longBoost]);
+}
 
   // After 350+ blocks: меньше антенн/щупалец, но появляются новые мутации.
   if (isGiant){
@@ -990,24 +1010,59 @@ const canBud =
     });
   }
 
-  // === Late-body reweight (soft switch to organs) ===
-  // After ~600 body blocks, резко уменьшаем шанс роста тела и усиливаем органные мутации.
-  // Переход мягкий (600..780), чтобы не было ступеньки.
+  // === Late-body reweight (very mild) ===
+  // We still want organs to matter late-game, but body must keep growing.
+  // Keep the shift soft (down to ~0.60 body weight by 780).
   {
     const s = M.bodyBlocks;
-    const m = clamp01((s - 600) / 180); // 0..1
-    const kBodyLate = 1 - 0.92 * m;     // 1.00 -> ~0.08
-    const kOtherLate = 1 + 1.20 * m;    // 1.00 -> 2.20
+    const m = clamp01((s - 600) / 180); // 0..1 (600..780)
+    const kBodyLate = 1 - 0.40 * m;     // 1.00 -> 0.60
+    const kOtherLate = 1 + 0.20 * m;    // 1.00 -> 1.20
     weights = weights.map(([kk, ww]) => {
       if (kk === "grow_body") return [kk, ww * kBodyLate];
       return [kk, ww * kOtherLate];
     });
   }
 
-  // We want visible progress on every mutation cycle.
+  
+  // === Body growth floor after 800+ ===
+  // After 800 body blocks, at least 35% of "growth decisions" should go to body growth
+  // (vs appendage growth). Implemented as a weight floor on grow_body among growth-related actions.
+  if (M.bodyBlocks >= 800){
+    const idxBody = weights.findIndex(([k]) => k === "grow_body");
+    const idxApp  = weights.findIndex(([k]) => k === "grow_appendage");
+    if (idxBody >= 0 && idxApp >= 0){
+      const wBody = Math.max(0, weights[idxBody][1]);
+      const wApp  = Math.max(0, weights[idxApp][1]);
+      const denom = (wBody + wApp);
+      if (denom > 0){
+        const frac = wBody / denom;
+        const floor = 0.35;
+        if (frac < floor){
+          // Increase body weight to reach the floor while keeping appendage weight unchanged.
+          const targetWBody = (floor * wApp) / Math.max(1e-6, (1 - floor));
+          weights[idxBody][1] = Math.max(wBody, targetWBody);
+        }
+      } else {
+        // If both are zero, give body a small default weight so something happens.
+        weights[idxBody][1] = Math.max(weights[idxBody][1], 0.10);
+      }
+    }
+  }
+
+// We want visible progress on every mutation cycle.
   // Early game (<300 body blocks) should noticeably expand the core body.
-  const earlyBody = M.bodyBlocks < 300;
-  const growthCount = earlyBody ? (2 + Math.floor(rng() * 3)) : (1 + Math.floor(rng() * 4));
+  const sN = M.bodyBlocks;
+  // New balance v2.2: limit growth steps per mutation event by stage.
+  // <250: 2..3, 250..600: 1..2, >600: 1
+  let growthCount = 1;
+  if (sN < 250){
+    growthCount = 2 + Math.floor(rng() * 2); // 2..3
+  } else if (sN < 600){
+    growthCount = 1 + Math.floor(rng() * 2); // 1..2
+  } else {
+    growthCount = 1;
+  }
 
   // Helper: body growth with early-game acceleration + consistent logging.
   function growBodyWithEarlyBoost(reasonLabel){
@@ -1098,7 +1153,9 @@ const canBud =
       const budType = state.modules[idx]?.type || "tail";
 
       // Large parents get extra placement attempts (boosts "success" chance).
-      const ok = createBudFromModule(state, idx, rng, isBigForBud ? 2 : 1);
+      const bigSuccess = Number.isFinite(BUD?.bigParentSuccessMult) ? BUD.bigParentSuccessMult : 2;
+const triesMult = isBigForBud ? bigSuccess : 1;
+const ok = createBudFromModule(state, idx, rng, triesMult);
       if (ok){
         state.bars.food = clamp01(state.bars.food - 0.20);
         state.bars.hp = clamp01(state.bars.hp - 0.20);

@@ -5,12 +5,13 @@ import { getOrgMotion } from "./moving.js";
 import { CARROT, carrotCellOffsets } from "./mods/carrots.js";
 import { COIN, coinCellOffsets } from "./mods/coins.js";
 import { getFxPipeline } from "./FX/pipeline.js";
+import { ICON_URLS } from "../content/icons.js";
 import { getOrganDef, organLabel } from "./organs/index.js";
 import { wormOffset as wormOffsetAnim } from "./organs/worm.js";
 import { tentacleOffset as tentacleOffsetAnim } from "./organs/tentacle.js";
 import { getStageName, getTotalBlocks } from "./creature.js";
 import { RULES } from "./rules-data.js";
-import { moodEmoji, stateEmoji, applyIconCssVars } from "../content/icons.js";
+import { moodEmoji, stateEmoji } from "../content/icons.js";
 import { computeEyeRadiusCells, getEyeShapeDefault } from "./organs/eye.js";
 
 /**
@@ -2153,8 +2154,231 @@ if (sel && sel.org){
     }
   }
 
+  // =====================
+  // Render-only icon FX (floating resource icons, coin-to-HUD)
+  // =====================
+  drawIconFx(ctx, state, view, cam);
+
   // Apply post-processing after the whole field is rendered.
   fx.end(canvas);
+}
+
+// ---------------------
+// Icon FX helpers
+// ---------------------
+function easeOutCubic(t){
+  t = clamp(t, 0, 1);
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function fxIconDataUrl(name){
+  // Accept a few semantic aliases from gameplay/UI code.
+  if (name === "wash") name = "drop";
+  if (name === "heal") name = "cross";
+  if (name === "clean") name = "drop";
+  if (name === "cure") name = "cross";
+
+  const v = ICON_URLS && ICON_URLS[name];
+  if (!v) return null;
+  const s = String(v).trim();
+
+  // ICON_URLS store CSS-ready values like: url("data:image/svg+xml,...")
+  // Canvas Image needs the raw data URI.
+  const m = s.match(/^url\((['"]?)(.+?)\1\)$/i);
+  if (m) return m[2];
+
+  // If someone passes a raw data-uri already, accept it.
+  if (s.startsWith("data:image/")) return s;
+
+  return null;
+}
+
+const _fxIconImgCache = new Map();
+
+function getFxIconImage(name){
+  if (_fxIconImgCache.has(name)) return _fxIconImgCache.get(name);
+  const url = fxIconDataUrl(name);
+  if (!url){
+    _fxIconImgCache.set(name, null);
+    return null;
+  }
+  const img = new Image();
+  img.decoding = "async";
+  img.src = url;
+  _fxIconImgCache.set(name, img);
+  return img;
+}
+
+function drawFxIcon(ctx, icon, x, y, size){
+  // Normalize aliases so both SVG and fallback paths behave consistently.
+  if (icon === "wash" || icon === "clean") icon = "drop";
+  if (icon === "heal" || icon === "cure") icon = "cross";
+
+  const s = Math.max(10, size || 18);
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Prefer project SVG icons (same source as UI buttons)
+  const img = icon ? getFxIconImage(icon) : null;
+  if (img && img.complete && img.naturalWidth > 0){
+    ctx.drawImage(img, -s/2, -s/2, s, s);
+    ctx.restore();
+    return;
+  }
+
+  // Fallback vector icons (in case SVG not yet decoded)
+  if (icon === "coin"){
+    ctx.beginPath();
+    ctx.arc(0, 0, s*0.55, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(251, 191, 36, 0.95)";
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, s*0.10);
+    ctx.strokeStyle = "rgba(161, 98, 7, 0.95)";
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, s*0.33, 0, Math.PI*2);
+    ctx.lineWidth = Math.max(1, s*0.08);
+    ctx.strokeStyle = "rgba(253, 230, 138, 0.95)";
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (icon === "carrot"){
+    // small carrot-ish fallback
+    ctx.beginPath();
+    ctx.moveTo(-s*0.15, -s*0.15);
+    ctx.lineTo(s*0.30, 0);
+    ctx.lineTo(-s*0.15, s*0.28);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(245, 158, 11, 0.95)";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-s*0.10, -s*0.28);
+    ctx.lineTo(-s*0.25, -s*0.10);
+    ctx.lineTo(-s*0.05, -s*0.05);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(34, 197, 94, 0.95)";
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (icon === "drop"){
+    ctx.beginPath();
+    ctx.moveTo(0, -s*0.55);
+    ctx.bezierCurveTo(s*0.35, -s*0.10, s*0.55, s*0.10, 0, s*0.55);
+    ctx.bezierCurveTo(-s*0.55, s*0.10, -s*0.35, -s*0.10, 0, -s*0.55);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(34, 211, 238, 0.92)";
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, s*0.08);
+    ctx.strokeStyle = "rgba(14, 165, 183, 0.92)";
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (icon === "cross"){
+    ctx.fillStyle = "rgba(239, 68, 68, 0.95)";
+    const w = s*0.20;
+    ctx.fillRect(-w/2, -s*0.50, w, s);
+    ctx.fillRect(-s*0.50, -w/2, s, w);
+    ctx.restore();
+    return;
+  }
+
+  // generic dot
+  ctx.beginPath();
+  ctx.arc(0, 0, s*0.20, 0, Math.PI*2);
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.fill();
+  ctx.restore();
+}
+
+function getOrgCoreScreen(state, view, cam, which){
+  const root = state;
+  const org = (Number.isFinite(which) && which >= 0 && Array.isArray(root.buds) && which < root.buds.length)
+    ? root.buds[which]
+    : root;
+  if (!org) return null;
+
+  // Convert selection model (which: -1 parent, 0.. buds) -> motion orgId (0 parent, 1.. buds)
+  const orgId = (Number.isFinite(which) && which >= 0) ? (which + 1) : 0;
+  const m = getOrgMotion(view, orgId);
+
+  const dx = Number.isFinite(m?.offsetX) ? m.offsetX : 0;
+  const dy = Number.isFinite(m?.offsetY) ? m.offsetY : 0;
+
+  const gait = m?.gait || null;
+  const gaitPhase = gait ? clamp((gait.t || 0) / Math.max(1e-6, (gait.dur || 0.25)), 0, 1) : 0;
+  const gaitDx = gait ? (gait.dx || 0) : 0;
+  const gaitDy = gait ? (gait.dy || 0) : 0;
+  const gaitDist = gait ? Math.max(1, (gait.dist || 1)) : 1;
+  const stepK = gait ? (gaitPhase * gaitDist) : 0;
+  const tdx = dx + gaitDx * stepK;
+  const tdy = dy + gaitDy * stepK;
+
+  const cam2 = { ox: (cam.ox || 0) - tdx, oy: (cam.oy || 0) - tdy };
+  const core = org?.body?.core || org?.body?.cells?.[0] || [0,0];
+  return worldToScreenPx(cam2, core[0] || 0, core[1] || 0, view);
+}
+
+function drawIconFx(ctx, state, view, cam){
+  const fx = Array.isArray(view?.fxIcons) ? view.fxIcons : null;
+  if (!fx || fx.length === 0) return;
+
+  const now = performance.now() / 1000;
+  const keep = [];
+
+  // Target: top-left of the playable field (inside canvas)
+  const hudTarget = { x: 18, y: 18 };
+
+  for (const it of fx){
+    if (!it) continue;
+    const t = (now - (it.t0 || 0)) / Math.max(1e-6, (it.dur || 1));
+    if (t >= 1){
+      continue;
+    }
+
+    const p = clamp(t, 0, 1);
+    const core = getOrgCoreScreen(state, view, cam, it.which);
+    if (!core) {
+      keep.push(it);
+      continue;
+    }
+
+    ctx.save();
+
+    if (it.type === "fly"){
+      const k = easeOutCubic(p);
+      const tx = (it.target === "hud" && Number.isFinite(it.tx)) ? it.tx : hudTarget.x;
+      const ty = (it.target === "hud" && Number.isFinite(it.ty)) ? it.ty : hudTarget.y;
+      const x = core.x + (tx - core.x) * k;
+      const y = core.y + (ty - core.y) * k;
+      const a = clamp(1 - Math.max(0, (p - 0.82) / 0.18), 0, 1);
+      ctx.globalAlpha = a;
+      drawFxIcon(ctx, it.icon, x, y, 18);
+    } else {
+      // float
+      const rise = 40; // px (requested 30–50)
+      const y = core.y - rise * p;
+      const a = 1 - p;
+      ctx.globalAlpha = a;
+      const scale = 1 + 0.08 * Math.sin(p * Math.PI);
+      ctx.save();
+      ctx.translate(core.x, y);
+      ctx.scale(scale, scale);
+      drawFxIcon(ctx, it.icon, 0, 0, 18);
+      ctx.restore();
+    }
+
+    ctx.restore();
+    keep.push(it);
+  }
+
+  // prune finished
+  view.fxIcons = keep;
 }
 
 
@@ -2195,9 +2419,9 @@ export function renderLegend(org, legendEl){
   const items = [
     { part:"body",    title:"Тело",    desc:"Основная биомасса." },
     { part:"core",     title:"Ядро",    desc:"Цвет отражает состояние организма." },
-    { part:"eye",     title:"Глаза",   desc:"Растут вместе с телом." },
+    { part:"eye",     title:"Глаза",   desc:"Они моргают." },
 
-    { part:"antenna",  title:organLabel("antenna"),  desc:"Чувствительный огран." },
+    { part:"antenna",  title:organLabel("antenna"),  desc:"Связь с космосом." },
     { part:"tentacle", title:organLabel("tentacle"), desc:"Мягкая, подвижная структура." },
     { part:"tail",     title:organLabel("tail"),     desc:"Чем лучше уход, тем дальше тянется." },
     { part:"worm",     title:organLabel("worm"),     desc:"Мягкое волнообразное движение." },
@@ -2262,81 +2486,5 @@ export function renderRules(rulesEl){
   `;
 }
 
-export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
-  const target = org || state;
-  const status = barStatus(target);
+export { renderHud } from "./render_hud.js";
 
-  // Legacy name/stage header may be absent in the new UI; keep null-safe.
-  if (els.hudName) els.hudName.textContent = target.name;
-  if (els.hudStage) els.hudStage.textContent = `• ${getStageName(target)}`;
-  // seed moved to settings
-
-  // Full stat row is no longer shown on the main screen; keep compatible if the node exists.
-  if (els.hudMeta){
-    els.hudMeta.innerHTML = `
-      <span class="pill stat ${barToneCls(target.bars.food)}" data-stat="food" title="сытость: ${barPct(target.bars.food)}%"><span class="ico"></span><span class="val">${barPct(target.bars.food)}%</span></span>
-      <span class="pill stat ${barToneCls(target.bars.clean)}" data-stat="clean" title="чистота: ${barPct(target.bars.clean)}%"><span class="ico"></span><span class="val">${barPct(target.bars.clean)}%</span></span>
-      <span class="pill stat ${barToneCls(target.bars.hp)}" data-stat="hp" title="здоровье: ${barPct(target.bars.hp)}%"><span class="ico"></span><span class="val">${barPct(target.bars.hp)}%</span></span>
-      <span class="pill stat ${barToneCls(target.bars.mood)}" data-stat="mood" title="настроение: ${barPct(target.bars.mood)}%"><span class="ico">${moodEmoji(target.bars.mood)}</span><span class="val">${barPct(target.bars.mood)}%</span></span>
-      <span class="pill stat ${status.cls}" data-stat="state" title="состояние: ${status.txt}"><span class="ico">${stateEmoji(status.txt)}</span></span>
-    `;
-  }
-
-  // second row: life time + carrots inventory (input is static in DOM)
-  if (els.lifePill){
-    const now = state.lastSeen || target.lastSeen || 0;
-    const age = Math.max(0, now - (target.createdAt || now));
-    els.lifePill.textContent = `Возраст: ${fmtAgeSeconds(age)}`;
-  }
-  if (els.carrotHudInput && document.activeElement !== els.carrotHudInput){
-    const v = state.inv?.carrots ?? 0;
-    els.carrotHudInput.value = String(Math.max(0, v|0));
-  }
-
-  if (els.coinHudInput && document.activeElement !== els.coinHudInput){
-    const v = state.inv?.coins ?? 0;
-    els.coinHudInput.value = String(Math.max(0, v|0));
-  }
-
-
-  // Third row: carrot feedback (target + mode + strength) and field count.
-  if (els.hudMeta2){
-    const fieldCount = Array.isArray(state.carrots) ? state.carrots.length : 0;
-    const inv = state.inv?.carrots ?? 0;
-    const coins = state.inv?.coins ?? 0;
-
-    const t = Array.isArray(target.growthTarget) ? target.growthTarget : null;
-    const mode = target.growthTargetMode;
-    const power = Number.isFinite(target.growthTargetPower) ? target.growthTargetPower : 0;
-
-    const modeTxt =
-      mode === "appendage" ? "отростки" :
-      mode === "body" ? "тело" :
-      mode === "mixed" ? "смеш" :
-      (fieldCount > 0 ? "ожид" : "—");
-
-    const tgtTxt = t ? `(${t[0]},${t[1]})` : (fieldCount > 0 ? "(выбор на тике)" : "—");
-    const pTxt = t ? `${Math.round(power*100)}%` : "";
-
-    els.hudMeta2.innerHTML = `
-	      <span class="invItem">
-    <span class="hudIco" style="--ico: var(--ico-coin)"></span>
-    <span class="invVal">:${Math.max(0, coins|0)}</span>
-  </span>
-      <span class="invItem">
-    <span class="hudIco" style="--ico: var(--ico-carrot)"></span>
-    <span class="invVal">:${Math.max(0, inv|0)}</span>
-  </span>
-
-      <span class="pill">режим: ${modeTxt}${pTxt ? ` • сила ${pTxt}` : ""}</span>
-    `;
-  }
-
-  // footer text is still set in main.js usually; keep compatible if present:
-  if (els.footerInfo){
-    const intervalSec = Math.max(1, Math.floor(state.evoIntervalMin * 60));
-    const until = Math.max(0, (state.lastMutationAt + intervalSec) - state.lastSeen);
-    els.footerInfo.textContent =
-      `Эволюция через ~${fmtAgeSeconds(until)} (интервал ${state.evoIntervalMin} мин) zoom:${zoom ?? ""}`;
-  }
-}

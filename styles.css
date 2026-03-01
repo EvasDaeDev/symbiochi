@@ -82,8 +82,8 @@ html, body {
 /* Левый верх внутри mainPanel: морковки/монетки/режим */
 .invOverlay{
   position: absolute;
-  top: 16px;
-  left: 12px;
+  top: 10px;
+  left: 10px;
   z-index: 6;
   display: grid;
   gap: 6px;
@@ -192,8 +192,8 @@ html, body {
 
 .lifeOverlay{
   position: absolute;
-  top: 16px;
-  right: 19px;
+  top: 10px;
+  right: 10px;
   z-index: 5;
   font-size: 12px;
   pointer-events: none;
@@ -594,6 +594,17 @@ html, body {
   font-size: 15px;
 }
 
+.statBox {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-height: 28px;
+  color: #e5e7eb;
+  display: flex;
+  align-items: center;
+}
+
 .logBody{
   padding: 8px 10px;
   overflow: auto;
@@ -689,11 +700,12 @@ html, body {
   max-width: min(240px, 90vw);
   opacity: 0;
   transform: translate(-50%, 8px);
-  transition: opacity .18s ease, transform .18s ease;
+  transition: opacity .22s ease, transform .22s ease;
   pointer-events: none;
   z-index: 50;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.hide { opacity: 0; transform: translate(-50%, -10px); }
 .toast b { color: var(--accent); }
 
 /* generic overlay (used by offline report) */
@@ -871,14 +883,26 @@ html, body {
 .modalBtns{
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
+  grid-template-areas:
+    "new rules"
+    "sym sym"
+    "cancel apply";
+  gap: 12px;
+  margin-top: 16px;
 }
 
-button:disabled{
-  opacity: .45;
-  cursor: not-allowed;
+#newCreature   { grid-area: new; }
+#rulesBtn      { grid-area: rules; }
+#symbiosisBtn  { grid-area: sym; }
+#closeSettings { grid-area: cancel; }
+#saveSettings  { grid-area: apply; }
+
+.modalBtns .smallbtn{
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+
 .symTabs{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -966,6 +990,7 @@ button:disabled{
   font-size:13px;
   color: var(--muted);
   line-height:1.3;
+  opacity: .8;
 }
 .logEntry.good .msg { color: #34d399; }     /* зелёный */
 .logEntry.warn .msg { color: #fbbf24; opacity: .75; } /* бледно-оранжевый */
@@ -1016,12 +1041,20 @@ button:disabled{
   }
 
   .tabBody{ overflow:auto; -webkit-overflow-scrolling: touch; }
+  
+/*  .lifeOverlay{
+  position: absolute;
+  top: 26px;
+}
+*/
 }
 
 .logEntry.bud .msg { color: #38bdf8; font-weight: 400; }
 .logEntry.bud .when { color: #38bdf8; }
 .modalBtns #symbiosisBtn{
   color: var(--muted);
+  justify-self: center;
+  width: 60%;
 }
 /* Organism list (info tab) */
 .orgList{
@@ -1110,8 +1143,10 @@ button:disabled{
 .invItem{
   display:inline-flex;
   align-items:center;
-  gap:6px;
-  margin-right:14px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  gap:0px;
+  margin-right:10px;
   color: rgba(255,255,255,0.75);
 }
 
@@ -1130,7 +1165,7 @@ button:disabled{
 /* === UI FONT OVERRIDE (должно быть в самом конце файла) === */
 
 @font-face{
-  font-family: "FixedsysExcelsior";
+  font-family: "Fixedsys-Excelsior";
   src: url("./fonts/fixedsys-excelsior.woff2") format("woff2");
   font-weight: normal;
   font-style: normal;
@@ -1138,11 +1173,205 @@ button:disabled{
 }
 
 :root{
-  --ui-font: "FixedsysExcelsior", monospace;
+  --ui-font: "Fixedsys-Excelsior", monospace;
 }
 
 html, body,
 button, input, select, textarea,
 .tabBtn, .tabBtn.isActive{
   font-family: var(--ui-font);
+}
+
+
+/* Cosmetics shop (v2.2 sinks) */
+#cosmeticsOverlay{
+  position: fixed;
+  inset: 0;
+  display: none;
+  place-items: center;
+  background: rgba(0,0,0,.55);
+  z-index: 40;
+}
+
+
+
+#rulesOverlay{
+  position: fixed;
+  inset: 0;
+  display: none;
+  place-items: center;
+  background: rgba(0,0,0,.55);
+  z-index: 145;
+}
+
+
+#rulesOverlay .rulesBody{
+  overflow-y: auto;
+  flex: 1 1 auto;
+  padding-right: 6px;    /* чтобы скролл не налезал на текст */
+}
+
+#cosmeticsOverlay .modal,
+#rulesOverlay .modal{
+  width: 80%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;  
+}
+
+.shopGrid{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 10px;
+}
+@media (min-width: 700px){
+  .shopGrid{ grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
+.shopItem{
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,.04);
+}
+.shopItem .name{ font-weight: 700; margin-bottom: 6px; }
+.shopItem .meta{ opacity: .75; font-size: 12px; margin-bottom: 8px; }
+.shopItem .row{ display:flex; gap:8px; align-items:center; justify-content:space-between; }
+.shopItem .tag{
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  opacity: .85;
+}
+.equippedRow{
+  display:flex;
+  gap:8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.equipPill{
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+}
+
+
+
+
+/* Inventory tab — clean layout, no inline styles */
+#tab-inv .invPanel{
+  text-align: left; /* вместо inline text-align */
+}
+
+#tab-inv .invGrid{
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* one inventory row: left value + right button */
+#tab-inv .invRow{
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+/* left part: icon + number */
+#tab-inv .invLeft{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 86px;
+}
+
+/* number */
+#tab-inv .invValue{
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,.9);
+}
+
+/* exchange button: keep in one line */
+#tab-inv .invExchangeBtn{
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  width: fit-content;
+  min-width: 0;           /* важно для grid */
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+#tab-inv .invExchangeBtn .invIco{
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+/* coins row: no button, just label on the right */
+#tab-inv .invRowCoins{
+  grid-template-columns: auto 1fr;
+}
+#tab-inv .invRightHint{
+  color: var(--muted);
+  font-size: 13px;
+  opacity: .8;
+  justify-self: end;
+}
+
+/* inventory action area */
+#tab-inv .invActions{
+  margin-top: 12px;
+}
+
+
+/* Label with icon instead of text */
+#tab-inv .invLabel{
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+  opacity: .95;
+}
+
+/* Icon base */
+#tab-inv .invIco{
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,.35));
+}
+
+
+/* Reuse existing UI icons (already defined in your CSS vars) */
+#tab-inv .invFood  { background-image: var(--ico-carrot); }
+#tab-inv .invWater { background-image: var(--ico-drop); }
+#tab-inv .invHeal  { background-image: var(--ico-cross); }
+
+/* Coin icon — same SVG vibe as in actCoin */
+#tab-inv .invCoin{
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Ccircle cx='7' cy='7' r='5.5' fill='%23fbbf24' stroke='%23a16207' stroke-width='1'/%3E%3Ccircle cx='7' cy='7' r='3.3' fill='none' stroke='%23fde68a' stroke-width='1'/%3E%3C/svg%3E");
+}
+
+#cosmeticsBtn{
+  width: fit-content;
+  align-items: center;
+}
+ 
+ .offlineCatch{
+  color: #22c55e;
+  font-weight: 600;
+  text-shadow: 0 0 6px rgba(34,197,94,.6);
+}
+
+.stasisWarn{
+  color: #ef4444;
+  font-weight: 700;
+  text-shadow: 0 0 6px rgba(239,68,68,.6);
 }
