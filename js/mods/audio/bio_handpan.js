@@ -8,7 +8,7 @@ import { triggerHandpanHit } from "./handpan_voice.js";
 // === Tuning ===
 export const MASTER_GAIN = 0.08;
 export const COMPRESSOR_THRESHOLD = -24;
-export const BASE_VELOCITY = 0.65;
+export const BASE_VELOCITY = 0.25;
 
 // Per-tap anti-spam (same module)
 const TAP_COOLDOWN_MS = 300;

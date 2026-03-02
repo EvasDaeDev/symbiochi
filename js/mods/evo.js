@@ -62,8 +62,12 @@ export function sizeFactor(bodyBlocks, S0 = EVO.sizeS0, p = EVO.sizeP){
   return 1 / (1 + Math.pow(s / s0, pp));
 }
 
-// Stat factor (food/clean/hp only). Mood does NOT affect speed.
-// Designed to be stable in 80..110% zone and smoothly degrade with low stats / imbalance.
+// Requirements:
+// - avg=1.0 => 1.0
+// - avg=0.5 => 0.25 (x4 slowdown)
+// - avg=0.3 => 1/7  (x7 slowdown)
+// - avg>1.0 => small penalty (no bonus above 100%)
+// - keep imbalance penalty (balanced stats keep it at 1.0)
 export function statFactor(bars, sleepThreshold = EVO.sleepThreshold){
   const f = Number(bars?.food ?? 0);
   const c = Number(bars?.clean ?? 0);
@@ -72,15 +76,26 @@ export function statFactor(bars, sleepThreshold = EVO.sleepThreshold){
   const avg = (f + c + h) / 3;
   const st = Math.max(0, Number(sleepThreshold) || 0);
 
+  // Stasis gate remains the same contract: below threshold => no evolution speed.
   if (!(avg > st)) return 0;
 
-  // Normalize "good zone": >= 0.80 -> 1.0 (no bonus past 1.10).
-  const good = 0.80;
-  const t = Math.max(0, Math.min(1, (avg - st) / Math.max(1e-6, (good - st))));
-  // Slight ease-in to avoid sharp jump near sleep threshold.
-  const eased = t * t * (3 - 2 * t); // smoothstep
+  // --- Base curve for <= 100% ---
+  // This curve is calibrated to hit:
+  // 0.5 -> 0.25 and 0.3 -> 1/7, while keeping 1.0 -> 1.0.
+  const a = Math.max(0, avg);
+  const base = Math.min(1, a);
 
-  // Penalize imbalance: if one bar is much lower than others, speed should drop.
+  let sf =
+    Math.pow(base, 0.673631) /
+    (1 + 3.015415 * (1 - base));
+
+  // --- Small penalty for > 100% (no bonus) ---
+  if (a > 1){
+    const overK = 0.35; // tweak 0.25..0.6 depending on how strong you want the "overcap tax"
+    sf *= 1 / (1 + overK * (a - 1));
+  }
+
+  // --- Imbalance penalty (same spirit as your current one) ---
   const v = [f, c, h];
   const mean = avg;
   let varSum = 0;
@@ -89,10 +104,12 @@ export function statFactor(bars, sleepThreshold = EVO.sleepThreshold){
     varSum += d * d;
   }
   const std = Math.sqrt(varSum / v.length); // 0..~1
-  const imbalance = Math.max(0, Math.min(1, std / 0.35)); // 0.35 chosen empirically
+  const imbalance = Math.max(0, Math.min(1, std / 0.35));
   const imbalanceFactor = 1 - 0.60 * imbalance; // up to -60%
 
-  return Math.max(0, Math.min(1, eased * imbalanceFactor));
+  sf *= imbalanceFactor;
+
+  return Math.max(0, Math.min(1, sf));
 }
 
 export function globalEcoPressure(totalOrganisms, k = EVO.ecoPressureK){

@@ -52,7 +52,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
   if (els.lifePill){
     const now = state.lastSeen || target.lastSeen || 0;
     const age = Math.max(0, now - (target.createdAt || now));
-    els.lifePill.textContent = `☀: ${fmtAgeSeconds(age)}`; //возраст
+    els.lifePill.textContent = `Живет: ${fmtAgeSeconds(age)}`; //возраст
   }
 
   // Keep compatibility with old HUD inputs if present

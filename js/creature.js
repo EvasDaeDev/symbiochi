@@ -292,7 +292,7 @@ export function newGame(){
   const body = makeSmallConnectedBody(seed, targetBodySize);
   const face = findFaceAnchor(body, seed);
   const eyeCfg = getOrganDef("eye");
-  const eyeShape = pickWeighted(rng, eyeCfg?.shapeOptions, eyeCfg?.shapeWeights) || "diamond";
+  const eyeShape = pickWeighted(rng, eyeCfg?.shapeOptions, eyeCfg?.shapeWeights) || "sphere";
 
  const plan = {
     // предпочитаемое направление роста (силуэт)
@@ -316,7 +316,7 @@ export function newGame(){
     palette: pal,
 	plan,
     care: { feed: 0, wash: 0, heal: 0, neglect: 0 },
-    bars: { food: 1.00, clean: 1.00, hp: 1.00, mood: 1.00 },
+    bars: { food: 0.85, clean: 0.85, hp: 0.85, mood: 1.00 },
     body,
     face: { anchor: face, eyeSize: 1, eyeShape, eyeRadius: 0 },
     modules: [],
@@ -338,7 +338,7 @@ export function newGame(){
   // Stored under state.body.wave.
   ensureBodyWave(state, rng);
 
-  pushLog(state, `Вылупился питомец "${state.name}".`, "system");
+  pushLog(state, `Появился организм "${state.name}".`, "system");
   return state;
 }
 
@@ -655,13 +655,13 @@ export function addModule(state, type, rng, target=null){
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
   } else if (type === "eye"){
     const cfg = getOrganDef("eye") || {};
-    eyeShape = pickWeighted(rng, cfg.shapeOptions, cfg.shapeWeights) || "diamond";
+    eyeShape = pickWeighted(rng, cfg.shapeOptions, cfg.shapeWeights) || "sphere";
     eyeRadius = (state.body?.cells?.length || 0) < (cfg.smallBodyThreshold ?? 0)
       ? 1
       : (rng() < (cfg.largeRadiusChance ?? 0) ? 1 : 2);
     const faceAnchor = state.face?.anchor;
     const faceEyeRadius = Math.max(0, (state.face?.eyeRadius ?? ((state.face?.eyeSize ?? 1) - 1)) | 0);
-    const faceEyeShape = state.face?.eyeShape || (pickWeighted(rng, cfg.shapeOptions, cfg.shapeWeights) || "diamond");
+    const faceEyeShape = state.face?.eyeShape || (pickWeighted(rng, cfg.shapeOptions, cfg.shapeWeights) || "sphere");
     const faceEyeSet = new Set();
     if (faceAnchor && faceEyeRadius >= 0){
       for (const [dx, dy] of buildEyeOffsets(faceEyeRadius, faceEyeShape)){
