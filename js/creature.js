@@ -3,7 +3,7 @@ import { getOrganDef } from "./organs/index.js";
 import { DIR8, GRID_W, GRID_H, PALETTES } from "./world.js";
 import { EVO } from "./mods/evo.js";
 import { CARROT } from "./mods/carrots.js";
-import { ensureBodyWave, bodyWaveScore } from "./mods/body_wave.js";
+import { ensureBodyWave, tuneBodyWaveForSize, bodyWaveScore } from "./mods/body_wave.js";
 // Some module constructors still reference per-organ config objects directly.
 // Keep these imports explicit so addModule() never depends on globals.
 import { CLAW } from "./organs/claw.js";
@@ -337,6 +337,7 @@ export function newGame(){
   // Variant A: initialize organic body-wave growth parameters in one place.
   // Stored under state.body.wave.
   ensureBodyWave(state, rng);
+  tuneBodyWaveForSize(state);
 
   pushLog(state, `Появился организм "${state.name}".`, "system");
   return state;
@@ -360,6 +361,7 @@ export function growBodyConnected(state, addN, rng, target=null, biases=null){
   // Variant A: organic growth scoring lives in mods/body_wave.js.
   // Keep it centralized so we don't hunt through creature/state files.
   ensureBodyWave(state, rng);
+  tuneBodyWaveForSize(state);
 
   for (let i=0;i<addN;i++){
     const candidates = [];

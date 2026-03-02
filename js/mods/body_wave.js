@@ -8,16 +8,16 @@ import { clamp01, hash32, mulberry32 } from "../util.js";
 
 export const BODY_WAVE = {
   // Требование пользователя: шум радиусом 3..9 блоков.
-  ampMinBlocks: 10,
-  ampMaxBlocks: 36,
+  ampMinBlocks: 7,
+  ampMaxBlocks: 17,
 
   // Кол-во "лепестков" по окружности (чем больше — тем чаще смена направления).
   lobesMin: 0,
   lobesMax: 3,
 
   // Скорость дрейфа фазы (медленно, чтобы форма "помнила" себя)
-  phaseSpeedMin: 0.008,
-  phaseSpeedMax: 0.025,
+  phaseSpeedMin: 0.010,
+  phaseSpeedMax: 0.055,
 
   // Сколько дискретных узлов для 1D value-noise по углу
   bins: 6,
@@ -70,6 +70,7 @@ export function ensureBodyWave(state, rng = null){
     if (!Number.isFinite(state.body.wave.ampBlocks)) state.body.wave.ampBlocks = BODY_WAVE.ampMinBlocks;
     if (!Number.isFinite(state.body.wave.lobes)) state.body.wave.lobes = BODY_WAVE.lobesMin;
     if (!Number.isFinite(state.body.wave.bins)) state.body.wave.bins = BODY_WAVE.bins;
+    if (!Number.isFinite(state.body.wave.microJitter)) state.body.wave.microJitter = BODY_WAVE.microJitter;
     return;
   }
 
@@ -88,8 +89,47 @@ export function ensureBodyWave(state, rng = null){
     lobes,
     phase: prng() * 10,
     phaseSpeed,
-    bins: BODY_WAVE.bins
+    bins: BODY_WAVE.bins,
+    microJitter: BODY_WAVE.microJitter
   };
+}
+
+// Авто-тюнинг волны под большие тела (2000+ блоков).
+// Идея: сохраняем "характер" (wiggle/seed), но плавно усиливаем лопастность и детализацию,
+// при этом замедляя phaseSpeed и уменьшая microJitter, чтобы огромные тела не выглядели "желе".
+//
+// Важно: это НЕ меняет рендер, только приоритизацию кандидатов роста.
+export function tuneBodyWaveForSize(state){
+  if (!state?.body?.wave) return;
+  const w = state.body.wave;
+
+  const n = Math.max(1, state?.body?.cells?.length || 1);
+
+  // 0..1: начинаем усиливать после 800, полностью включаем к 2000.
+  const big = clamp01((n - 800) / (2000 - 800));
+  if (big <= 0) return;
+
+  // Используем wiggle как "ручку характера" и на больших телах тоже.
+  const wiggle = Number.isFinite(state?.plan?.wiggle) ? clamp01(state.plan.wiggle) : 0.5;
+
+  // Целевые диапазоны для 2000+:
+  // amp: 34..110 (по wiggle)
+  // lobes: 3..5 (детерминировано по seed)
+  // bins: 10 или 12 (детерминировано по seed)
+  // phaseSpeed: 0.010..0.025
+  // microJitter: 0.02
+  const ampBig = Math.round(lerp(34, 110, wiggle));
+  const lobesBig = 3 + ((hash32(w.seed | 0, 90210) >>> 0) % 3); // 3..5
+  const binsBig = ((hash32(w.seed | 0, 1337) >>> 0) & 1) ? 12 : 10;
+  const phaseSpeedBig = Math.max(0.010, Math.min(0.025, Number.isFinite(w.phaseSpeed) ? w.phaseSpeed : 0.018));
+  const microJitterBig = 0.02;
+
+  // Плавное приближение к big-настройкам.
+  w.ampBlocks = Math.round(lerp(Number.isFinite(w.ampBlocks) ? w.ampBlocks : BODY_WAVE.ampMinBlocks, ampBig, big));
+  w.lobes = Math.round(lerp(Number.isFinite(w.lobes) ? w.lobes : 1, lobesBig, big));
+  w.bins = Math.round(lerp(Number.isFinite(w.bins) ? w.bins : BODY_WAVE.bins, binsBig, big));
+  w.phaseSpeed = lerp(Number.isFinite(w.phaseSpeed) ? w.phaseSpeed : BODY_WAVE.phaseSpeedMin, phaseSpeedBig, big);
+  w.microJitter = lerp(Number.isFinite(w.microJitter) ? w.microJitter : BODY_WAVE.microJitter, microJitterBig, big);
 }
 
 // Вызывай раз в "мутационный" тик, если хочешь лёгкое дыхание формы.
@@ -135,7 +175,8 @@ export function bodyWaveScore(state, x, y){
 
   // лёгкий микроджиттер, устойчивый по координатам
   const h = hash32(w.seed | 0, (x * 73856093) ^ (y * 19349663));
-  const j = ((h & 1023) / 1023 - 0.5) * BODY_WAVE.microJitter;
+  const jitter = Number.isFinite(w.microJitter) ? w.microJitter : BODY_WAVE.microJitter;
+  const j = ((h & 1023) / 1023 - 0.5) * jitter;
   score += j;
 
   return score;

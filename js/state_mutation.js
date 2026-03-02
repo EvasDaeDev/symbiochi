@@ -1164,7 +1164,7 @@ const ok = createBudFromModule(state, idx, rng, triesMult);
       } else {
         pushLog(
           state,
-          `Эволюция: почкование не поместилось.`,
+          `Эволюция: почкование не удалось.`,
           "mut_fail",
           { part: budType }
         );
@@ -1194,7 +1194,7 @@ const ok = createBudFromModule(state, idx, rng, triesMult);
         if (forcedByPerimeter){
           pushLog(
             state,
-            `Эволюция: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → тело выросло (+${addN}).`,
+            `Эволюция: периметр занят, тело выросло (+${addN}).`,
             "mut_ok",
             { part: "body" }
           );
@@ -1238,7 +1238,7 @@ const ok = createBudFromModule(state, idx, rng, triesMult);
         }
         const primaryMi = (grownModules.length === 1) ? grownModules[0] : null;
         if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
-          pushLog(state, `Эволюция: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → Растут органы.`, "mut_ok", {
+          pushLog(state, `Эволюция: периметр занят, Растут органы.`, "mut_ok", {
             part: "appendage",
             mi: primaryMi,
             grownModules
@@ -1253,7 +1253,7 @@ const ok = createBudFromModule(state, idx, rng, triesMult);
       } else {
         // Do not waste the mutation step: if appendage growth failed, expand body.
         if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
-          pushLog(state, `Эволюция: периметр занят ≥${Math.round(MAX_PERIMETER_USAGE*100)}% → Рост органов не удался.`, "mut_fail", { part: "appendage" });
+          pushLog(state, `Эволюция: периметр занят,  Рост органов не удался.`, "mut_fail", { part: "appendage" });
           // Requirement: if perimeter cap reached and we couldn't extend organs, grow body.
           growBodyWithEarlyBoost("периметр занят — фолбэк на рост тела");
         } else {
@@ -1354,7 +1354,7 @@ if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
     if (altOk){
       pushLog(
         state,
-        `Эволюция: орган (${organLabel(kind)}) не смог появиться → появился другой орган (${organLabel(altKind)}).`,
+        `Эволюция: появился новый орган (${organLabel(altKind)}).`,
         "mut_ok",
         { part: altKind, mi: altMi }
       );
