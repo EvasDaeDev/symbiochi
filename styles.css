@@ -811,6 +811,16 @@ html, body {
   background: rgba(0,0,0,.45);
   z-index: 120;
 }
+
+#capsuleOverlay{
+  position: fixed;
+  inset: 0;
+  display: none;
+  place-items: center;
+  padding: 14px;
+  background: rgba(0,0,0,.45);
+  z-index: 130;
+}
 #symbiosisOverlay{
   position: fixed;
   inset: 0;
@@ -955,6 +965,24 @@ html, body {
   justify-content: flex-start;
   margin-bottom: 8px;
 }
+
+/* Capsules (reuse symModal styles) */
+.capsRow{
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: rgba(0,0,0,0.15);
+}
+.capsRowTop{
+  display:flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.capsBtns{ display:flex; gap:6px; flex-wrap: wrap; }
+.capsKey{ margin-top:8px; font-size:12px; }
+.muted{ color: var(--muted); }
 .symConfirm{
   position: absolute;
   inset: 0;

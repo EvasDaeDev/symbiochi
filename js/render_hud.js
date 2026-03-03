@@ -88,7 +88,7 @@ export function renderHud(state, org, els, deltaSec, fmtAgeSeconds, zoom){
     const pTxt = t ? `${Math.round(power*100)}%` : "";
 
     els.hudMeta2.innerHTML = `
-      <span class="invItem"><span class="hudIco" style="--ico: var(--ico-coin)"></span><span class="invVal">:${Math.max(0, coins|0)}</span></span>
+      <span class="invItem"><span class="hudIco hudCoin" style="--ico: var(--ico-coin)"></span><span class="invVal">:${Math.max(0, coins|0)}</span></span>
       <span class="invItem"><span class="hudIco" style="--ico: var(--ico-drop)"></span><span class="invVal">:${Math.max(0, water|0)}</span></span>
 	  <span class="invItem"><span class="hudIco" style="--ico: var(--ico-cross)"></span><span class="invVal">:${Math.max(0, heal|0)}</span></span>
 	  <span class="invItem"><span class="hudIco" style="--ico: var(--ico-carrot)"></span><span class="invVal">:${Math.max(0, food|0)}</span>

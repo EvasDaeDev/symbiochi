@@ -3,11 +3,11 @@ export const SHELL = {
   wind: false,
   growthDir: 8,
   // Shell plates are strong perimeter-occupiers; delay them until the body has room.
-  spawnMinBody: 130,
+  spawnMinBody: 530,
   size: 2,
   maxLen: 10,
   spawnWeight: 0.06,
-  growthChance: 0.35,
+  growthChance: 0.45,
   width: 2,
   anim: {
     growthSec: 0.7,
@@ -15,5 +15,5 @@ export const SHELL = {
   },
   initialColor: "#64748b",
   shapeOptions: ["plate", "dome", "ridge"],
-  shapeWeights: [0.55, 0.3, 0.15]
+  shapeWeights: [0.55, 0.37, 0.45]
 };

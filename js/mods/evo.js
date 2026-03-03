@@ -55,7 +55,7 @@ export function sizeFactor(bodyBlocks, S0 = EVO.sizeS0, p = EVO.sizeP){
   const s = Math.max(0, Number(bodyBlocks) || 0);
 
   // ✅ Early stage: no slowdown until 250 blocks (v2.2 wants fast early growth)
-  if (s <= 350) return 1;
+  if (s <= 1250) return 1;
 
   const s0 = Math.max(1, Number(S0) || 420);
   const pp = Math.max(0.2, Number(p) || 1.75);

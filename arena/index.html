@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Symbiochi Arena</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="title">SYMBIOCHI ARENA</div>
+      <div class="subtitle">Autonomous PvP sandbox</div>
+    </div>
+    <div class="top-actions">
+      <button id="btnNewMatch" class="btn">New match</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2>Fighter A</h2>
+      <div class="row"><span class="k">Name</span><span id="aName" class="v">—</span></div>
+      <div class="row"><span class="k">Blocks</span><span id="aBlocks" class="v">—</span></div>
+      <div class="row"><span class="k">Wins</span><span id="aWins" class="v">—</span></div>
+      <div class="row"><span class="k">Honor</span><span id="aHonor" class="v">—</span></div>
+      <div class="row actions">
+        <button id="btnImportA" class="btn primary">Import .sbh</button>
+      </div>
+    </section>
+
+    <section class="stage">
+      <canvas id="arenaCanvas" width="900" height="600"></canvas>
+      <div class="hud">
+        <div class="hudline"><span id="hudStatus">Idle</span></div>
+        <div class="hudline">
+          <span class="tag">A</span> <span id="hudA">—</span>
+          <span class="sep">|</span>
+          <span class="tag">B</span> <span id="hudB">—</span>
+        </div>
+      </div>
+      <div class="stage-actions">
+        <button id="btnStart" class="btn primary">Start match</button>
+        <button id="btnExportWinner" class="btn" disabled>Export winner</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Fighter B</h2>
+      <div class="row"><span class="k">Name</span><span id="bName" class="v">—</span></div>
+      <div class="row"><span class="k">Blocks</span><span id="bBlocks" class="v">—</span></div>
+      <div class="row"><span class="k">Wins</span><span id="bWins" class="v">—</span></div>
+      <div class="row"><span class="k">Honor</span><span id="bHonor" class="v">—</span></div>
+      <div class="row actions">
+        <button id="btnImportB" class="btn primary">Import .sbh</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="importOverlay" class="overlay" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="importTitle">Import</div>
+        <button id="btnCloseImport" class="iconbtn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <label class="lbl">Capsule file (.sbh)</label>
+        <input id="fileInput" type="file" accept=".sbh,application/json" />
+        <label class="lbl">Key</label>
+        <input id="keyInput" type="password" placeholder="Enter key" autocomplete="off" />
+        <div class="hint">Key is required to decrypt capsule.</div>
+        <div id="importErr" class="error" style="display:none"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btnDoImport" class="btn primary">Import</button>
+        <button id="btnCancelImport" class="btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="exportOverlay" class="overlay" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="exportTitle">Export</div>
+        <button id="btnCloseExportX" class="iconbtn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <label class="lbl">Key (stored “under the mat” for this session)</label>
+        <input id="exportKey" type="text" readonly />
+        <div class="hint">In arena MVP the key is kept in memory until you refresh the page.</div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btnCopyExportKey" class="btn">Copy key</button>
+        <button id="btnDownloadExport" class="btn primary">Download .sbh</button>
+        <button id="btnCloseExport" class="btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+
+  <script type="module" src="js/arena_main.js"></script>
+</body>
+</html>

@@ -40,7 +40,7 @@ import {
   attachCoinHudInput,
   attachLogFlash,
   attachDisableDoubleTapZoom,
-  attachSymbiosisUI,
+  attachCapsuleUI,
   attachDebugPanel,
   attachDragPan,
   attachZoomWheel
@@ -119,18 +119,20 @@ const els = {
   fxEnabled: document.getElementById("fxEnabled"),
   soundEnabled: document.getElementById("soundenabled"),  //звук
   newCreature: document.getElementById("newCreature"),
+  // Capsule overlay (reuses legacy symbiosis button as a shortcut)
   symbiosisBtn: document.getElementById("symbiosisBtn"),
-  symbiosisOverlay: document.getElementById("symbiosisOverlay"),
-  symShowHint: document.getElementById("symShowHint"),
-  symShareBtn: document.getElementById("symShareBtn"),
-  symShareOutput: document.getElementById("symShareOutput"),
-  symReceiveInput: document.getElementById("symReceiveInput"),
-  symApplyBtn: document.getElementById("symApplyBtn"),
-  symCloseBtn: document.getElementById("symCloseBtn"),
-  symPermissionsHint: document.getElementById("symPermissionsHint"),
-  symConfirm: document.getElementById("symConfirm"),
-  symConfirmYes: document.getElementById("symConfirmYes"),
-  symConfirmNo: document.getElementById("symConfirmNo"),
+  capsuleOverlay: document.getElementById("capsuleOverlay"),
+  capsuleCloseBtn: document.getElementById("capsuleCloseBtn"),
+  capsuleTabExport: document.getElementById("capsuleTabExport"),
+  capsuleTabImport: document.getElementById("capsuleTabImport"),
+  capsuleExportPane: document.getElementById("capsuleExportPane"),
+  capsuleImportPane: document.getElementById("capsuleImportPane"),
+  capsuleSelectedInfo: document.getElementById("capsuleSelectedInfo"),
+  capsuleDoExport: document.getElementById("capsuleDoExport"),
+  capsuleDepartedList: document.getElementById("capsuleDepartedList"),
+  capsuleFile: document.getElementById("capsuleFile"),
+  capsuleKey: document.getElementById("capsuleKey"),
+  capsuleDoImport: document.getElementById("capsuleDoImport"),
   
  
 };
@@ -300,6 +302,10 @@ function rerenderAll(deltaSec){
 
       els.orgInfo.innerHTML = `
         <div class="orgList">${listHtml}</div>
+        <div class="orgListCapsBtns" style="display:flex; gap:8px; margin-top:10px;">
+          <button class="smallbtn" id="capsuleImportBtn">IMPORT</button>
+          <button class="smallbtn" id="capsuleExportBtn" ${root.active === -1 ? 'disabled="disabled" title="Родитель не экспортируется"' : ''}>EXPORT</button>
+        </div>
         <div style="color:var(--muted); font-size:11px;">Клик — выбрать, Дабл Клик центрировать камеру на ядре.</div>
       `;
       cache.orgInfoAt = now;
@@ -510,17 +516,11 @@ function applyPickupFxDiff(view, state, before, after){
   }
 
   // Coin reward / inventory increase (periodic reward, etc.)
-  const dCoins = (after.invCoins|0) - (before.invCoins|0);
-  if (dCoins > 0){
-    // Spawn one fly per coin gained; distribute across orgs for visual variety.
-    const orgs = [state, ...(Array.isArray(state?.buds) ? state.buds : [])];
-    const n = Math.max(1, orgs.length);
-    for (let i = 0; i < dCoins; i++){
-      const which = (i % n) === 0 ? -1 : ((i % n) - 1);
-      spawnFx({ type: "fly", icon: "coin", which, target: "hud" });
-    }
-  }
+  // NOTE: do NOT spawn fly-to-HUD here based on inventory diff alone.
+  // The simulation logs coin rewards with meta.org, and autoTick() spawns the fly FX from those entries.
+
 }
+
 
 
 function autoTick(){
@@ -599,9 +599,9 @@ function autoTick(){
       }
 
       // Some implementations may encode it in kind rather than message.
-      if (/reward_coin|coin_reward|money_reward/i.test(kind)){
-        spawnFx({ type: "fly", icon: "coin", which, target: "hud" });
-      }
+if (kind === "coin_reward"){
+  spawnFx({ type: "fly", icon: "coin", which, target: "hud" });
+}
     }
   } else {
     // Fallback: if coins increased without a log entry, still show at least one fly.
@@ -664,19 +664,20 @@ function getHudCoinTargetCanvasPx(){
     if (!els?.canvas) return null;
     const canvasRect = els.canvas.getBoundingClientRect();
 
-    // Prefer an explicit coin icon in HUD if it exists.
-    // (In current UI we may only have a text bar; in that case use the whole HUD meta area.)
-    const explicit = document.querySelector("#invOverlay .invIco.invCoin")
-                  || document.querySelector("#invOverlay .invCoin")
-                  || null;
-    const el = explicit || els.hudMeta2 || document.getElementById("invOverlay");
+    // Left edge of the HUD coin counter (not center of HUD)
+    const coinEl =
+      document.querySelector("#hudMeta2 .hudCoin") ||
+      document.querySelector("#invOverlay .invIco.invCoin") ||
+      document.querySelector("#invOverlay .invCoin") ||
+      null;
+
+    const el = coinEl || els.hudMeta2 || document.getElementById("invOverlay");
     if (!el) return null;
     const r = el.getBoundingClientRect();
 
-    let x = (r.left + r.width * 0.5) - canvasRect.left;
-    let y = (r.top + r.height * 0.5) - canvasRect.top;
+    let x = (r.left + 10) - canvasRect.left;           // левый край + паддинг
+    let y = (r.top + r.height * 0.5) - canvasRect.top; // по центру по вертикали
 
-    // Clamp into canvas bounds to avoid off-canvas targets on narrow screens.
     const w = els.canvas.width || 0;
     const h = els.canvas.height || 0;
     if (w > 0 && h > 0){
@@ -1016,7 +1017,7 @@ function handleCoinMode(view, wx, wy) {
   });
 
   pushLog(s, `Монетка: поставлена. Осталось: ${Math.max(0, inv.coins|0)}.`, "coin");
-  toast(`Монетка: (${wx},${wy}) → цель: ${bestId === 0 ? "родитель" : `почка ${bestId}`}.`);
+  toast(`Монетка: (${wx},${wy}) → цель: ${bestId === 0 ? "Родитель" : `почка ${bestId}`}.`);
   
   saveGame(s);
   rerenderAll(0);
@@ -1039,7 +1040,7 @@ function handleMoveMode(view, wx, wy){
   inv.coins = Math.max(0, (inv.coins|0) - 1);
   setMoveTarget(view, s, orgId, wx, wy, { stopTolBlocks: 10 });
   pushLog(s, `Движение: -1 монета. Осталось: ${Math.max(0, inv.coins|0)}.`, "coin");
-  toast(`Движение → цель: ${orgId === 0 ? "родитель" : `почка ${orgId}`}.`);
+  toast(`Движение → цель: ${orgId === 0 ? "Родитель" : `почка ${orgId}`}.`);
   saveGame(s);
   rerenderAll(0);
 }
@@ -1272,7 +1273,7 @@ async function startGame(){
   attachLegendHuePicker(view, els, rerenderAll);
   attachCarrotHudInput(view, els, rerenderAll);
   attachCoinHudInput(view, els, rerenderAll);
-  attachSymbiosisUI(view, els, toast);
+  attachCapsuleUI(view, els, toast);
   attachGridInteractions();
   attachOrgListClicks();
 

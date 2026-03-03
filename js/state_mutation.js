@@ -229,7 +229,7 @@ function applyOrganTypeCapsToWeights(state, baseWeights, caps){
 //  - grow existing organs (lengthen appendages), OR
 //  - grow body to create new perimeter.
 const MAX_PERIMETER_USAGE = 0.35;
-const EARLY_FAST_BODY_BLOCKS = 250; // early stage grows faster
+const EARLY_FAST_BODY_BLOCKS = 750; // early stage grows faster
 
 // We count *occupied perimeter anchors* (body perimeter cells that have an attached organ).
 // This matches the requirement "free perimeter too low" much better than a heuristic cost sum.

@@ -3,8 +3,8 @@ export const BODY = {
   wind: false,
   growWeight: 0.92,
   appendageGrowWeight: 0.12,
-  appendageGrowPerModule: 0.03,
-  growBodyPenaltyMult: 0.65,
+  appendageGrowPerModule: 0.015,
+  growBodyPenaltyMult: 0.85,
   growthChance: 0.72,
   width: 1,
   anim: {

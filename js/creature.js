@@ -804,7 +804,7 @@ export function addModule(state, type, rng, target=null){
   });
     // ----- symmetry: sometimes spawn a mirrored twin organ -----
   const sym = state?.plan?.symmetry ?? 0;
-  const canMirror = sym > 0.75 && rng() < 0.45;
+  const canMirror = sym > 0.55 && rng() < 0.45;
   const linear = (type==="tail" || type==="tentacle" || type==="worm" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth" || type==="claw");
 
   if (canMirror && linear && dirForGrowth){

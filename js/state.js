@@ -60,6 +60,11 @@ export function migrateOrNew(){
 if (!state){
   state = newGame();
 
+  // Capsules: exported buds are stored locally in this home.
+  // (Offline transfer system; anti-dupe is not enforced.)
+  state.departedCapsules = [];
+  state.importedCapsules = [];
+
   // v2.2: inventory defaults must exist even for a fresh save
   state.inv = state.inv || {};
   if (!Number.isFinite(state.inv.food))  state.inv.food  = INV_DEFAULTS.food;
@@ -71,6 +76,10 @@ if (!state){
   saveGame(state);
   return state;
 }
+
+  // Ensure capsule storage exists for older saves.
+  if (!Array.isArray(state.departedCapsules)) state.departedCapsules = [];
+  if (!Array.isArray(state.importedCapsules)) state.importedCapsules = [];
 
   function normalizeOrg(org, fallbackSeed){
     if (!org) return;
@@ -546,7 +555,7 @@ export function simulate(state, deltaSec){
     if (!state._mutationContext || state._mutationContext.tickIndex !== tickIndex){
       state._mutationContext = {
         tickIndex,
-        appendageBudget: 200,
+        appendageBudget: 50,
         offlineSim: isOffline,
         offlineRollup: false,
       };
@@ -606,14 +615,26 @@ const applyShrinkIfNeeded = (org, dt)=>{
       applyMutation(org, momentSec);
       applied += 1;
 
-      // Economy v2.2: every 14 mutations of each organism -> +1 coin.
-      org.coinEarnAcc = (org.coinEarnAcc || 0) + 1;
-      if (org.coinEarnAcc >= 14){
-        const n = Math.floor(org.coinEarnAcc / 14);
-        org.coinEarnAcc -= n * 14;
-        state.inv = state.inv || {};
-        state.inv.coins = (state.inv.coins || 0) + n;
-      }
+// Economy v2.2: every 14 mutations of each organism -> +1 coin.
+org.coinEarnAcc = (org.coinEarnAcc || 0) + 1;
+if (org.coinEarnAcc >= 14){
+  const n = Math.floor(org.coinEarnAcc / 14);
+  org.coinEarnAcc -= n * 14;
+
+  state.inv = state.inv || {};
+  state.inv.coins = (state.inv.coins || 0) + n;
+
+  // IMPORTANT: tell HUD-fly FX which organism earned it
+//  const tag = Number.isFinite(org.__orgTag) ? org.__orgTag : -1; // -1=parent, 0..=buds[]
+const idx = orgs.indexOf(org);
+const tag = (idx <= 0) ? -1 : (idx - 1);
+  pushLog(
+    org,
+    `Монетка: +${n} (за 14 эволюций)`,
+    "coin_reward",
+    { org: tag, n, src: "evo14" }
+  );
+}
     };
 
     applyOnce(false);
@@ -632,8 +653,8 @@ const applyShrinkIfNeeded = (org, dt)=>{
   };
 
   // Apply evolution for each organism.
-  const MAX_EVENTS_PER_ORG = 200; // safety cap (v2.2)
-  const CATCHUP_INTERVAL_SEC = 2.5; // v2.2: 'форсировано, но плавно' on return
+  const MAX_EVENTS_PER_ORG = 100; // safety cap (v2.2)
+  const CATCHUP_INTERVAL_SEC = 0.7; // v2.2: 'форсировано, но плавно' on return
   const endT = now;
 
   for (const org of orgs){
@@ -1224,7 +1245,8 @@ function rewardCoinForMaxedBars(rootState){
         gained += 1;
 
         const who = (i === 0) ? (rootState.name || "родитель") : (org.name || `почка ${i}`);
-        pushLog(rootState, `Монетка: +1 (идеальное состояние: ${who}). Теперь: ${rootState.inv.coins|0}.`, "coin");
+        pushLog(rootState,`Монетка: +1 (идеальное состояние: ${who}). Теперь: ${rootState.inv.coins|0}.`,"coin", { org: (i === 0) ? -1 : (i - 1) }   // -1 = parent, 0.. = buds[]
+       );
       }
     } else {
       org._coinRewardedMax = false;

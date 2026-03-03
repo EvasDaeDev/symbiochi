@@ -1,8 +1,13 @@
 import { fmtAgeSeconds, escapeHtml, barPct, mulberry32, hash32, clamp, nowSec } from "./util.js";
 import { pushLog, MAX_DEBUG_LOG } from "./log.js";
 import { saveGame, deleteSave, actOn } from "./state.js";
-import { extractGenome, encodeGenome } from "./mods/merge.js";
-import { applySymbiosisMerge } from "./state_mutation.js";
+import {
+  exportSelectedBudToCapsule,
+  importCapsuleFileToHome,
+  rotateDepartedCapsuleKey,
+  redownloadDepartedCapsule,
+  deleteDepartedCapsule,
+} from "./capsule.js";
 import { getFxPipeline } from "./FX/pipeline.js";
 import { addRipple, RIPPLE_KIND } from "./FX/ripples.js";
 
@@ -526,129 +531,219 @@ const doExchange = (kind)=>{
   refreshInventoryUI(view.state);
 }
 
-export function attachSymbiosisUI(view, els, toast){
-  if (!els.symbiosisBtn || !els.symbiosisOverlay) return;
+export function attachCapsuleUI(view, els, toast){
+  if (!els.capsuleOverlay) return;
 
-  function openSymbiosis(){
-    els.symbiosisOverlay.style.display = "grid";
-    if (els.symShareOutput) els.symShareOutput.value = "";
-    if (!view.state){
-      if (els.symPermissionsHint){
-        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
-      }
-      if (els.symShareBtn) els.symShareBtn.disabled = true;
-      if (els.symApplyBtn) els.symApplyBtn.disabled = true;
-    } else {
-      if (els.symShareBtn) els.symShareBtn.disabled = false;
-      updateApplyState();
+  const open = (mode)=>{
+    els.capsuleOverlay.style.display = "grid";
+    els.capsuleOverlay.dataset.mode = mode || "export";
+	const open = (mode) => {
+  els.capsuleOverlay.style.display = "grid";
+  els.capsuleOverlay.dataset.mode = mode || "export";
+
+  // NEW: prefill export name input from selected bud
+  const nameInput = document.getElementById("capsuleNameInput");
+  if (nameInput) {
+    nameInput.value = "";
+    if ((mode || "export") === "export") {
+      const s = view?.state;
+      const idx = Number.isFinite(s?.active) ? s.active : -1;
+      // экспорт матки запрещён, но на всякий случай:
+      const bud = (idx >= 0 && Array.isArray(s?.buds)) ? s.buds[idx] : null;
+      if (bud?.name) nameInput.value = String(bud.name).slice(0, 20);
     }
   }
 
-  function closeSymbiosis(){
-    els.symbiosisOverlay.style.display = "none";
-    hideConfirm();
-    if (els.symShareBtn) els.symShareBtn.disabled = false;
-  }
+  refresh();
+};
+    refresh();
+  };
+  
+  
+  const close = ()=>{
+    els.capsuleOverlay.style.display = "none";
+  };
 
-  async function shareGenome(){
-    if (!view.state){
-      if (els.symPermissionsHint){
-        els.symPermissionsHint.textContent = "Сначала запусти игру, чтобы отпечаток появился.";
-      }
+  const setMode = (mode)=>{
+    els.capsuleOverlay.dataset.mode = mode;
+    refresh();
+  };
+
+  const renderDepartedList = ()=>{
+    const state = view.state;
+    if (!els.capsuleDepartedList) return;
+    const list = Array.isArray(state?.departedCapsules) ? state.departedCapsules : [];
+    if (!list.length){
+      els.capsuleDepartedList.innerHTML = `<div class="muted">Пока нет капсул в этом доме.</div>`;
       return;
     }
-    try {
-      const genome = extractGenome(getActiveOrg(view.state));
-      const code = await encodeGenome(genome);
-      console.debug("[symbiosis] share genome code length", code.length);
-      if (els.symShareOutput) els.symShareOutput.value = code;
-      let copied = false;
-      if (navigator.clipboard?.writeText){
-        try {
-          await navigator.clipboard.writeText(code);
-          copied = true;
-        } catch {
-          copied = false;
-        }
-      }
-      if (!copied && els.symShareOutput && document.queryCommandSupported?.("copy")){
-        els.symShareOutput.focus();
-        els.symShareOutput.select();
-        copied = document.execCommand("copy");
-      }
-      if (copied){
-        toast("Отпечаток скопирован.");
-        if (els.symPermissionsHint) els.symPermissionsHint.textContent = "Отпечаток скопирован в буфер.";
+    const rows = list.slice().reverse().map((c)=>{
+      const name = c?.meta?.name || "—";
+      const blocks = c?.meta?.blocks ?? "—";
+      const idShort = String(c?.capsuleId||"").slice(0,8);
+      const keyShown = !!c?.keyShown;
+      const keyText = keyShown ? `<div class="capsKey"><span class="muted">Ключ:</span> <code>${escapeHtml(c.key||"")}</code></div>` : "";
+      return `
+        <div class="capsRow" data-capsule-id="${escapeHtml(c.capsuleId||"")}">
+          <div class="capsRowTop">
+            <div class="capsMeta"><b>${escapeHtml(name)}</b> <span class="muted">• блоков ${blocks} • ${idShort}</span></div>
+            <div class="capsBtns">
+              <button class="smallbtn" data-act="toggleKey">${keyShown ? "Скрыть ключ" : "Показать ключ"}</button>
+              <button class="smallbtn" data-act="copyKey">Скопировать</button>
+              <button class="smallbtn" data-act="download">Скачать</button>
+              <button class="smallbtn" data-act="rotate">Новый ключ</button>
+              <button class="smallbtn" data-act="delete">Удалить</button>
+            </div>
+          </div>
+          ${keyText}
+        </div>
+      `;
+    }).join("");
+    els.capsuleDepartedList.innerHTML = rows;
+  };
+
+  const refresh = ()=>{
+    const mode = els.capsuleOverlay.dataset.mode || "export";
+    if (els.capsuleTabExport) els.capsuleTabExport.classList.toggle("isActive", mode === "export");
+    if (els.capsuleTabImport) els.capsuleTabImport.classList.toggle("isActive", mode === "import");
+    if (els.capsuleExportPane) els.capsuleExportPane.style.display = (mode === "export") ? "block" : "none";
+    if (els.capsuleImportPane) els.capsuleImportPane.style.display = (mode === "import") ? "block" : "none";
+
+    // Export info
+    if (els.capsuleSelectedInfo){
+      const s = view.state;
+      const a = s?.active;
+      if (Number.isFinite(a) && a >= 0 && Array.isArray(s?.buds) && a < s.buds.length){
+        const bud = s.buds[a];
+        els.capsuleSelectedInfo.innerHTML = `Выбрана почка: <b>${escapeHtml(bud?.name||"—")}</b> • блоков: ${((bud?.body?.cells?.length||0) + (bud?.modules||[]).reduce((ss,m)=>ss+(m?.cells?.length||0),0))}`;
+        if (els.capsuleDoExport) els.capsuleDoExport.disabled = false;
       } else {
-        throw new Error("no clipboard");
+        els.capsuleSelectedInfo.innerHTML = `<span class="muted">Экспортировать можно только почку (не матку).</span>`;
+        if (els.capsuleDoExport) els.capsuleDoExport.disabled = true;
       }
-    } catch (err){
-      console.debug("[symbiosis] share genome failed", err);
-      if (els.symPermissionsHint){
-        els.symPermissionsHint.textContent = "Отпечаток не создан. Проверь консоль для деталей.";
-      }
-      if (els.symShareOutput){
-        const message = err instanceof Error ? err.message : String(err);
-        els.symShareOutput.value = `Ошибка: ${message}`;
-      }
-      if (els.symShareOutput){
-        els.symShareOutput.focus();
-        els.symShareOutput.select();
-      }
-      toast("Не удалось скопировать отпечаток.");
     }
-  }
 
-  function updateApplyState(){
-    if (!els.symApplyBtn || !els.symReceiveInput) return;
-    els.symApplyBtn.disabled = !els.symReceiveInput.value.trim();
-  }
+    renderDepartedList();
+  };
 
-  function showConfirm(){
-    if (!els.symConfirm) return;
-    els.symConfirm.style.display = "grid";
-  }
-
-  function hideConfirm(){
-    if (!els.symConfirm) return;
-    els.symConfirm.style.display = "none";
-  }
-
-  async function applySymbiosis(){
-    if (!view.state || !els.symReceiveInput) return;
-    const input = els.symReceiveInput.value.trim();
-    if (!input){
-      toast("Отпечаток не распознан.");
-      return;
-    }
-    const result = await applySymbiosisMerge(view.state, input);
-    if (result.ok){
-      toast("Симбиоз завершён. Это тело уже не прежнее.");
-      closeSymbiosis();
-    } else {
-      toast("Отпечаток не распознан.");
-    }
-  }
-
-  els.symbiosisBtn.addEventListener("click", openSymbiosis);
-  if (els.symCloseBtn) els.symCloseBtn.addEventListener("click", closeSymbiosis);
-  if (els.symShareBtn) els.symShareBtn.addEventListener("click", shareGenome);
-  if (els.symApplyBtn) els.symApplyBtn.addEventListener("click", showConfirm);
-  if (els.symConfirmYes) els.symConfirmYes.addEventListener("click", applySymbiosis);
-  if (els.symConfirmNo) els.symConfirmNo.addEventListener("click", hideConfirm);
-  if (els.symReceiveInput) els.symReceiveInput.addEventListener("input", updateApplyState);
-  if (els.symReceiveInput) els.symReceiveInput.addEventListener("paste", () => setTimeout(updateApplyState, 0));
-  if (els.symbiosisOverlay){
-    els.symbiosisOverlay.addEventListener("click", (e)=>{
-      if (e.target === els.symbiosisOverlay) closeSymbiosis();
+  // Open from org list buttons
+  if (els.orgInfo){
+    els.orgInfo.addEventListener("click", (e)=>{
+      const b = e.target?.closest?.("#capsuleImportBtn, #capsuleExportBtn");
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (b.id === "capsuleImportBtn") open("import");
+      if (b.id === "capsuleExportBtn") open("export");
     });
   }
-  if (els.symConfirm){
-    els.symConfirm.addEventListener("click", (e)=>{
-      if (e.target === els.symConfirm) hideConfirm();
+
+  if (els.capsuleCloseBtn) els.capsuleCloseBtn.addEventListener("click", close);
+  if (els.capsuleOverlay) els.capsuleOverlay.addEventListener("click", (e)=>{ if (e.target === els.capsuleOverlay) close(); });
+  if (els.capsuleTabExport) els.capsuleTabExport.addEventListener("click", ()=> setMode("export"));
+  if (els.capsuleTabImport) els.capsuleTabImport.addEventListener("click", ()=> setMode("import"));
+
+  if (els.capsuleDoExport){
+    els.capsuleDoExport.addEventListener("click", async ()=>{
+      if (!view.state) return;
+      const res = await exportSelectedBudToCapsule(view);
+      if (!res.ok){
+        toast(res.reason === "not_bud" ? "Матка не экспортируется." : "Не удалось экспортировать.", "bad");
+      } else {
+        toast("Капсула создана. Почка исчезла из мира.");
+        refresh();
+      }
     });
   }
-  updateApplyState();
+
+  if (els.capsuleDoImport){
+    els.capsuleDoImport.addEventListener("click", async ()=>{
+      if (!view.state) return;
+      const file = els.capsuleFile?.files?.[0] || null;
+      const key = els.capsuleKey?.value || "";
+      const res = await importCapsuleFileToHome(view, file, key);
+      if (!res.ok){
+        const msg =
+          res.reason === "bad_key" ? "Неверный ключ." :
+          res.reason === "already_imported" ? "Эта капсула уже импортирована в этот дом." :
+          res.reason === "no_space" ? "Нет свободного места для импорта." :
+          res.reason === "bad_format" ? "Формат капсулы не поддерживается." :
+          "Не удалось импортировать.";
+        toast(msg, "bad");
+      } else {
+        toast("Импортировано.");
+        if (els.capsuleFile) els.capsuleFile.value = "";
+        if (els.capsuleKey) els.capsuleKey.value = "";
+        close();
+      }
+    });
+  }
+
+  // Departed list actions (delegated)
+  if (els.capsuleDepartedList){
+    els.capsuleDepartedList.addEventListener("click", async (e)=>{
+      const btn = e.target?.closest?.("button[data-act]");
+      const row = e.target?.closest?.(".capsRow");
+      if (!btn || !row) return;
+      const capsuleId = row.dataset.capsuleId;
+      const act = btn.dataset.act;
+      const state = view.state;
+      const list = Array.isArray(state?.departedCapsules) ? state.departedCapsules : [];
+      const rec = list.find(x=>x?.capsuleId === capsuleId);
+      if (!rec) return;
+
+      if (act === "toggleKey"){
+        rec.keyShown = !rec.keyShown;
+        saveGame(state);
+        refresh();
+        return;
+      }
+      if (act === "copyKey"){
+        const key = String(rec.key||"");
+        let ok = false;
+        if (navigator.clipboard?.writeText){
+          try { await navigator.clipboard.writeText(key); ok = true; } catch { ok = false; }
+        }
+        if (!ok && document.queryCommandSupported?.("copy")){
+          const ta = document.createElement("textarea");
+          ta.value = key;
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand("copy");
+          ta.remove();
+        }
+        toast(ok ? "Ключ скопирован." : "Не удалось скопировать.");
+        return;
+      }
+      if (act === "download"){
+        redownloadDepartedCapsule(state, capsuleId);
+        return;
+      }
+      if (act === "rotate"){
+        const rr = await rotateDepartedCapsuleKey(state, capsuleId);
+        if (!rr.ok) toast("Не удалось сменить ключ.", "bad");
+        else toast("Новый ключ создан.");
+        refresh();
+        return;
+      }
+      if (act === "delete"){
+        deleteDepartedCapsule(state, capsuleId);
+        toast("Удалено.");
+        refresh();
+        return;
+      }
+    });
+  }
+
+  // Optional legacy button (was Symbiosis)
+  if (els.symbiosisBtn){
+    els.symbiosisBtn.disabled = false;
+    els.symbiosisBtn.title = "Капсулы";
+    els.symbiosisBtn.textContent = "КАПСУЛЫ";
+    els.symbiosisBtn.addEventListener("click", ()=> open("export"));
+  }
+
+  refresh();
 }
 
 export function attachInfoTabs(els){

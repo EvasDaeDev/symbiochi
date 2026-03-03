@@ -5,7 +5,7 @@ export const FIN = {
   maxExtra: 25,
   maxLen: 10,
   spawnWeight: 0.08,
-  growthChance: 0.3,
+  growthChance: 0.5,
   width: 2,
   growthDir: 16,
   offsets: [
@@ -15,6 +15,9 @@ export const FIN = {
     [2, 1],
     [2, -1]
   ],
+  spawnWeight: 0.06,
+  growthChance: 0.1,
+  width: 2,
   anim: {
     growthSec: 0.7,
     flutterSec: 5.2

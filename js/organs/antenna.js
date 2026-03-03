@@ -6,8 +6,8 @@ export const ANTENNA = {
   maxExtra: 22,
   maxLen: 16,
   upBias: 0.7,
-  spawnWeight: 0.12,
-  growthChance: 0.42,
+  spawnWeight: 0.10,
+  growthChance: 0.22,
   width: 1,
   anim: {
     growthSec: 0.7,
@@ -16,5 +16,5 @@ export const ANTENNA = {
   },
   initialColor: "#cbd5e1",
   shapeOptions: ["straight", "zigzag", "curve"],
-  shapeWeights: [0.65, 0.2, 0.15]
+  shapeWeights: [0.75, 0.2, 0.05]
 };
