@@ -122,9 +122,9 @@ html, body {
   margin-top: 20px;
   height: var(--gameH);
   /* ширина — чтобы влезли все табы + ⚙ */
-  width: 420px;
+  width: 350px;
   max-width: 92vw;
-  min-width: 340px;
+  min-width: 250px;
   resize: none;
   min-height: 240px;
 }
@@ -180,8 +180,8 @@ html, body {
 }
 
 #mainPanel{
-  width: 600px;         /* стартовый размер */
-  height: 445px;        /* стартовый размер */
+  width: 800px;         /* стартовый размер */
+  height: 600px;        /* стартовый размер */
   position: relative;
 
   resize: none;
