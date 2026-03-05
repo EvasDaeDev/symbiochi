@@ -15,9 +15,7 @@ export const FIN = {
     [2, 1],
     [2, -1]
   ],
-  spawnWeight: 0.06,
-  growthChance: 0.1,
-  width: 2,
+
   anim: {
     growthSec: 0.7,
     flutterSec: 5.2

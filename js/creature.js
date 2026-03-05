@@ -596,6 +596,7 @@ export function addModule(state, type, rng, target=null){
   let limbPlan = null;
   let eyeShape = null;
   let eyeRadius = null;
+  let extra = null;
 
   if (type === "tail" || type === "tentacle"){
     movable = true;
@@ -693,7 +694,7 @@ export function addModule(state, type, rng, target=null){
     if (!placed) return { ok: false, reason: (sawTooClose && !sawBlocked) ? "too_close" : (sawTooClose ? "too_close" : "blocked") };
     cells = placed;
     movable = false;
-    targetLen = cells.length;
+    targetLen = patch.length;
     dirForGrowth = null;
   } else if (type === "mouth"){
     // mouth: small 2x2 patch near face anchor (front)
@@ -706,7 +707,7 @@ export function addModule(state, type, rng, target=null){
     ].slice(0, MOUTH.size * MOUTH.size);
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
     movable = false;
-    targetLen = cells.length;
+    targetLen = patch.length;
     dirForGrowth = baseDir;
   } else if (type === "teeth"){
     // teeth: 1-wide line in front of face anchor, grows up to 6
@@ -719,15 +720,55 @@ export function addModule(state, type, rng, target=null){
     const full = buildLineFrom(fa, dir, targetLen, state, bodySet);
     cells = full.slice(0, Math.min(1, full.length));
   } else if (type === "claw"){
-    // claw: like a limb but more "hook"-like (grows longer)
     movable = true;
-    // Aim near configured maximum length (±10% on maxExtra)
-    targetLen = targetLenNearMax(rng, CLAW.minLen, CLAW.maxExtra);
-    targetLen = Math.min(targetLen, CLAW.maxLen);
-    dirForGrowth = baseDir;
-    const full = buildLineFrom(anchor, baseDir, targetLen, state, bodySet);
-    cells = full.slice(0, Math.min(1, full.length));
-  } else if (type === "fin"){
+
+  // steps вдоль оси
+  let stepsTarget = targetLenNearMax(rng, CLAW.minLen, CLAW.maxExtra);
+  stepsTarget = Math.min(stepsTarget, CLAW.maxLen);
+
+  dirForGrowth = baseDir;
+
+  // Дискретизируем направление (ось клешни)
+  const step0 = stepFromDir([0,0], baseDir).cell;
+  let dx = step0[0], dy = step0[1];
+  if (dx === 0 && dy === 0){
+    dx = Math.sign(baseDir[0] || 0);
+    dy = Math.sign(baseDir[1] || 0);
+    if (dx === 0 && dy === 0) dx = 1;
+  }
+
+  // Перпендикуляр (лево/право)
+  const px = -dy, py = dx;
+
+  // Выбираем форму (hook/sickle/fork) — чтобы потом можно было чуть менять spread
+  const shape = pickWeighted(rng, CLAW.shapeOptions, CLAW.shapeWeights); // если у тебя уже есть что-то подобное
+  // Если нет pickWeighted — можно временно просто:
+  // const shape = "hook";
+
+  // Стартовая клетка = якорь (основание клешни)
+  const ox = anchor[0], oy = anchor[1];
+
+  // Положим сразу "первую пару" (step=1), чтобы визуально это уже была клешня, а не палка
+  const s = 1;
+  const spread = 1;
+
+  const left  = [ox + dx*s + px*spread, oy + dy*s + py*spread];
+  const right = [ox + dx*s - px*spread, oy + dy*s - py*spread];
+
+  cells = [[ox, oy]];
+  if (!bodySet.has(key(left[0], left[1])))  cells.push(left);
+  if (!bodySet.has(key(right[0], right[1]))) cells.push(right);
+
+  // Важно: growTo должен быть "полной формы", а не текущего cells.length
+  // Полная форма = 1 (основание) + 2*stepsTarget (левая+правая на каждый шаг)
+  targetLen = 1 + 2 * stepsTarget;
+
+  // Сохраняем метаданные прямо в модуль (чтобы рост и рендер знали ось/перпенд/shape)
+  // Это поле будет записано вместе с модулем.
+    extra = {
+      claw: { stepsTarget, shape, dx, dy, px, py, ox, oy }
+    };
+  }else if (type === "fin"){
     // fin: short 2-wide-ish triangle made of blocks, attached sideways
     movable = false;
     const baseStep = stepFromDir([ax, ay], baseDir).cell;
@@ -739,7 +780,7 @@ export function addModule(state, type, rng, target=null){
       ...FIN.offsets.map(([step, yOffset]) => [ox + dx * step, oy + dy + yOffset])
     ];
     cells = patch.filter(([x,y]) => !bodySet.has(key(x,y)) && !occupiedByModules(state,x,y));
-    targetLen = cells.length;
+    targetLen = patch.length;
     dirForGrowth = baseDir;
   } else {
     return { ok: false, reason: "blocked" };
@@ -800,12 +841,15 @@ export function addModule(state, type, rng, target=null){
     limbAnim: limbPlan?.anim,
     eyeShape: type === "eye" ? eyeShape : undefined,
     eyeRadius: type === "eye" ? eyeRadius : undefined,
+    ...(extra || {}),
     ...styleParams
   });
     // ----- symmetry: sometimes spawn a mirrored twin organ -----
   const sym = state?.plan?.symmetry ?? 0;
   const canMirror = sym > 0.55 && rng() < 0.45;
-  const linear = (type==="tail" || type==="tentacle" || type==="worm" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth" || type==="claw");
+  // Note: claw is no longer a simple line appendage; it grows as a symmetric patch.
+  // Mirroring the old linear claw logic would create broken half-claws.
+  const linear = (type==="tail" || type==="tentacle" || type==="worm" || type==="limb" || type==="antenna" || type==="spike" || type==="teeth");
 
   if (canMirror && linear && dirForGrowth){
     const [cx,cy] = state.body.core;
@@ -1030,7 +1074,147 @@ export function growPlannedModules(state, rng, options = {}){
         dir = baseDir;
       }
     }
+    // 🐟 FIN: растём не "в линию", а дозаполняем заранее заданный patch (как при спавне)
+    if (m.type === "fin"){
+      const first = m.cells?.[0];
 
+      // dx/dy — дискретный шаг из growDir
+      const step0 = stepFromDir([0,0], baseDir).cell;
+      let dx = step0[0], dy = step0[1];
+      if (dx === 0 && dy === 0){
+        dx = Math.sign(baseDir[0] || 0);
+        dy = Math.sign(baseDir[1] || 0);
+        if (dx === 0 && dy === 0) dx = 1; // fallback
+      }
+
+      if (first && (dx !== 0 || dy !== 0)){
+        const ox = first[0];
+        const oy = first[1];
+
+        const desired = [
+          [ox, oy],
+          ...FIN.offsets.map(([step, yOffset]) => [ox + dx * step, oy + dy + yOffset])
+        ];
+
+        // на всякий случай: если старый сейв занизил growTo — поднимем до патча
+        if (!Number.isFinite(m.growTo) || m.growTo < desired.length) m.growTo = desired.length;
+
+        const have = new Set((m.cells || []).map(([x,y]) => key(x,y)));
+
+        let placedFin = false;
+        for (const [nx, ny] of desired){
+          const k2 = key(nx, ny);
+          if (have.has(k2)) continue;
+          if (bodySet.has(k2)) continue; // в тело нельзя
+          // коллизии с другими органами у тебя при росте отключены — оставляем так же
+          m.cells.push([nx, ny]);
+          m.growPos = [nx, ny];
+          markAnim(state, nx, ny, m.type);
+
+          if (Array.isArray(grownModules) && !grownModules.includes(entry.i)){
+            grownModules.push(entry.i);
+          }
+
+          grew++;
+          placed = true;
+          placedFin = true;
+          lastGrownPos = pos;
+
+          if (grew >= maxGrows){
+            if (lastGrownPos !== null && modules.length > 0){
+              state.growthQueueIndex = (lastGrownPos + 1) % modules.length;
+            }
+            return grew;
+          }
+          break;
+        }
+
+        if (placedFin){
+          // fin успешно вырос — не запускаем обычную "линейную" логику ниже
+          continue;
+        }
+      }
+      // если fin не удалось расширить (всё занято телом), падаем дальше в общую логику
+    }
+	
+	// 🦀 CLAW: растим симметричными парами (левая+правая)
+if (m.type === "claw"){
+  const meta = m.claw || null;
+  const first = m.cells?.[0];
+
+  if (first && meta){
+    // целевая длина формы
+    const stepsTarget = Math.max(1, meta.stepsTarget || 1);
+    const dx = meta.dx, dy = meta.dy;
+    const px = meta.px, py = meta.py;
+
+    // Находим "какой следующий step растить":
+    // вычислим максимальную проекцию вдоль оси среди уже имеющихся клеток
+    let maxStep = 0;
+    const ox = first[0], oy = first[1];
+
+    for (const [x,y] of m.cells){
+      const along = (x - ox) * dx + (y - oy) * dy; // т.к. dx/dy = -1/0/1
+      if (along > maxStep) maxStep = along;
+    }
+
+    const nextStep = maxStep + 1;
+    if (nextStep <= stepsTarget){
+      // spread растёт к кончику (можно подкрутить под shape)
+      let spread = 1 + Math.floor((nextStep-1) / 3);
+      spread = Math.min(spread, CLAW.maxSpread || 3);
+
+      // чуть поведение от shape
+      if (meta.shape === "fork"){
+        spread = Math.min(spread + 1, CLAW.maxSpread || 3);
+      } else if (meta.shape === "sickle"){
+        // sickle: чуть меньше расходится
+        spread = Math.max(1, spread - 1);
+      }
+
+      const left  = [ox + dx*nextStep + px*spread, oy + dy*nextStep + py*spread];
+      const right = [ox + dx*nextStep - px*spread, oy + dy*nextStep - py*spread];
+
+      const kL = key(left[0], left[1]);
+      const kR = key(right[0], right[1]);
+
+      // Строго: или обе клетки ставим, или ни одной
+      if (!bodySet.has(kL) && !bodySet.has(kR)){
+        m.cells.push(left);
+        m.cells.push(right);
+
+        // отметка анимации роста
+        markAnim(state, left[0], left[1], m.type);
+        markAnim(state, right[0], right[1], m.type);
+
+        // если у тебя есть grownModules как у fin — отметь
+        if (Array.isArray(grownModules) && !grownModules.includes(entry.i)){
+          grownModules.push(entry.i);
+        }
+
+        grew += 2;
+        placed = true;
+        lastGrownPos = pos;
+
+        // выставим growTo на случай старых сейвов
+        const full = 1 + 2*stepsTarget;
+        if (!Number.isFinite(m.growTo) || m.growTo < full) m.growTo = full;
+
+        if (grew >= maxGrows){
+          if (lastGrownPos !== null && modules.length > 0){
+            state.growthQueueIndex = (lastGrownPos + 1) % modules.length;
+          }
+          return grew;
+        }
+
+        // рост выполнен — не идём в общую линейную логику
+        continue;
+      }
+    }
+  }
+  // если не получилось (упёрлись в тело) — упадём дальше в общую логику (или просто continue)
+}
+	
     // 🔍 ПРОБУЕМ ОБОЙТИ ПРЕПЯТСТВИЕ
     const tryDirs = [];
     const tryDirKeys = new Set();

@@ -487,6 +487,16 @@ function clawRotationRad(offsetSec=0){
   return 0;
 }
 
+function clawOpen01(offsetSec=0){
+  const cycle = 6.0; // можно привязать к CLAW.anim.swipeSec
+  const phase = ((Date.now()/1000) + offsetSec) % cycle;
+
+  // 0..1..0 (мягкий пульс)
+  const t = phase / cycle;
+  // sin(0..pi) = 0..1..0
+  return Math.sin(Math.PI * t);
+}
+
 function limbPhalanxAngleRad(maxDeg, direction, offsetSec=0){
   const bendDur = 2 * 1.5;
   const returnDur = 2 * 1.5;
@@ -1506,10 +1516,29 @@ function limbPhalanxIndex(lengths, idx){
       if (type === "claw" && baseCell){
         const baseX = baseCell[0];
         const baseY = baseCell[1];
-        const angle = clawRotationRad(offsetSec);
-        if (angle !== 0){
-          const toward = Math.sign((coreCell[0]-baseX) * perp[0] + (coreCell[1]-baseY) * perp[1]) || 1;
-          const a = angle * toward;
+
+        // 1) "Swipe" motion (old behavior): rotate the whole claw a bit.
+        const swipe = clawRotationRad(offsetSec);
+
+        // 2) "Pinch" motion (new): rotate left/right halves toward each other.
+        // We keep it visual-only (doesn't affect simulation cells).
+        const open01 = clawOpen01(offsetSec);
+        const close01 = 1 - open01; // 1 = closed, 0 = open
+        const pinchMaxDeg = 24;
+        const pinch = close01 * (Math.PI/180) * pinchMaxDeg;
+
+        // Determine side of this block relative to the claw axis using the *original* cell coords.
+        const wx0 = cells[i][0];
+        const wy0 = cells[i][1];
+        const side = Math.sign((wx0 - baseX) * perp[0] + (wy0 - baseY) * perp[1]);
+
+        // 'toward' keeps swipe bending outward from the core (existing behavior)
+        const toward = Math.sign((coreCell[0]-baseX) * perp[0] + (coreCell[1]-baseY) * perp[1]) || 1;
+
+        // Combine rotations: swipe + symmetric pinch.
+        // side: +1 and -1 rotate in opposite directions, giving a real "claw" closing motion.
+        const a = (swipe * toward) + (-side * pinch);
+        if (a !== 0){
           const dx = wx - baseX;
           const dy = wy - baseY;
           const cos = Math.cos(a);

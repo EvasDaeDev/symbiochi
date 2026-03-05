@@ -175,7 +175,13 @@ org.seed = seed;
           m.growPos = null;
           if (Number.isFinite(m.growStep)) m.growStep = 0;
         }
-        if (Number.isFinite(m.growTo)) m.growTo = Math.min(m.growTo, cells.length);
+ if (Number.isFinite(m.growTo)) {
+   let gt = m.growTo;
+   const maxLen2 = getOrganMaxLen(type);
+   if (Number.isFinite(maxLen2) && maxLen2 > 0) gt = Math.min(gt, maxLen2);
+   gt = Math.max(gt, cells.length); // цель роста не может быть меньше текущей длины
+   m.growTo = gt;
+ }
         kept.push(m);
         if (existing) existing.push(...cells);
         else typeBuckets.set(type, cells.slice());
