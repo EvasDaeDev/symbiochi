@@ -6,13 +6,21 @@ import { cellPx } from './arena_render.js';
 // Единицы мира: клетки. Время: секунды. Скорости: клетки/сек.
 export const ARENA_DEFAULTS = {
   // Гравитация солнца: тянет на орбиту вокруг центра.
-  sunG: 3000,
+  sunG: 3600,
   // Сила активного сближения с противником (режим атаки / перехват орбиты).
-  bodyG: 920,
+  bodyG: 1160,
   // Базовое сопротивление космоса. Меньше = дольше сохраняется инерция.
-  spaceDrag: 0.44,
+  spaceDrag: 0.16,
   // Торможение в плотном контакте / клинче.
-  contactDrag: 0.68,
+  contactDrag: 0.22,
+  shapeDrag: 0.20,
+  sideSlipDrag: 0.34,
+  clinchTurnAssist: 2.8,
+  frontBiasTurn: 1.9,
+  contactStick: 0.26,
+  contactBodySquash: 0.22,
+  contactDentDepth: 1.65,
+  contactSurfaceSlide: 9.5,
 
   // Базовая длительность удержания в контакте.
   grappleBase: 0.28,
@@ -22,7 +30,7 @@ export const ARENA_DEFAULTS = {
   tentacleDragBoost: 0.18,
 
   // Базовый урон от контакта по блокам.
-  kDamage: 2.18,
+  kDamage: 3.18,
   // Опорная скорость столкновения для пересчёта бонуса к урону.
   v0: 22,
   // Верхний предел бонуса от скорости удара.
@@ -33,79 +41,44 @@ export const ARENA_DEFAULTS = {
   shellDamageReduction: 2.7,
 
   // Касательный импульс хвоста при удачном контакте.
-  tailImpulse: 32,
+  tailImpulse: 58,
 
   // Упругость отскока по нормали. Ниже = менее резиново.
-  restitution: 0.36,
+  restitution: 0.7,
   // Плавное биомеханическое блуждание траектории, чтобы движения не были слишком линейными.
-  wanderForce: 5,
+  wanderForce: 8,
   wanderFreqMin: 0.16,
   wanderFreqMax: 0.34,
-  wanderSideAmp: 16,
-  wanderForwardAmp: 10,
-  wanderOrbitAmp: 0.02,
+  wanderSideAmp: 48,
+  wanderForwardAmp: 0,
+  wanderOrbitAmp: 0.05,
   wanderRetargetMin: 1.2,
   wanderRetargetMax: 2.8,
   wanderDriftResponse: 1.6,
   // Разведение тел после контакта, чтобы не слипались.
-  separation: 7.0,
+  separation: 9.2,
   // Касательный разлёт после удара. Даёт эффект «бейблейда».
-  tangentBounce: 1.25,
+  tangentBounce: 5.4,
   // Базовый множитель вращения от столкновения.
-  collisionSpinBoost: 18.0,
+  collisionSpinBoost: 66.6,
   // Доп. раскрутка именно от касательного проскальзывания.
-  collisionTangentialSpinBoost: 9.0,
+  collisionTangentialSpinBoost: 66.2,
   // Затухание вращения тела.
-  angularDamping: 1.7,
+  angularDamping: 0.6,
   // Раскрутка при длительном скольжении по противнику в плотном контакте.
-  contactSlideSpinBoost: 10.0,
+  contactSlideSpinBoost: 53.85,
   // Насколько сильно касательное скольжение в контакте влияет на поворот.
-  contactSlideTangentialFactor: 14.0,
+  contactSlideTangentialFactor: 55.32,
 
   // Насколько сильно система удерживает красивую орбиту вокруг солнца.
-  orbitAssist: 0.012,
+  orbitAssist: 0.04,
   // Насколько далеко вперёд предсказывается цель при перехвате.
-  interceptLookAhead: 4.2,
+  interceptLookAhead: 12.42,
   // Боковое смещение точки перехвата.
-  interceptSideOffset: 8,
+  interceptSideOffset: 14,
   // Насколько масса цели увеличивает боковой вынос точки перехвата.
-  interceptSideMassFactor: 0.14,
+  interceptSideMassFactor: 0.30,
 
-  // Фазное движение: организм собирается и делает толчки, вместо постоянного скольжения.
-  locomotionCycleMin: 0.52,
-  locomotionCycleMax: 1.05,
-  locomotionCoilRatio: 0.22,
-  locomotionThrustRatio: 0.24,
-  locomotionRecoverRatio: 0.18,
-  locomotionBaseForce: 420,
-  locomotionTailForce: 240,
-  locomotionTentacleForce: 160,
-  locomotionFinForce: 120,
-  locomotionLimbForce: 150,
-  locomotionWormForce: 135,
-  locomotionMisalignPenalty: 0.58,
-  locomotionDriftBrake: 1.6,
-  bodyAlignRate: 3.8,
-  bodyTurnRate: 2.6,
-  shapeDragBase: 0.0012,
-  shapeDragSide: 0.0035,
-  shapeDragAppendage: 0.0016,
-  contactStick: 0.22,
-  contactBodySquash: 0.11,
-  contactRecovery: 5.6,
-  thrustStretch: 0.09,
-  thrustRecovery: 4.0,
-  impactJitter: 0.9,
-  frontAttackBonus: 0.28,
-  flankAttackPenalty: 0.10,
-  rearAttackPenalty: 0.22,
-  frontalDriveBonus: 0.18,
-  sideDrivePenalty: 0.16,
-  attackAimJitter: 18,
-  attackAimJitterRetargetMin: 0.22,
-  attackAimJitterRetargetMax: 0.60,
-  clinchTurnAssist: 1.4,
-  localImpactDent: 0.18,
 
   // Порог паники: доля оставшихся блоков от стартовой массы.
   panicHealthRatio: 0.15,
@@ -116,7 +89,7 @@ export const ARENA_DEFAULTS = {
   // Стартовый импульс бегства в долях от базовой орбитальной скорости.
   panicStartBoost: 1.25,
   // Дополнительное ускорение бегства, пока активна паника.
-  panicAccel: 280,
+  panicAccel: 780,
   // Доля бокового увода при бегстве, чтобы не лететь строго назад.
   panicSideMix: 0.22,
   // Насколько масса ослабляет бегство. Больше = тяжёлые хуже убегают.
@@ -169,35 +142,26 @@ export const ARENA_DEFAULTS = {
   // Если очки почти равны, считаем их равными и идём к следующему критерию.
   timeoutEpsilon: 0.0005,
   // Минимальный размер оторванного куска, который ещё сохраняется как часть тела.
-  pruneDetachedMinBlocks: 28,
+  pruneDetachedMinBlocks: 58,
   // То же самое как доля от текущей массы. Защищает крупные органы от удаления целиком.
-  pruneDetachedMinRatio: 0.52,
+  pruneDetachedMinRatio: 0.12,
 
   // Визуальный мусор от ударов: частицы отдельных блоков и оторванные куски.
-  debrisMinLife: 2.0,
-  debrisMaxLife: 5.0,
-  chunkMinLife: 3.0,
+  debrisMinLife: 5.0,
+  debrisMaxLife: 7.0,
+  chunkMinLife: 5.0,
   chunkMaxLife: 8.0,
   chunkLargeLifeBonus: 2.0,
   fadeTailSec: 1.0,
   contactFlashSec: 0.5,
 
   // Камера-зума на удар: дополнительный зум поверх базового x1.0.
-  cameraHitZoomAdd: 0.15,
-  cameraHitZoomMax: 2.45,
+  cameraHitZoomAdd: 0.2,
+  cameraHitZoomMax: 2.5,
   cameraHitZoomInSec: 0.1,
   cameraHitZoomOutSec: 0.5,
   cameraHitFocusInSec: 0.2,
   cameraHitFocusOutSec: 0.5,
-  cameraLead: 10,
-  cameraLeadCatchSec: 0.16,
-  cameraLeadReleaseSec: 0.34,
-  cameraClinchZoomAdd: 0.08,
-  cameraDominationZoomAdd: 0.12,
-  cameraShakeBase: 0.12,
-  cameraShakeMax: 0.2,
-  cameraShakeDecay: 2.2,
-  cameraDuelFrameBias: 0.18,
 
   bloodMinLife: 0.35,
   bloodMaxLife: 0.9,
@@ -212,7 +176,6 @@ export const ARENA_DEFAULTS = {
 
 
 function randRange(a, b){ return a + Math.random() * (b - a); }
-function lerp(a, b, t){ return a + (b - a) * t; }
 
 const FLEX_TYPES = new Set(['tentacle','tail','antenna','worm','fin','limb','claw']);
 const FLEX_PROFILE = {
@@ -335,13 +298,6 @@ function ensureCameraState(arena){
   if(!Number.isFinite(c.focusWorldY)) c.focusWorldY = arena.worldH * 0.5;
   if(!Number.isFinite(c.targetWorldX)) c.targetWorldX = arena.worldW * 0.5;
   if(!Number.isFinite(c.targetWorldY)) c.targetWorldY = arena.worldH * 0.5;
-  if(!Number.isFinite(c.leadWorldX)) c.leadWorldX = 0;
-  if(!Number.isFinite(c.leadWorldY)) c.leadWorldY = 0;
-  if(!Number.isFinite(c.shakeAmp)) c.shakeAmp = 0;
-  if(!Number.isFinite(c.shakeX)) c.shakeX = 0;
-  if(!Number.isFinite(c.shakeY)) c.shakeY = 0;
-  if(!Number.isFinite(c.clinchZoom)) c.clinchZoom = 0;
-  if(!Number.isFinite(c.dominationZoom)) c.dominationZoom = 0;
   return c;
 }
 
@@ -356,77 +312,8 @@ function queueCameraHit(arena, hitPoint, strength = 1){
   }
 }
 
-function addCameraShake(arena, amount = 0.2){
-  const c = ensureCameraState(arena);
-  const maxAmp = Math.max(0, arena?.params?.cameraShakeMax || 1.2);
-  c.shakeAmp = clamp((c.shakeAmp || 0) + Math.max(0, amount), 0, maxAmp);
-}
-
-function updateCombatDrama(arena, dt){
-  const A = arena?.fighters?.[0];
-  const B = arena?.fighters?.[1];
-  if(!A || !B) return;
-  const cam = ensureCameraState(arena);
-  const drama = arena.drama || (arena.drama = {});
-  const ax = A.transform.pos.x + A.geom.center.x;
-  const ay = A.transform.pos.y + A.geom.center.y;
-  const bx = B.transform.pos.x + B.geom.center.x;
-  const by = B.transform.pos.y + B.geom.center.y;
-  const dx = bx - ax;
-  const dy = by - ay;
-  const dist = Math.max(1e-6, Math.hypot(dx, dy));
-  const nx = dx / dist;
-  const ny = dy / dist;
-  const midX = (ax + bx) * 0.5;
-  const midY = (ay + by) * 0.5;
-  const recentA = Math.max(0, (A.combat?.recentContactT || 0) - dt);
-  const recentB = Math.max(0, (B.combat?.recentContactT || 0) - dt);
-  A.combat.recentContactT = recentA;
-  B.combat.recentContactT = recentB;
-  const clinchNow = Math.max(recentA, recentB, A.combat?.grappleTimer || 0, B.combat?.grappleTimer || 0) > 0.02;
-  drama.clinch = clamp((drama.clinch || 0) + (clinchNow ? dt * 3.2 : -dt * 2.4), 0, 1);
-  const hpA = clamp((A.mass || 1) / Math.max(1, A.combat?.baseMass || A.mass || 1), 0, 1.2);
-  const hpB = clamp((B.mass || 1) / Math.max(1, B.combat?.baseMass || B.mass || 1), 0, 1.2);
-  const scoreA = (A.stats?.damageDealt || 0) - (A.stats?.damageTaken || 0) + (hpA - hpB) * 120;
-  const scoreB = (B.stats?.damageDealt || 0) - (B.stats?.damageTaken || 0) + (hpB - hpA) * 120;
-  const dominanceRaw = clamp((scoreA - scoreB) / 180, -1, 1);
-  drama.dominance = lerp(drama.dominance || 0, dominanceRaw, clamp(dt * 1.9, 0, 1));
-  const leader = drama.dominance >= 0 ? A : B;
-  const trailer = drama.dominance >= 0 ? B : A;
-  const leadVx = leader.transform.vel.x - trailer.transform.vel.x;
-  const leadVy = leader.transform.vel.y - trailer.transform.vel.y;
-  const leadLen = Math.max(1e-6, Math.hypot(leadVx, leadVy));
-  const leadDirX = leadVx / leadLen;
-  const leadDirY = leadVy / leadLen;
-  const relV = Math.hypot(A.transform.vel.x - B.transform.vel.x, A.transform.vel.y - B.transform.vel.y);
-  const leadAmount = (arena?.params?.cameraLead || 18) * clamp(relV / 30, 0.18, 1.0) * (1 - drama.clinch * 0.75);
-  const desiredLeadX = leadDirX * leadAmount;
-  const desiredLeadY = leadDirY * leadAmount;
-  const catchRate = clamp(dt / Math.max(0.01, arena?.params?.cameraLeadCatchSec || 0.16), 0, 1);
-  const releaseRate = clamp(dt / Math.max(0.01, arena?.params?.cameraLeadReleaseSec || 0.34), 0, 1);
-  const rate = relV > 4 ? catchRate : releaseRate;
-  cam.leadWorldX += (desiredLeadX - cam.leadWorldX) * rate;
-  cam.leadWorldY += (desiredLeadY - cam.leadWorldY) * rate;
-  const duelBias = clamp(arena?.params?.cameraDuelFrameBias || 0.18, 0, 0.45);
-  const focusLeadX = cam.leadWorldX + nx * duelBias * dist * Math.sign(drama.dominance || 0);
-  const focusLeadY = cam.leadWorldY + ny * duelBias * dist * Math.sign(drama.dominance || 0);
-  cam.targetWorldX = midX + focusLeadX;
-  cam.targetWorldY = midY + focusLeadY;
-  const desiredClinchZoom = drama.clinch * Math.max(0, arena?.params?.cameraClinchZoomAdd || 0.08);
-  const desiredDomZoom = Math.abs(drama.dominance) * clamp(1 - dist / 160, 0, 1) * Math.max(0, arena?.params?.cameraDominationZoomAdd || 0.12);
-  cam.clinchZoom += (desiredClinchZoom - cam.clinchZoom) * clamp(dt * 4.6, 0, 1);
-  cam.dominationZoom += (desiredDomZoom - cam.dominationZoom) * clamp(dt * 2.2, 0, 1);
-  const shakeDecay = Math.exp(-Math.max(0.01, arena?.params?.cameraShakeDecay || 5.2) * dt);
-  cam.shakeAmp *= shakeDecay;
-  const shakeAmp = cam.shakeAmp * (0.35 + drama.clinch * 0.9 + Math.abs(drama.dominance) * 0.45);
-  const t = arena?.time?.t || 0;
-  cam.shakeX = Math.sin(t * 33.0 + 0.7) * shakeAmp;
-  cam.shakeY = Math.cos(t * 28.0 + 2.1) * shakeAmp;
-}
-
 function stepArenaCamera(arena, dt){
   const c = ensureCameraState(arena);
-  updateCombatDrama(arena, dt);
   const inSec = Math.max(0.001, arena?.params?.cameraHitZoomInSec || 0.1);
   const outSec = Math.max(0.001, arena?.params?.cameraHitZoomOutSec || 0.5);
   const focusInSec = Math.max(0.001, arena?.params?.cameraHitFocusInSec || inSec);
@@ -434,15 +321,15 @@ function stepArenaCamera(arena, dt){
   const maxExtra = Math.max(0, (arena?.params?.cameraHitZoomMax || 1.5) - 1);
   const decay = maxExtra * (dt / outSec);
   c.targetExtra = Math.max(0, c.targetExtra - decay);
-  const zoomT = c.targetExtra + (c.clinchZoom || 0) + (c.dominationZoom || 0);
+  const zoomT = c.targetExtra;
   const zoomRate = zoomT > c.currentExtra ? (dt / inSec) : (dt / outSec);
   c.currentExtra += (zoomT - c.currentExtra) * clamp(zoomRate, 0, 1);
 
   const restX = arena.worldW * 0.5;
   const restY = arena.worldH * 0.5;
-  const focusWeight = maxExtra > 1e-6 ? clamp(c.currentExtra / Math.max(maxExtra, 1e-6), 0, 1) : 0;
-  const desiredX = restX * (1 - focusWeight) + c.targetWorldX * focusWeight + (c.shakeX || 0);
-  const desiredY = restY * (1 - focusWeight) + c.targetWorldY * focusWeight + (c.shakeY || 0);
+  const focusWeight = maxExtra > 1e-6 ? clamp(c.currentExtra / maxExtra, 0, 1) : 0;
+  const desiredX = restX * (1 - focusWeight) + c.targetWorldX * focusWeight;
+  const desiredY = restY * (1 - focusWeight) + c.targetWorldY * focusWeight;
   const focusRate = focusWeight > 0.02 ? (dt / focusInSec) : (dt / focusOutSec);
   c.focusWorldX += (desiredX - c.focusWorldX) * clamp(focusRate, 0, 1);
   c.focusWorldY += (desiredY - c.focusWorldY) * clamp(focusRate, 0, 1);
@@ -907,45 +794,6 @@ function orbitSpeedScale(mass){
   return clamp(1.58 - Math.log2(m) * 0.10 - Math.pow(m / 220, 0.28) * 0.18, 0.38, 1.28);
 }
 
-function buildMorphologyProfile(f){
-  const cells = Array.isArray(f?.geom?.cells) ? f.geom.cells : [];
-  const stats = { tail:0, tentacle:0, fin:0, limb:0, claw:0, worm:0, antenna:0, spike:0, shell:0, body:0 };
-  let frontScoreX = 0, frontScoreY = 0;
-  const cx = Number.isFinite(f?.geom?.center?.x) ? f.geom.center.x : 0;
-  const cy = Number.isFinite(f?.geom?.center?.y) ? f.geom.center.y : 0;
-  for(const c of cells){
-    const t = String(c?.type || 'body').toLowerCase();
-    if(Object.prototype.hasOwnProperty.call(stats, t)) stats[t]++;
-    else stats.body++;
-    const dx = c.x - cx;
-    const dy = c.y - cy;
-    const weight = (t === 'eye' || t === 'mouth' || t === 'teeth' || t === 'claw') ? 2.4 : (t === 'spike' ? 1.3 : 0.2);
-    frontScoreX += dx * weight;
-    frontScoreY += dy * weight;
-  }
-  let fx = frontScoreX, fy = frontScoreY;
-  let fl = Math.hypot(fx, fy);
-  if(fl < 1e-4){ fx = 1; fy = 0; fl = 1; }
-  const mass = Math.max(1, cells.length);
-  return {
-    stats,
-    propulsion: {
-      tail: stats.tail,
-      tentacle: stats.tentacle,
-      fin: stats.fin,
-      limb: stats.limb + stats.claw * 0.6,
-      worm: stats.worm,
-      base: stats.body,
-    },
-    silhouette: {
-      appendage: stats.tail + stats.tentacle + stats.fin + stats.limb + stats.claw + stats.worm + stats.antenna,
-      armor: stats.shell + stats.spike * 0.5,
-      mass,
-    },
-    frontLocal: { x: fx / fl, y: fy / fl },
-  };
-}
-
 function resetCombat(f){
   f.alive = true;
   if(!f.stats) f.stats = {};
@@ -978,25 +826,14 @@ function resetCombat(f){
   };
   if(f.combat.flashCells instanceof Map) f.combat.flashCells.clear();
   if(f.combat.flexPose instanceof Map) f.combat.flexPose.clear();
-  f.combat.morph = buildMorphologyProfile(f);
-  f.combat.motionPhase = 'coil';
-  f.combat.phaseT = 0;
-  f.combat.phaseDur = randRange(ARENA_DEFAULTS.locomotionCycleMin, ARENA_DEFAULTS.locomotionCycleMax);
-  f.combat.lastThrust = 0;
   f.combat.bodySquash = 0;
-  f.combat.bodyStretch = 0;
   f.combat.impactJitter = 0;
   f.combat.recentContactT = 0;
-  f.combat.tetherTargetId = null;
-  f.combat.aimOffsetX = randRange(-ARENA_DEFAULTS.attackAimJitter, ARENA_DEFAULTS.attackAimJitter);
-  f.combat.aimOffsetY = randRange(-ARENA_DEFAULTS.attackAimJitter, ARENA_DEFAULTS.attackAimJitter);
-  f.combat.aimRetargetT = randRange(ARENA_DEFAULTS.attackAimJitterRetargetMin, ARENA_DEFAULTS.attackAimJitterRetargetMax);
-  f.combat.impactDent = 0;
-  f.combat.impactPointX = null;
-  f.combat.impactPointY = null;
   f.combat.tetherStrength = 0;
+  f.combat.tetherTargetId = null;
   f.combat.tetherPointX = 0;
   f.combat.tetherPointY = 0;
+  f.combat.contactDent = null;
 }
 
 export function stepArena(arena, dt){
@@ -1015,8 +852,6 @@ export function stepArena(arena, dt){
   updatePanicState(arena, B, A, dt);
   updateWander(arena, A, dt);
   updateWander(arena, B, dt);
-  updateLocomotionState(arena, A, B, dt);
-  updateLocomotionState(arena, B, A, dt);
 
   applyForces(arena, A, B, dt);
   applyForces(arena, B, A, dt);
@@ -1052,37 +887,6 @@ export function stepArena(arena, dt){
   rebuildWorldCells(arena);
 }
 
-function updateLocomotionState(arena, self, other, dt){
-  const c = self?.combat || (self.combat = {});
-  const m = c.morph || (c.morph = buildMorphologyProfile(self));
-  const p = arena.params;
-  const sx = self.transform.pos.x + self.geom.center.x;
-  const sy = self.transform.pos.y + self.geom.center.y;
-  const ox = other.transform.pos.x + other.geom.center.x;
-  const oy = other.transform.pos.y + other.geom.center.y;
-  const dist = Math.hypot(ox - sx, oy - sy);
-  const close = clamp(1 - dist / 160, 0, 1);
-  c.phaseT = (c.phaseT || 0) + dt;
-  const phaseDur = Math.max(0.2, c.phaseDur || randRange(p.locomotionCycleMin, p.locomotionCycleMax));
-  const coilEnd = phaseDur * p.locomotionCoilRatio;
-  const thrustEnd = coilEnd + phaseDur * p.locomotionThrustRatio;
-  const recoverEnd = thrustEnd + phaseDur * p.locomotionRecoverRatio;
-  let nextPhase = c.motionPhase || 'coil';
-  if(c.phaseT >= phaseDur){
-    c.phaseT = 0;
-    c.phaseDur = randRange(p.locomotionCycleMin, p.locomotionCycleMax) * (1 - close * 0.18 + Math.random() * 0.05);
-    nextPhase = 'coil';
-  } else if(c.phaseT < coilEnd) nextPhase = 'coil';
-  else if(c.phaseT < thrustEnd) nextPhase = 'thrust';
-  else if(c.phaseT < recoverEnd) nextPhase = 'drift';
-  else nextPhase = 'recover';
-  c.motionPhase = nextPhase;
-  const thrust = c.motionPhase === 'thrust' ? 1 : 0;
-  const coil = c.motionPhase === 'coil' ? 1 : 0;
-  c.bodyStretch += ((thrust * (p.thrustStretch + close * 0.035)) - (c.bodyStretch || 0)) * clamp(dt * p.thrustRecovery, 0, 1);
-  c.bodySquash += ((coil * 0.05) - (c.bodySquash || 0)) * clamp(dt * 4.2, 0, 1);
-  c.impactJitter = (c.impactJitter || 0) * Math.exp(-p.contactRecovery * dt * 0.8);
-}
 
 function updateWander(arena, fighter, dt){
   const w = fighter?.combat?.wander;
@@ -1143,9 +947,7 @@ function applyForces(arena, self, other, dt){
 
   applyOrbitAssist(arena, self, dt, rs);
   applyInterceptForce(arena, self, other, dt);
-  applyLocomotionDrive(arena, self, other, dt);
   applyPanicDrive(arena, self, other, dt);
-  applyContactTether(arena, self, other, dt);
 
   const w = self?.combat?.wander;
   if(w){
@@ -1155,16 +957,29 @@ function applyForces(arena, self, other, dt){
     const wf = arena.params.wanderForce || 0;
     const massScale = Math.max(1, self.mass * 0.16);
     const lane = (Number.isFinite(w.laneOffset) ? w.laneOffset : 0) + (Number.isFinite(w.driftX) ? w.driftX : 0) * 0.35;
-    const forward = (arena.params.wanderForwardAmp || 0) * (Number.isFinite(w.driftY) ? w.driftY : 0);
-    v.x += (tx * lane + dirSx * forward) * wf * dt / massScale;
-    v.y += (ty * lane + dirSy * forward) * wf * dt / massScale;
+    v.x += tx * lane * wf * dt / massScale;
+    v.y += ty * lane * wf * dt / massScale;
   }
 
-  applyShapeDrag(arena, self, dt);
-
-  const spaceDrag = Math.exp(-arena.params.spaceDrag * dt);
-  v.x *= spaceDrag;
-  v.y *= spaceDrag;
+  const speed = Math.hypot(v.x, v.y);
+  if(speed > 1e-5){
+    const facing = Number.isFinite(self.transform.angle) ? self.transform.angle : Math.atan2(v.y, v.x);
+    const fx = Math.cos(facing);
+    const fy = Math.sin(facing);
+    const along = (v.x * fx + v.y * fy) / speed;
+    const side = Math.sqrt(Math.max(0, 1 - along * along));
+    const morph = self?.combat?.morph || {};
+    const appendages = (morph.tentacle || 0) + (morph.tail || 0) + (morph.fin || 0) + (morph.limb || 0) + (morph.worm || 0) * 0.6;
+    const shapeDrag = (arena.params.shapeDrag || 0) * (0.7 + Math.min(2.2, appendages * 0.08));
+    const sideSlipDrag = (arena.params.sideSlipDrag || 0) * (0.3 + side * side * 1.25);
+    const drag = Math.exp(-(arena.params.spaceDrag + shapeDrag + sideSlipDrag) * dt);
+    v.x *= drag;
+    v.y *= drag;
+  }else{
+    const spaceDrag = Math.exp(-arena.params.spaceDrag * dt);
+    v.x *= spaceDrag;
+    v.y *= spaceDrag;
+  }
 }
 
 function applyOrbitAssist(arena, fighter, dt, r){
@@ -1177,140 +992,64 @@ function applyOrbitAssist(arena, fighter, dt, r){
   const ty =  rx / rr;
   const radiusBias = Number.isFinite(fighter.combat?.radiusBias) ? fighter.combat.radiusBias : 0;
   const biasedR = Math.max(24, rr * (1 + radiusBias));
+  const wander = fighter?.combat?.wander;
+  const orbitBias = 1 + (Number.isFinite(wander?.orbitBias) ? wander.orbitBias : 0) + (arena.params.wanderOrbitAmp || 0) * (Number.isFinite(wander?.laneOffset) ? wander.laneOffset : 0) * 0.25;
   const orbitDir = Number.isFinite(fighter?.combat?.orbitDir) ? fighter.combat.orbitDir : 1;
-  const desiredV = Math.sqrt(arena.params.sunG / biasedR) * orbitSpeedScale(fighter.mass) * 0.56 * orbitDir;
+  const desiredV = Math.sqrt(arena.params.sunG / biasedR) * orbitSpeedScale(fighter.mass) * 0.90 * Math.max(0.72, orbitBias) * orbitDir;
   const currentTan = v.x * tx + v.y * ty;
   const tanError = desiredV - currentTan;
-  const morph = fighter?.combat?.morph;
-  const appendagePenalty = clamp((morph?.silhouette?.appendage || 0) / Math.max(8, fighter.mass), 0, 0.45);
+  const maneuver = 1 / Math.sqrt(Math.max(1, fighter.mass));
   const panicMul = fighter.combat?.panicActive ? arena.params.panicOrbitAssistMul : 1.0;
   const desperationMul = arena.desperationActive ? arena.params.desperationOrbitAssistMul : 1.0;
-  const assist = arena.params.orbitAssist * panicMul * desperationMul * (1 - appendagePenalty);
+  const assist = arena.params.orbitAssist * panicMul * desperationMul * (0.18 + 2.2 * maneuver);
 
   v.x += tx * tanError * assist * dt;
   v.y += ty * tanError * assist * dt;
-}
-
-function getAimWorldPoint(arena, self, other, dt){
-  const c = self?.combat || (self.combat = {});
-  c.aimRetargetT = (c.aimRetargetT || 0) - dt;
-  if(c.aimRetargetT <= 0){
-    const jitter = Math.max(0, arena?.params?.attackAimJitter || 0);
-    c.aimOffsetX = randRange(-jitter, jitter);
-    c.aimOffsetY = randRange(-jitter, jitter);
-    c.aimRetargetT = randRange(arena?.params?.attackAimJitterRetargetMin || 0.22, arena?.params?.attackAimJitterRetargetMax || 0.60);
-  }
-  return {
-    x: other.transform.pos.x + other.geom.center.x + (c.aimOffsetX || 0),
-    y: other.transform.pos.y + other.geom.center.y + (c.aimOffsetY || 0),
-  };
-}
-
-function getFrontalContactBias(attacker, defender, normal){
-  const faceA = getDesiredFacingWorld(attacker);
-  const faceB = getDesiredFacingWorld(defender);
-  const attackDot = clamp(faceA.x * (-normal.x) + faceA.y * (-normal.y), -1, 1);
-  const defendDot = clamp(faceB.x * normal.x + faceB.y * normal.y, -1, 1);
-  const frontBonus = (attackDot > 0.35 ? attackDot * (attacker?.arenaParams?.frontAttackBonus || 0) : 0);
-  const flankPenalty = defendDot < 0.25 ? (0.25 - defendDot) * 0.25 : 0;
-  return { attackDot, defendDot, frontBonus, flankPenalty };
-}
-
-function getAttackArcMultiplier(arena, attacker, defender, normal){
-  const faceA = getDesiredFacingWorld(attacker);
-  const faceB = getDesiredFacingWorld(defender);
-  const attackDot = clamp(faceA.x * (-normal.x) + faceA.y * (-normal.y), -1, 1);
-  const defendDot = clamp(faceB.x * normal.x + faceB.y * normal.y, -1, 1);
-  let mult = 1;
-  mult += Math.max(0, attackDot) * (arena.params.frontAttackBonus || 0.28);
-  if(attackDot < -0.15) mult -= Math.abs(attackDot) * (arena.params.rearAttackPenalty || 0.22);
-  if(Math.abs(attackDot) < 0.35) mult -= (1 - Math.abs(attackDot) / 0.35) * (arena.params.flankAttackPenalty || 0.10);
-  if(defendDot < -0.15) mult += Math.abs(defendDot) * 0.16;
-  return clamp(mult, 0.58, 1.48);
-}
-
-function getDesiredFacingWorld(f){
-  const local = f?.combat?.morph?.frontLocal || { x: 1, y: 0 };
-  const a = Number.isFinite(f?.transform?.angle) ? f.transform.angle : 0;
-  const ca = Math.cos(a), sa = Math.sin(a);
-  return { x: local.x * ca - local.y * sa, y: local.x * sa + local.y * ca };
 }
 
 function applyInterceptForce(arena, self, other, dt){
   const p = self.transform.pos;
   const v = self.transform.vel;
   const lookAhead = arena.params.interceptLookAhead;
-  const aim = getAimWorldPoint(arena, self, other, dt);
-  const predX = aim.x + other.transform.vel.x * lookAhead;
-  const predY = aim.y + other.transform.vel.y * lookAhead;
-  const dx = predX - p.x;
-  const dy = predY - p.y;
-  const d2 = dx * dx + dy * dy + 480;
+  const predX = other.transform.pos.x + other.transform.vel.x * lookAhead;
+  const predY = other.transform.pos.y + other.transform.vel.y * lookAhead;
+
+  const orx = predX - arena.sun.x;
+  const ory = predY - arena.sun.y;
+  const rr = Math.max(1, Math.hypot(orx, ory));
+  const tx = -ory / rr;
+  const ty =  orx / rr;
+
+  const sideBase = arena.params.interceptSideOffset;
+  const desperationSideMul = arena.desperationActive ? arena.params.desperationSideOffsetMul : 1.0;
+  const sideOffset = clamp((sideBase + Math.sqrt(Math.max(1, other.mass)) * arena.params.interceptSideMassFactor) * desperationSideMul, 5, 28);
+
+  const cross = (p.x - predX) * ty - (p.y - predY) * tx;
+  const sideSign = Math.sign(cross) || 1;
+  const w = self?.combat?.wander;
+  const nx = rr > 1e-6 ? orx / rr : 0;
+  const ny = rr > 1e-6 ? ory / rr : 0;
+  const laneOffset = Number.isFinite(w?.laneOffset) ? w.laneOffset : 0;
+  const wanderSide = (arena.params.wanderSideAmp || 0) * (laneOffset + (Number.isFinite(w?.driftX) ? w.driftX : 0) * 0.25) * (w?.sideSign || 1);
+
+  const targetX = predX + tx * (sideOffset * sideSign + wanderSide);
+  const targetY = predY + ty * (sideOffset * sideSign + wanderSide);
+
+  const dx = targetX - p.x;
+  const dy = targetY - p.y;
+  const d2 = dx * dx + dy * dy + 600;
   const d = Math.sqrt(d2);
   const dirX = dx / d;
   const dirY = dy / d;
-  const face = getDesiredFacingWorld(self);
-  const facing = clamp(face.x * dirX + face.y * dirY, -1, 1);
-  const zoneWeight = smoothstep(220, 46, d);
+
+  const engage = smoothstep(380, 58, d);
+  const maneuver = 1 / Math.sqrt(Math.max(1, self.mass));
   const panicMul = self.combat?.panicActive ? arena.params.panicBodyGMul : 1.0;
   const desperationMul = arena.desperationActive ? arena.params.desperationBodyGMul : 1.0;
-  const acc = arena.params.bodyG * panicMul * desperationMul * zoneWeight * (0.48 + Math.max(0, facing) * 0.54) / d2;
+  const acc = arena.params.bodyG * panicMul * desperationMul * engage * (0.95 + 9.0 * maneuver) / d2;
+
   v.x += dirX * acc * dt;
   v.y += dirY * acc * dt;
-}
-
-function applyLocomotionDrive(arena, self, other, dt){
-  const c = self?.combat || (self.combat = {});
-  const morph = c.morph || (c.morph = buildMorphologyProfile(self));
-  const phase = c.motionPhase || 'coil';
-  const sx = self.transform.pos.x + self.geom.center.x;
-  const sy = self.transform.pos.y + self.geom.center.y;
-  const aim = getAimWorldPoint(arena, self, other, dt);
-  let dirX = aim.x - sx;
-  let dirY = aim.y - sy;
-  const dist = Math.max(1, Math.hypot(dirX, dirY));
-  dirX /= dist; dirY /= dist;
-  const face = getDesiredFacingWorld(self);
-  const facingDot = clamp(face.x * dirX + face.y * dirY, -1, 1);
-  const misalign = 1 - Math.max(0, facingDot);
-  const thrustProfile = morph.propulsion;
-  const drive = arena.params.locomotionBaseForce
-    + thrustProfile.tail * arena.params.locomotionTailForce
-    + thrustProfile.tentacle * arena.params.locomotionTentacleForce
-    + thrustProfile.fin * arena.params.locomotionFinForce
-    + thrustProfile.limb * arena.params.locomotionLimbForce
-    + thrustProfile.worm * arena.params.locomotionWormForce;
-  const normDrive = drive / Math.max(12, self.mass + morph.silhouette.appendage * 1.3);
-  const phaseMul = phase === 'thrust' ? 1.15 : phase === 'coil' ? -0.18 : phase === 'recover' ? 0.12 : 0.0;
-  const engage = smoothstep(240, 38, dist);
-  const frontalDrive = facingDot >= 0 ? (1 + facingDot * (arena.params.frontalDriveBonus || 0.18)) : (1 - Math.abs(facingDot) * (arena.params.sideDrivePenalty || 0.16));
-  const accel = normDrive * engage * phaseMul * (1 - misalign * arena.params.locomotionMisalignPenalty) * frontalDrive;
-  if(Math.abs(accel) > 1e-5){
-    self.transform.vel.x += dirX * accel * dt;
-    self.transform.vel.y += dirY * accel * dt;
-  }
-  if(phase === 'drift'){
-    const brake = Math.exp(-arena.params.locomotionDriftBrake * dt);
-    self.transform.vel.x *= brake;
-    self.transform.vel.y *= brake;
-  }
-}
-
-function applyShapeDrag(arena, self, dt){
-  const morph = self?.combat?.morph;
-  if(!morph) return;
-  const v = self.transform.vel;
-  const speed = Math.hypot(v.x, v.y);
-  if(speed < 1e-4) return;
-  const velX = v.x / speed, velY = v.y / speed;
-  const face = getDesiredFacingWorld(self);
-  const dot = clamp(face.x * velX + face.y * velY, -1, 1);
-  const side = Math.sqrt(Math.max(0, 1 - dot * dot));
-  const appendage = morph.silhouette.appendage / Math.max(10, morph.silhouette.mass);
-  const dragK = arena.params.shapeDragBase + side * arena.params.shapeDragSide + appendage * arena.params.shapeDragAppendage;
-  const drag = Math.exp(-dragK * speed * dt);
-  v.x *= drag;
-  v.y *= drag;
 }
 
 
@@ -1450,36 +1189,6 @@ function applyPanicDrive(arena, self, other, dt){
   self.transform.vel.y += (dirY / dirL) * accel * dt / Math.max(1, self.mass * 0.08);
 }
 
-function applyContactTether(arena, self, other, dt){
-  const c = self?.combat;
-  if(!c || c.tetherTargetId !== other?.id) return;
-  const strength = clamp(c.tetherStrength || 0, 0, 1.35);
-  if(strength <= 0.001) return;
-  const sx = self.transform.pos.x + self.geom.center.x;
-  const sy = self.transform.pos.y + self.geom.center.y;
-  const tx = Number.isFinite(c.tetherPointX) ? c.tetherPointX : (other.transform.pos.x + other.geom.center.x);
-  const ty = Number.isFinite(c.tetherPointY) ? c.tetherPointY : (other.transform.pos.y + other.geom.center.y);
-  const dx = tx - sx;
-  const dy = ty - sy;
-  const d = Math.max(1e-6, Math.hypot(dx, dy));
-  const nx = dx / d;
-  const ny = dy / d;
-  const tangentX = -ny;
-  const tangentY = nx;
-  const rvx = other.transform.vel.x - self.transform.vel.x;
-  const rvy = other.transform.vel.y - self.transform.vel.y;
-  const relTan = rvx * tangentX + rvy * tangentY;
-  const pull = (46 + contactTypeHoldBias(self) * 26) * strength;
-  const tangentPull = relTan * strength * 0.22;
-  self.transform.vel.x += (nx * pull + tangentX * tangentPull) * dt / Math.max(1, self.mass * 0.085);
-  self.transform.vel.y += (ny * pull + tangentY * tangentPull) * dt / Math.max(1, self.mass * 0.085);
-  c.tetherStrength *= Math.exp(-3.4 * dt);
-  if(c.tetherStrength < 0.03){
-    c.tetherStrength = 0;
-    c.tetherTargetId = null;
-  }
-}
-
 function integrate(f, dt, arena){
   const p = f.transform.pos;
   const v = f.transform.vel;
@@ -1496,9 +1205,16 @@ function integrate(f, dt, arena){
   p.x += v.x * dt;
   p.y += v.y * dt;
 
-  f.combat.bodySquash *= Math.exp(-arena.params.contactRecovery * dt);
-  f.combat.bodyStretch *= Math.exp(-arena.params.thrustRecovery * dt * 0.35);
-  f.combat.impactDent *= Math.exp(-arena.params.contactRecovery * dt * 0.9);
+  if(f.combat){
+    f.combat.recentContactT = Math.max(0, (f.combat.recentContactT || 0) - dt);
+    f.combat.bodySquash = (f.combat.bodySquash || 0) * Math.exp(-5.6 * dt);
+    f.combat.impactJitter = (f.combat.impactJitter || 0) * Math.exp(-8.5 * dt);
+    f.combat.tetherStrength = (f.combat.tetherStrength || 0) * Math.exp(-4.2 * dt);
+    if(f.combat.contactDent){
+      f.combat.contactDent.strength *= Math.exp(-5.4 * dt);
+      if(f.combat.contactDent.strength < 0.03) f.combat.contactDent = null;
+    }
+  }
 
   updateAngularMotion(f, arena, dt);
 
@@ -1508,23 +1224,24 @@ function integrate(f, dt, arena){
 
 function updateAngularMotion(f, arena, dt){
   if(!f?.transform) return;
+  const p = f.transform.pos;
   const v = f.transform.vel;
+  const rx = p.x - arena.sun.x;
+  const ry = p.y - arena.sun.y;
+  const r = Math.max(1, Math.hypot(rx, ry));
+  const tx = -ry / r;
+  const ty =  rx / r;
+  const vt = v.x * tx + v.y * ty;
+  const inertia = Math.max(12, f.mass * Math.max(4, f.geom.radius) * 0.06);
   const speed = Math.hypot(v.x, v.y);
-  const desiredMoveAngle = speed > 1e-4 ? Math.atan2(v.y, v.x) : f.transform.angle;
-  const frontLocal = f?.combat?.morph?.frontLocal || { x: 1, y: 0 };
-  const frontLocalAngle = Math.atan2(frontLocal.y, frontLocal.x);
-  const desiredBodyAngle = desiredMoveAngle - frontLocalAngle;
-  let delta = desiredBodyAngle - f.transform.angle;
-  while(delta > Math.PI) delta -= Math.PI * 2;
-  while(delta < -Math.PI) delta += Math.PI * 2;
-  const phase = f?.combat?.motionPhase || 'recover';
-  const turnMul = phase === 'thrust' ? 0.55 : phase === 'coil' ? 1.15 : 0.82;
-  let clinchBias = 0;
-  if((f?.combat?.grappleTimer || 0) > 0.01 && f?.combat?.tetherTargetId){
-    clinchBias = Math.sign(delta) * Math.min(Math.abs(delta), arena.params.clinchTurnAssist || 1.4) * 0.35;
-  }
-  const desiredSpin = clamp(delta * arena.params.bodyAlignRate * turnMul + clinchBias, -arena.params.bodyTurnRate, arena.params.bodyTurnRate);
-  f.transform.angularVel += (desiredSpin - f.transform.angularVel) * clamp(dt * 6.5, 0, 0.22);
+  const targetSpin = vt / Math.max(10, f.geom.radius * 2.25);
+  f.transform.angularVel += (targetSpin - f.transform.angularVel) * clamp((12 / inertia) * dt, 0, 0.14);
+  const desiredAngle = speed > 0.35 ? Math.atan2(v.y, v.x) : (Number.isFinite(f.transform.angle) ? f.transform.angle : 0);
+  let da = desiredAngle - (Number.isFinite(f.transform.angle) ? f.transform.angle : 0);
+  while(da > Math.PI) da -= Math.PI * 2;
+  while(da < -Math.PI) da += Math.PI * 2;
+  const contactTurn = (f.combat?.recentContactT || 0) > 0 ? (arena.params.clinchTurnAssist || 0) : 0;
+  f.transform.angularVel += da * (arena.params.frontBiasTurn || 0.9) * dt * (1.0 + contactTurn);
   f.transform.angularVel *= Math.exp(-arena.params.angularDamping * dt);
   f.transform.angle += f.transform.angularVel * dt;
 }
@@ -1644,9 +1361,7 @@ function resolveContact(arena, A, B, contact, dt){
   B.stats.contactFrames++;
   markContactFlash(arena, A, contact?.pairs, 'A');
   markContactFlash(arena, B, contact?.pairs, 'B');
-  const contactStrength = clamp(contact?.contactPairs / 12, 0.2, 1.05);
-  queueCameraHit(arena, contact?.hitPoint, contactStrength);
-  addCameraShake(arena, (arena?.params?.cameraShakeBase || 0.22) * contactStrength);
+  queueCameraHit(arena, contact?.hitPoint, clamp(contact?.contactPairs / 8, 0.35, 1.2));
 
   applyContactSlideSpin(arena, A, B, contact, dt);
 
@@ -1656,10 +1371,8 @@ function resolveContact(arena, A, B, contact, dt){
   const attackMultA = 1 + clamp(speedInA / arena.params.v0, 0, arena.params.speedCap);
   const attackMultB = 1 + clamp(speedInB / arena.params.v0, 0, arena.params.speedCap);
 
-  const arcA = getAttackArcMultiplier(arena, A, B, contact.normal);
-  const arcB = getAttackArcMultiplier(arena, B, A, { x: -contact.normal.x, y: -contact.normal.y });
-  const modA = getAttackMod(A, contact.hitA, arena) * getDefenseMod(B, contact.hitB, arena) * arcA;
-  const modB = getAttackMod(B, contact.hitB, arena) * getDefenseMod(A, contact.hitA, arena) * arcB;
+  const modA = getAttackMod(A, contact.hitA, arena) * getDefenseMod(B, contact.hitB, arena);
+  const modB = getAttackMod(B, contact.hitB, arena) * getDefenseMod(A, contact.hitA, arena);
 
   const impactFactorA = 0.90 + 2.15 * clamp(speedInA / Math.max(1, arena.params.v0), 0, arena.params.speedCap);
   const impactFactorB = 0.90 + 2.15 * clamp(speedInB / Math.max(1, arena.params.v0), 0, arena.params.speedCap);
@@ -1682,24 +1395,6 @@ function resolveContact(arena, A, B, contact, dt){
   A.stats.damageTaken += dmgToA;
 
   const tentacleInvolved = (contact.hitA.tentacle > 0) || (contact.hitB.tentacle > 0);
-  if(contact.contactPairs > 0){
-    const t = arena.params.contactStick + (tentacleInvolved ? arena.params.tentacleHoldBoost : 0) + clamp(contact.contactPairs / 42, 0.04, 0.16);
-    A.combat.grappleTimer = Math.max(A.combat.grappleTimer, t);
-    B.combat.grappleTimer = Math.max(B.combat.grappleTimer, t);
-    A.combat.recentContactT = Math.max(A.combat.recentContactT || 0, 0.45);
-    B.combat.recentContactT = Math.max(B.combat.recentContactT || 0, 0.45);
-    const holdA = clamp(0.22 + contactTypeHoldBias(A) + (tentacleInvolved ? 0.22 : 0) + contact.contactPairs * 0.01, 0.16, 1.25);
-    const holdB = clamp(0.22 + contactTypeHoldBias(B) + (tentacleInvolved ? 0.22 : 0) + contact.contactPairs * 0.01, 0.16, 1.25);
-    A.combat.tetherTargetId = B.id;
-    B.combat.tetherTargetId = A.id;
-    A.combat.tetherStrength = Math.max(A.combat.tetherStrength || 0, holdA);
-    B.combat.tetherStrength = Math.max(B.combat.tetherStrength || 0, holdB);
-    A.combat.tetherPointX = contact.hitPoint.x; A.combat.tetherPointY = contact.hitPoint.y;
-    B.combat.tetherPointX = contact.hitPoint.x; B.combat.tetherPointY = contact.hitPoint.y;
-    const mult = 1 + (tentacleInvolved ? arena.params.tentacleDragBoost : 0.12) + clamp(contact.contactPairs / 50, 0.04, 0.22);
-    A.combat.contactDragMult = Math.max(A.combat.contactDragMult || 1.0, mult);
-    B.combat.contactDragMult = Math.max(B.combat.contactDragMult || 1.0, mult);
-  }
 
   if(contact.hitA.tail > 0) applyTailKick(arena, A, B, contact);
   if(contact.hitB.tail > 0) applyTailKick(arena, B, A, contact);
@@ -1713,6 +1408,27 @@ function resolveContact(arena, A, B, contact, dt){
   const rvy = A.transform.vel.y - B.transform.vel.y;
   const vn = rvx * nx + rvy * ny;
   const vt = rvx * tx + rvy * ty;
+
+  if(contact.contactPairs > 0){
+    const t = (arena.params.contactStick || arena.params.grappleBase || 0.22) + (tentacleInvolved ? arena.params.tentacleHoldBoost : 0) + clamp(contact.contactPairs / 42, 0.04, 0.16);
+    A.combat.grappleTimer = Math.max(A.combat.grappleTimer, t);
+    B.combat.grappleTimer = Math.max(B.combat.grappleTimer, t);
+    A.combat.recentContactT = Math.max(A.combat.recentContactT || 0, 0.46);
+    B.combat.recentContactT = Math.max(B.combat.recentContactT || 0, 0.46);
+    const mult = 1 + (tentacleInvolved ? arena.params.tentacleDragBoost : 0.10) + clamp(contact.contactPairs / 50, 0.03, 0.22);
+    A.combat.contactDragMult = Math.max(A.combat.contactDragMult || 1.0, mult);
+    B.combat.contactDragMult = Math.max(B.combat.contactDragMult || 1.0, mult);
+    const tether = clamp(0.22 + contact.contactPairs * 0.01 + (tentacleInvolved ? 0.16 : 0), 0.18, 1.2);
+    A.combat.tetherTargetId = B.id;
+    B.combat.tetherTargetId = A.id;
+    A.combat.tetherStrength = Math.max(A.combat.tetherStrength || 0, tether);
+    B.combat.tetherStrength = Math.max(B.combat.tetherStrength || 0, tether);
+    A.combat.tetherPointX = contact.hitPoint.x; A.combat.tetherPointY = contact.hitPoint.y;
+    B.combat.tetherPointX = contact.hitPoint.x; B.combat.tetherPointY = contact.hitPoint.y;
+    const dent = clamp((arena.params.contactDentDepth || 1.2) * (0.45 + contact.contactPairs / 24), 0.35, 2.3);
+    A.combat.contactDent = { x: contact.hitPoint.x, y: contact.hitPoint.y, strength: Math.max(A.combat.contactDent?.strength || 0, dent) };
+    B.combat.contactDent = { x: contact.hitPoint.x, y: contact.hitPoint.y, strength: Math.max(B.combat.contactDent?.strength || 0, dent) };
+  }
 
   const invMA = 1 / Math.max(1, A.mass);
   const invMB = 1 / Math.max(1, B.mass);
@@ -1732,7 +1448,7 @@ function resolveContact(arena, A, B, contact, dt){
     B.transform.vel.y -= ny * jB;
 
     const tangentMul = arena.desperationActive ? arena.params.desperationTangentBounceMul : 1.0;
-    const tangentKick = Math.abs(vn) * arena.params.tangentBounce * tangentMul * clamp(0.55 + Math.abs(vt) * 0.05, 0.55, 1.15);
+    const tangentKick = Math.abs(vn) * arena.params.tangentBounce * tangentMul;
     const massFactorA = 1 / Math.pow(Math.max(1, A.mass), 0.52);
     const massFactorB = 1 / Math.pow(Math.max(1, B.mass), 0.52);
 
@@ -1760,15 +1476,18 @@ function resolveContact(arena, A, B, contact, dt){
     );
   }
 
-  const impactSquash = clamp(contact.contactPairs / 24, 0.08, arena.params.contactBodySquash);
+  const impactSquash = clamp(contact.contactPairs / 24, 0.08, arena.params.contactBodySquash || 0.18);
   A.combat.bodySquash = Math.max(A.combat.bodySquash || 0, impactSquash);
   B.combat.bodySquash = Math.max(B.combat.bodySquash || 0, impactSquash);
   A.combat.impactJitter = Math.max(A.combat.impactJitter || 0, Math.abs(vn) * 0.04 + impactSquash * 4.0);
   B.combat.impactJitter = Math.max(B.combat.impactJitter || 0, Math.abs(vn) * 0.04 + impactSquash * 4.0);
-  A.combat.impactDent = Math.max(A.combat.impactDent || 0, impactSquash * (arena.params.localImpactDent || 0.18));
-  B.combat.impactDent = Math.max(B.combat.impactDent || 0, impactSquash * (arena.params.localImpactDent || 0.18));
-  A.combat.impactPointX = contact.hitPoint.x; A.combat.impactPointY = contact.hitPoint.y;
-  B.combat.impactPointX = contact.hitPoint.x; B.combat.impactPointY = contact.hitPoint.y;
+
+  const slide = clamp(vt * 0.06, -1.6, 1.6);
+  const surfaceSlide = (arena.params.contactSurfaceSlide || 0) * dt;
+  A.transform.pos.x += tx * slide * surfaceSlide * invMB;
+  A.transform.pos.y += ty * slide * surfaceSlide * invMB;
+  B.transform.pos.x -= tx * slide * surfaceSlide * invMA;
+  B.transform.pos.y -= ty * slide * surfaceSlide * invMA;
 
   const push = arena.params.separation * clamp(contact.contactPairs / 26, 0.14, 0.92);
   const pA = push * (invMA / invSum);
@@ -1778,12 +1497,6 @@ function resolveContact(arena, A, B, contact, dt){
   A.transform.pos.y += ny * pA * dt;
   B.transform.pos.x -= nx * pB * dt;
   B.transform.pos.y -= ny * pB * dt;
-
-  const dragIntoClinch = clamp(contact.contactPairs / 30, 0.04, 0.22);
-  A.transform.pos.x += nx * dragIntoClinch * dt * (invMB / invSum);
-  A.transform.pos.y += ny * dragIntoClinch * dt * (invMB / invSum);
-  B.transform.pos.x -= nx * dragIntoClinch * dt * (invMA / invSum);
-  B.transform.pos.y -= ny * dragIntoClinch * dt * (invMA / invSum);
 }
 
 function getAttackMod(f, hit, arena){
@@ -1794,11 +1507,6 @@ function getAttackMod(f, hit, arena){
 function getDefenseMod(target, hit, arena){
   if(hit?.shell > 0) return arena.params.shellDamageReduction;
   return 1.0;
-}
-
-function contactTypeHoldBias(f){
-  const m = f?.combat?.morph?.propulsion || {};
-  return (m.tentacle || 0) * 0.08 + (m.limb || 0) * 0.05 + (m.worm || 0) * 0.03;
 }
 
 function applyTailKick(arena, attacker, other, contact){

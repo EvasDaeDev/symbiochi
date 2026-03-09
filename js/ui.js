@@ -200,14 +200,6 @@ export function attachSettings(view, els, toast){
     return state;
   }
 
-  function fmtPlan(plan){
-    if (!plan || typeof plan !== "object") return "—";
-    const eco = plan.ecotype ?? "—";
-    const ax  = Array.isArray(plan.axisDir) ? plan.axisDir.join(",") : "—";
-    const sym = Number.isFinite(plan.symmetry) ? Math.round(plan.symmetry * 100) + "%" : "—";
-    const wig = Number.isFinite(plan.wiggle) ? Math.round(plan.wiggle * 100) + "%" : "—";
-    return `eco: ${eco}\naxis: ${ax}\nsym: ${sym}\nwig: ${wig}`;
-  }
 
 function refreshInventoryUI(state){
   if (!state) return;
@@ -292,11 +284,6 @@ function refreshInventoryUI(state){
     if (els.fxEnabled){
       const cur = (state.settings?.fxEnabled !== false);
       els.fxEnabled.checked = !!cur;
-    }
-
-    if (els.planInfo){
-      const org = getActiveOrg(state);
-      els.planInfo.textContent = fmtPlan(org?.plan);
     }
 
     els.settingsOverlay.style.display = "grid";

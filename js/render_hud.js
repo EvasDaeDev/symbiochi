@@ -20,7 +20,7 @@ function barToneCls(v){
 function barStatus(org){
   const bars = org?.bars || {food:1,clean:1,hp:1,mood:1};
   const minBar = Math.min(bars.food, bars.clean, bars.hp, bars.mood);
-  if (minBar <= 0.01) return { txt:"усыхание", cls:"bad" };
+  if (minBar <= 0.01) return { txt:"стазис", cls:"bad" };
   if (minBar <= 0.1) return { txt:"анабиоз", cls:"bad" };
   if (minBar <= 0.15) return { txt:"критично", cls:"bad" };
   if (minBar <= 0.35) return { txt:"плохо", cls:"bad" };

@@ -70,6 +70,18 @@ function countBlocks(org){
   return body + mods;
 }
 
+export function getOrganismHonor(org){
+  if (!org) return 0;
+
+  if (Number.isFinite(org?.pvp?.honor)) {
+    return org.pvp.honor;
+  }
+  if (Number.isFinite(org?.honor)) {
+    return org.honor;
+  }
+  return 0;
+}
+
 async function deriveAesKeyFromPassword(password, saltU8, iters){
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
@@ -371,6 +383,7 @@ const meta = {
   name: exportName,
   blocks: countBlocks(bud),
   createdAt,
+  honor: getOrganismHonor(bud),
 };
   const payload = { organismState: budData, meta };
   const enc = await encryptJson(payload, key);
@@ -413,13 +426,6 @@ export async function rotateDepartedCapsuleKey(state, capsuleId){
   const oldKey = rec.key;
   if (!oldKey) return { ok: false, reason: "no_key" };
 
-
-  // Prevent importing the same capsule multiple times into the same home.
-  state.importedCapsules = Array.isArray(state.importedCapsules) ? state.importedCapsules : [];
-  if (capsule.capsuleId){
-    const cid = String(capsule.capsuleId);
-    if (state.importedCapsules.includes(cid)) return { ok: false, reason: "already_imported" };
-  }
 
   const dec = await decryptJson(rec.capsule, oldKey);
   if (!dec.ok) return { ok: false, reason: "bad_key" };
@@ -484,12 +490,25 @@ export async function importCapsuleFileToHome(view, file, key){
 
   const payload = dec.obj;
   const bud = payload?.organismState;
-  // === NEW: restore name from capsule meta ===
-if (payload?.meta?.name) {
-  bud.name = payload.meta.name;
-}
   if (!bud || !bud.body || !Array.isArray(bud.body.cells)){
     return { ok: false, reason: "corrupt" };
+  }
+
+  // Restore friendly name from capsule meta.
+  if (payload?.meta?.name) {
+    bud.name = payload.meta.name;
+  }
+
+  // Normalize honor so home UI and future exports use one stable field.
+  if (!bud.pvp || typeof bud.pvp !== "object") bud.pvp = {};
+  if (!Number.isFinite(bud.pvp.honor)) {
+    if (Number.isFinite(payload?.meta?.honor)) {
+      bud.pvp.honor = payload.meta.honor;
+    } else if (Number.isFinite(bud?.honor)) {
+      bud.pvp.honor = bud.honor;
+    } else {
+      bud.pvp.honor = 0;
+    }
   }
 
   // Prevent id collision in this home.
@@ -522,5 +541,5 @@ if (payload?.meta?.name) {
   }
 
   saveGame(state);
-  return { ok: true };
+  return { ok: true, honor: getOrganismHonor(bud) };
 }

@@ -830,60 +830,10 @@ const isBigForBud = M.bodyBlocks >= bigParentSize;
 
   // Снизить приоритет роста тела на 15%.
   weights = weights.map(([k, w]) => (k === "grow_body" ? [k, w * growBodyPenalty] : [k, w]));
-   // === PERSONAL PLAN (cheap but strong shape diversity) ===
-  const plan = state.plan || {};
-  const eco = plan.ecotype || "crawler";
 
-  function bump(key, add){
-    weights = weights.map(([k,w]) => (k===key ? [k, w + add] : [k,w]));
-  }
-  function mul(key, m){
-    weights = weights.map(([k,w]) => (k===key ? [k, w * m] : [k,w]));
-  }
-
-  // Ecotype biases (small, but постоянные -> силуэт меняется заметно)
-  if (eco === "crawler"){
-    bump("limb", 0.10);
-	bump("tentacle", 0.10);
-    mul("tail", 0.90);
-    mul("antenna", 0.95);
-  } else if (eco === "swimmer"){
-    bump("tail", 0.15);
-    mul("limb", 0.90);
-  } else if (eco === "sentinel"){
-    bump("antenna", 0.10);
-    bump("eye", 0.05);
-    bump("spike", 0.10);
-    mul("grow_body", 0.90);
-  } else if (eco === "tank"){
-    bump("shell", 0.10);
-    bump("spike", 0.05);
-    bump("grow_body", 0.12);
-    mul("limb", 0.85);
-    mul("tail", 0.85);
-	} else if (eco === "lurker"){
-  bump("tentacle", 0.10);
-  bump("worm", 0.18);
-  bump("eye", 0.10);
-  mul("limb", 0.88);
-  bump("grow_appendage", 0.14);
-  } else if (eco === "seer"){
-  bump("antenna", 0.10);
-  bump("eye", 0.05);
-  mul("spike", 0.90);
-  mul("grow_body", 0.94);
-  } else if (eco === "fortress"){
-  bump("shell", 0.18);
-  bump("spike", 0.10);
-  mul("tail", 0.85);
-  mul("limb", 0.85);
-  bump("grow_body", 0.06);
-  } else if (eco === "bloomer"){
-  bump("grow_body", 0.04);
-  bump("grow_appendage", 0.02);
-  bump("tail", 0.10);
-  mul("shell", 0.90);
-  }
+  // Экопланы отключены:
+  // дальнейший рост определяется только текущим состоянием организма,
+  // морфологией, дефицитами и историей ухода, без preset-экотипов.
 
   // === ЭКОЛОГИЯ (морфо-обратная связь) ===
   // Если тело крупнее, а "мобильность" слабая -> подталкиваем к лапам/хвостам
@@ -1225,12 +1175,14 @@ const ok = createBudFromModule(state, idx, rng, triesMult);
         maxGrows = Math.min(maxGrows, appendageBudget);
       }
       const grownModules = [];
+      const trappedModules = [];
       const grew = growPlannedModules(state, rng, {
         target,
         maxGrows,
         strength,
         shuffle: !target,
-        grownModules
+        grownModules,
+        trappedModules
       });
       if (grew){
         if (appendageBudget !== null){
@@ -1251,36 +1203,43 @@ const ok = createBudFromModule(state, idx, rng, triesMult);
           });
         }
       } else {
+        const shouldReanchor = trappedModules.length > 0 || (forcedByPerimeter && forcedPerimeterMode === "appendage");
+        if (shouldReanchor){
+          reanchorModulesToPerimeter(state, state);
+
+          const grownModules2 = [];
+          const trappedModules2 = [];
+          const grew2 = growPlannedModules(state, rng, {
+            target,
+            maxGrows: Math.max(1, Math.min(2, maxGrows)),
+            strength,
+            shuffle: !target,
+            grownModules: grownModules2,
+            trappedModules: trappedModules2
+          });
+
+          if (grew2){
+            pushLog(state,
+              trappedModules.length > 0
+                ? `Эволюция: орган почти врос в тело, перенос к коже сработал и рост продолжился.`
+                : `Эволюция: периметр занят → органы выкатились к коже и выросли.`,
+              "mut_ok",
+              {
+                part: "appendage",
+                mi: (grownModules2.length === 1) ? grownModules2[0] : null,
+                grownModules: grownModules2
+              }
+            );
+            continue;
+          }
+        }
+
         // Do not waste the mutation step: if appendage growth failed, expand body.
         if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
           pushLog(state, `Эволюция: периметр занят,  Рост органов не удался.`, "mut_fail", { part: "appendage" });
-          // Requirement: if perimeter cap reached and we couldn't extend organs, grow body.
           growBodyWithEarlyBoost("периметр занят — фолбэк на рост тела");
         } else {
           pushLog(state, `Эволюция: рост органов не удался.`, "mut_fail", { part: "appendage" });
-		  
-		  // === Attempt 2: reanchor modules to skin, then retry once (prevents "thick bald" spiral)
-if (forcedByPerimeter && forcedPerimeterMode === "appendage"){
-  reanchorModulesToPerimeter(state, state);
-
-  const grownModules2 = [];
-  const grew2 = growPlannedModules(state, rng, {
-    target,
-    maxGrows: Math.max(1, Math.min(2, maxGrows)), // небольшой ретрай
-    strength,
-    shuffle: !target,
-    grownModules: grownModules2
-  });
-
-  if (grew2){
-    pushLog(state, `Эволюция: периметр занят → органы выкатились к коже и выросли.`, "mut_ok", {
-      part: "appendage",
-      mi: (grownModules2.length === 1) ? grownModules2[0] : null,
-      grownModules: grownModules2
-    });
-    continue;
-  }
-}
           growBodyWithEarlyBoost("фолбэк после неудачного роста отростка");
         }
       }

@@ -90,16 +90,8 @@ const seed = (org.seed ?? hash32(base, org.id ?? 0)) | 0;
 
 org.seed = seed;
 
-    // per-organism "development plan" (for shape diversity)
-    if (!org.plan || typeof org.plan !== "object"){
-      const prng = mulberry32(hash32(seed, 60606));
-      org.plan = {
-        axisDir: pick(prng, [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]),
-        symmetry: prng(),
-        wiggle: prng(),
-        ecotype: pick(prng, ["crawler","swimmer","sentinel","tank","sprinter","lurker","seer","fortress","bloomer"])
-      };
-    }
+    // Remove legacy preset growth plans from old saves entirely.
+    if (Object.prototype.hasOwnProperty.call(org, "plan")) delete org.plan;
 
     org.version = 6;
     org.care = org.care || { feed:0, wash:0, heal:0, neglect:0 };
@@ -572,27 +564,10 @@ export function simulate(state, deltaSec){
     return state._mutationContext;
   };
 
-const applyShrinkIfNeeded = (org, dt)=>{
-  if (!org || !(dt > 0)) return 0;
-  const b = org.bars || {};
-
-  // Усыхание только при глубоком истощении: хотя бы один core-бар <= 0
-  if ((b.food ?? 0) > 0 && (b.clean ?? 0) > 0 && (b.hp ?? 0) > 0) return 0;
-
-  org._shrinkAccSec = (org._shrinkAccSec || 0) + dt;
-
-  const stepSec = 10 * 60; // 1 шаг усыхания ~ каждые 10 минут
-  const steps = Math.floor(org._shrinkAccSec / stepSec);
-  if (steps <= 0) return 0;
-
-  // списываем ТОЛЬКО то, что реально превратилось в "шаги"
-  org._shrinkAccSec -= steps * stepSec;
-
-  // ВАЖНО: не применяем shrink тут.
-  // Только копим "долг" на применение в общем блоке ниже (с логом и учётом статистики).
-  org._offlineShrinks = (org._offlineShrinks || 0) + steps;
-
-  return steps; // вернём сколько шагов начислили (для отладки, если надо)
+const applyShrinkIfNeeded = (_org, _dt)=>{
+  // Усыхание отключено: при истощении организм уходит в стазис,
+  // но клетки больше не теряются ни онлайн, ни оффлайн.
+  return 0;
 };
 
   const maxPerTick = Math.max(1, Math.floor(EVO.maxMutationsPerTick || 2));
@@ -775,28 +750,11 @@ if (info.inStasis){
   state.lastMutationAt = now;
 const blocksAfterMutations = orgs.map(countBlocks);
 
-// Apply accumulated shrink steps.
-// Done AFTER time fast-forward, so shrink does not interfere with per-tick mutation placement.
+// Усыхание отключено: накопленные shrink-шаги не применяются.
 for (const org of orgs){
-  const pending = (org && org._offlineShrinks) ? (org._offlineShrinks|0) : 0;
-  if (pending <= 0) continue;
-
-  // Safety cap per simulate() call (чтобы не вырубить огромным dt)
-  const cap = Math.min(pending, 20);
-
-  let applied = 0;
-  for (let i = 0; i < cap; i++){
-    if (applyShrinkDecay(org, org.lastMutationAt || now)) applied++;
-    else break;
-  }
-
-  if (applied > 0){
-    simShrinks += applied;
-    pushLog(org, `Организм усыхает (-${applied} блок.)`, "alert");
-  }
-
-  // ВАЖНО: остаток НЕ сжигаем — оставляем долг на следующий simulate()
-  org._offlineShrinks = Math.max(0, pending - applied);
+  if (!org) continue;
+  org._offlineShrinks = 0;
+  org._shrinkAccSec = 0;
 }
 
   // Repair invariant after offline catch-up: no floating modules disconnected from body.
@@ -858,7 +816,7 @@ for (const org of orgs){
 function reportCriticalState(org, momentSec){
   const shrunk = applyShrinkDecay(org, momentSec);
   const msg = shrunk
-    ? "Критическое состояние: параметр на нуле, организм усыхает."
+    ? "Критическое состояние: параметр на нуле, организм в стазисе."
     : "Критическое состояние: параметр на нуле.";
   pushLog(org, msg, "alert");
 }
@@ -973,7 +931,6 @@ function promoteBudToParent(state, bud){
   const fields = [
     "name",
     "seed",
-    "plan",
     "version",
     "care",
     "bars",

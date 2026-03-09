@@ -45,6 +45,7 @@ import {
   attachDragPan,
   attachZoomWheel
 } from "./ui.js";
+import { getOrganismHonor } from "./capsule.js";
 
 const els = {
   dbgPanel: document.getElementById("dbgPanel"),
@@ -281,6 +282,7 @@ function rerenderAll(deltaSec){
         const createdAt = (o?.createdAt ?? nowS);
         const age = Math.max(0, nowS - createdAt);
         const ageTxt = fmtAgeSeconds ? fmtAgeSeconds(age) : `${Math.floor(age)}с`;
+        const honor = Math.max(0, Math.floor(Number(getOrganismHonor(o) || 0)));
         const cls = isSel ? 'orgCell isActive' : 'orgCell';
 
         return `
@@ -290,6 +292,7 @@ function rerenderAll(deltaSec){
               <span class="orgCellStage">${stage}</span>
               <span class="orgMetaInline">блоков: ${blocks} • возраст: ${ageTxt}</span>
             </div>
+            <div class="orgHonorLine"><span class="orgHonorLabel">хонор:</span> <span class="orgHonorValue">${honor}</span></div>
             ${mkBarsRow(o)}
           </div>
         `;

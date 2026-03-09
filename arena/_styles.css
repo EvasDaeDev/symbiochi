@@ -77,6 +77,51 @@ body{
   image-rendering:pixelated;
 }
 
+.fighter-overlay{
+  position:absolute;
+  top:26px;
+  z-index:2;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  pointer-events:none;
+  text-shadow:0 0 10px rgba(0,0,0,.6);
+}
+
+.fighter-overlay-left{left:34px;align-items:flex-start}
+.fighter-overlay-right{right:34px;align-items:flex-end}
+
+.info-line{
+  display:grid;
+  grid-template-columns:auto auto;
+  align-items:baseline;
+  gap:18px;
+  font-variant-numeric:tabular-nums;
+}
+
+.fighter-overlay-right .info-line{
+  justify-items:end;
+}
+
+.info-key{
+  color:var(--info);
+  font-size:12px;
+  line-height:1.1;
+}
+
+.info-name{
+  color:var(--accent);
+  font-size:14px;
+  font-weight:700;
+  line-height:1.1;
+}
+
+.info-value{
+  color:#f6f7fb;
+  font-size:12px;
+  line-height:1.1;
+}
+
 .bottom-hud{
   position:absolute;
   left:0;
@@ -245,7 +290,10 @@ input[type="text"],input[type="password"],input[type="file"]{
   .arena-shell{padding:8px}
   .stage{padding:10px;border-radius:22px}
   .arena-frame{padding:10px 10px 170px}
-  .info-key,.info-name,
+  .fighter-overlay{top:18px}
+  .fighter-overlay-left{left:20px}
+  .fighter-overlay-right{right:20px}
+  .info-key,.info-name,.info-value{font-size:15px}
   .bottom-hud{
     grid-template-columns:1fr;
     justify-items:center;
@@ -266,7 +314,15 @@ input[type="text"],input[type="password"],input[type="file"]{
   }
   .brand .subtitle{display:none}
   .arena-frame{padding-bottom:182px}
-  .info-key,.info-name,
+  .fighter-overlay{
+    gap:6px;
+  }
+  .info-line{
+    gap:12px;
+  }
+  .info-key,.info-name,.info-value{
+    font-size:13px;
+  }
   .bottom-name{
     font-size:15px;
     max-width:140px;

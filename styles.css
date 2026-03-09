@@ -1407,3 +1407,20 @@ button, input, select, textarea,
   font-weight: 700;
   text-shadow: 0 0 6px rgba(239,68,68,.6);
 }
+
+.orgHonorLine{
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: left;
+  color: #f59e0b;
+}
+
+.orgHonorLabel{
+  color: #f59e0b;
+  opacity: 0.95;
+}
+
+.orgHonorValue{
+  color: #fbbf24;
+}

@@ -1,4 +1,4 @@
-import { mulberry32, hash32, clamp01 } from "../util.js";
+import { mulberry32, hash32 } from "../util.js";
 import { base64UrlEncode, base64UrlDecode, deflateBytes, inflateBytes } from "../util.js";
 import { makeSmallConnectedBody, growBodyConnected, addModule, growPlannedModules, findFaceAnchor } from "../creature.js";
 
@@ -42,7 +42,6 @@ export function extractGenome(stateOrOrg){
   return {
     v: GEN_VERSION,
     seed: (stateOrOrg.seed ?? 0) | 0,
-    plan: stateOrOrg.plan ? JSON.parse(JSON.stringify(stateOrOrg.plan)) : null,
     palette: stateOrOrg.palette ? JSON.parse(JSON.stringify(stateOrOrg.palette)) : null,
     modules
   };
@@ -82,46 +81,10 @@ export async function decodeGenome(str){
   if (!Number.isFinite(genome.seed)) throw new Error("bad seed");
   if (!Array.isArray(genome.modules)) genome.modules = [];
   genome.modules = genome.modules.map(cleanModuleSpec).filter(Boolean);
-  if (genome.plan && typeof genome.plan !== "object") genome.plan = null;
   if (genome.palette && typeof genome.palette !== "object") genome.palette = null;
   return genome;
 }
 
-function mixNumber(a, b, rng){
-  const t = rng();
-  return a * (1 - t) + b * t;
-}
-
-function mixPlan(planA, planB, seed){
-  const rng = mulberry32(seed);
-  const out = {};
-  const keys = new Set([
-    ...Object.keys(planA || {}),
-    ...Object.keys(planB || {})
-  ]);
-  for (const key of keys){
-    const va = planA ? planA[key] : undefined;
-    const vb = planB ? planB[key] : undefined;
-    if (Array.isArray(va) || Array.isArray(vb)){
-      const arrA = Array.isArray(va) ? va : vb;
-      const arrB = Array.isArray(vb) ? vb : va;
-      out[key] = rng() < 0.5 ? arrA : arrB;
-    } else if (typeof va === "number" || typeof vb === "number"){
-      const na = Number.isFinite(va) ? va : (Number.isFinite(vb) ? vb : 0);
-      const nb = Number.isFinite(vb) ? vb : (Number.isFinite(va) ? va : 0);
-      out[key] = mixNumber(na, nb, rng);
-    } else if (typeof va === "string" || typeof vb === "string"){
-      out[key] = rng() < 0.5 ? va : vb;
-    } else if (typeof va === "boolean" || typeof vb === "boolean"){
-      out[key] = rng() < 0.5 ? va : vb;
-    } else {
-      out[key] = rng() < 0.5 ? va : vb;
-    }
-  }
-  if (out.symmetry != null) out.symmetry = clamp01(out.symmetry);
-  if (out.wiggle != null) out.wiggle = clamp01(out.wiggle);
-  return out;
-}
 
 function mixPalette(palA, palB, seed){
   const rng = mulberry32(seed);
@@ -162,14 +125,12 @@ export function mergeGenomes(genA, genB){
   const out1 = {
     v: GEN_VERSION,
     seed: hash32(sharedSeed, 1) | 0,
-    plan: mixPlan(genA.plan || {}, genB.plan || {}, hash32(sharedSeed, 11)),
     palette: mixPalette(genA.palette || {}, genB.palette || {}, hash32(sharedSeed, 21)),
     modules: mods1
   };
   const out2 = {
     v: GEN_VERSION,
     seed: hash32(sharedSeed, 2) | 0,
-    plan: mixPlan(genA.plan || {}, genB.plan || {}, hash32(sharedSeed, 12)),
     palette: mixPalette(genA.palette || {}, genB.palette || {}, hash32(sharedSeed, 22)),
     modules: mods2
   };
@@ -206,7 +167,7 @@ export function instantiateParentFromGenome(state, genomeOut){
   growBodyConnected({ body, modules: [] }, Math.max(0, targetBody - body.cells.length), rng);
 
   state.seed = seed;
-  state.plan = genomeOut.plan ? JSON.parse(JSON.stringify(genomeOut.plan)) : state.plan;
+  if (Object.prototype.hasOwnProperty.call(state, "plan")) delete state.plan;
   state.palette = genomeOut.palette ? JSON.parse(JSON.stringify(genomeOut.palette)) : state.palette;
   state.body = body;
   state.face = {

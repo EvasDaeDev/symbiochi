@@ -60,6 +60,15 @@ function nodeHash01(seed, i){
   return (h >>> 0) / 0xFFFFFFFF;
 }
 
+function stateWiggle(state){
+  const b = state?.bars || {};
+  const food = Number(b.food ?? 0);
+  const clean = Number(b.clean ?? 0);
+  const hp = Number(b.hp ?? 0);
+  const coreMin = Math.min(food, clean, hp);
+  return clamp01(1 - coreMin);
+}
+
 export function ensureBodyWave(state, rng = null){
   if (!state || !state.body) return;
   if (state.body.wave && typeof state.body.wave === "object"){
@@ -74,11 +83,12 @@ export function ensureBodyWave(state, rng = null){
     return;
   }
 
-  // Инициализация: привязываем к seed и "плану" (wiggle) для разнообразия.
+  // Инициализация: визуальный характер теперь зависит от текущего состояния,
+  // а не от заранее сгенерированного плана.
   const seed = (state.seed ?? 1) | 0;
   const prng = rng || mulberry32(hash32(seed, 44011));
 
-  const wiggle = Number.isFinite(state?.plan?.wiggle) ? clamp01(state.plan.wiggle) : 0.5;
+  const wiggle = stateWiggle(state);
   const ampBlocks = Math.round(lerp(BODY_WAVE.ampMinBlocks, BODY_WAVE.ampMaxBlocks, wiggle));
   const lobes = Math.max(1, Math.round(lerp(BODY_WAVE.lobesMin, BODY_WAVE.lobesMax, prng())));
   const phaseSpeed = lerp(BODY_WAVE.phaseSpeedMin, BODY_WAVE.phaseSpeedMax, prng());
@@ -109,8 +119,8 @@ export function tuneBodyWaveForSize(state){
   const big = clamp01((n - 800) / (2000 - 800));
   if (big <= 0) return;
 
-  // Используем wiggle как "ручку характера" и на больших телах тоже.
-  const wiggle = Number.isFinite(state?.plan?.wiggle) ? clamp01(state.plan.wiggle) : 0.5;
+  // Используем состояние организма как "ручку характера" и на больших телах тоже.
+  const wiggle = stateWiggle(state);
 
   // Целевые диапазоны для 2000+:
   // amp: 34..110 (по wiggle)

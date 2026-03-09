@@ -209,144 +209,6 @@ function placeFightersIdle() {
 let importTarget = 0;
 let lastExport = null;
 
-
-function cloneCapsuleSafe(value) {
-  return value == null ? value : structuredClone(value);
-}
-
-function sanitizeArenaExportObject(obj) {
-  if (!obj || typeof obj !== 'object') return obj;
-  delete obj.__logRoot;
-  delete obj.__parent;
-  delete obj.__state;
-  delete obj.anim;
-  delete obj.worldCells;
-  delete obj.geom;
-  delete obj.transform;
-  delete obj.combat;
-  delete obj.stats;
-  delete obj._moduleMetaMap;
-  for (const k of Object.keys(obj)) {
-    if (k.startsWith('__')) delete obj[k];
-  }
-  return obj;
-}
-
-function decodeCellList(list) {
-  if (!Array.isArray(list)) return [];
-  const out = [];
-  for (const c of list) {
-    if (Array.isArray(c) && c.length >= 2) out.push({ x: c[0] | 0, y: c[1] | 0 });
-    else if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) out.push({ x: c.x | 0, y: c.y | 0 });
-    else if (typeof c === 'string') {
-      const m = /^(-?\d+)\s*,\s*(-?\d+)$/.exec(c.trim());
-      if (m) out.push({ x: m[1] | 0, y: m[2] | 0 });
-    }
-  }
-  return out;
-}
-
-function encodeCellList(points, asPairs) {
-  return asPairs
-    ? points.map(p => [p.x | 0, p.y | 0])
-    : points.map(p => ({ x: p.x | 0, y: p.y | 0 }));
-}
-
-function rebuildWinnerOrganismForCapsule(winner) {
-  const srcOrg = cloneCapsuleSafe(winner?.organismState || {});
-  const org = sanitizeArenaExportObject(srcOrg || {});
-  org.body = org.body || {};
-
-  const geomCells = Array.isArray(winner?.geom?.cells)
-    ? winner.geom.cells.map(c => ({ x: c.x | 0, y: c.y | 0, type: String(c.type || 'body').toLowerCase() }))
-    : [];
-
-  const tmpGeom = { cells: geomCells.map(c => ({ ...c })), center: { x: 0, y: 0 }, radius: 0, bbox: null };
-  recomputeGeom(tmpGeom);
-  const shiftX = Math.round(tmpGeom.center.x);
-  const shiftY = Math.round(tmpGeom.center.y);
-
-  const survivorSet = new Set(geomCells.map(c => `${c.x},${c.y}`));
-  const core = Array.isArray(org?.body?.core) && org.body.core.length >= 2
-    ? [org.body.core[0] | 0, org.body.core[1] | 0]
-    : [0, 0];
-
-  const bodyAsPairs = Array.isArray(org?.body?.cells) && Array.isArray(org.body.cells[0]);
-  const originalBody = decodeCellList(org?.body?.cells || org?.body?.blocks || org?.body?.cellsPacked || []);
-  const rebuiltBody = [];
-  for (const p of originalBody) {
-    const nx = (p.x - core[0]) | 0;
-    const ny = (p.y - core[1]) | 0;
-    if (!survivorSet.has(`${nx},${ny}`)) continue;
-    rebuiltBody.push({ x: nx - shiftX, y: ny - shiftY });
-  }
-  if (!rebuiltBody.length) {
-    for (const c of geomCells) {
-      if (c.type !== 'body') continue;
-      rebuiltBody.push({ x: c.x - shiftX, y: c.y - shiftY });
-    }
-  }
-
-  org.body.cells = encodeCellList(rebuiltBody, bodyAsPairs);
-  org.body.core = [0, 0];
-  if ('blocks' in org.body) delete org.body.blocks;
-  if ('cellsPacked' in org.body) delete org.body.cellsPacked;
-
-  const srcMods = Array.isArray(org?.modules) ? org.modules : [];
-  const rebuiltModules = [];
-  for (const mod of srcMods) {
-    const nextMod = sanitizeArenaExportObject(cloneCapsuleSafe(mod || {}));
-    const asPairs = Array.isArray(nextMod?.cells) && Array.isArray(nextMod.cells[0]);
-    const pts = decodeCellList(nextMod?.cells || nextMod?.blocks || nextMod?.bodyCells || []);
-    const kept = [];
-    for (const p of pts) {
-      const nx = (p.x - core[0]) | 0;
-      const ny = (p.y - core[1]) | 0;
-      if (!survivorSet.has(`${nx},${ny}`)) continue;
-      kept.push({ x: nx - shiftX, y: ny - shiftY });
-    }
-    if (!kept.length) continue;
-    nextMod.cells = encodeCellList(kept, asPairs);
-    delete nextMod.blocks;
-    delete nextMod.bodyCells;
-    if (Array.isArray(nextMod.growPos) && nextMod.growPos.length >= 2) {
-      nextMod.growPos = [((nextMod.growPos[0] | 0) - core[0] - shiftX), ((nextMod.growPos[1] | 0) - core[1] - shiftY)];
-    }
-    if (Array.isArray(nextMod.anchor) && nextMod.anchor.length >= 2) {
-      nextMod.anchor = [((nextMod.anchor[0] | 0) - core[0] - shiftX), ((nextMod.anchor[1] | 0) - core[1] - shiftY)];
-    }
-    rebuiltModules.push(nextMod);
-  }
-
-  if (!rebuiltModules.length) {
-    const byType = new Map();
-    for (const c of geomCells) {
-      if (c.type === 'body') continue;
-      let arr = byType.get(c.type);
-      if (!arr) {
-        arr = [];
-        byType.set(c.type, arr);
-      }
-      arr.push({ x: c.x - shiftX, y: c.y - shiftY });
-    }
-    for (const [type, pts] of byType.entries()) {
-      rebuiltModules.push({ type, cells: encodeCellList(pts, true) });
-    }
-  }
-
-  org.modules = rebuiltModules;
-
-  if (org.face && typeof org.face === 'object' && Array.isArray(org.face.anchor) && org.face.anchor.length >= 2) {
-    org.face.anchor = [((org.face.anchor[0] | 0) - core[0] - shiftX), ((org.face.anchor[1] | 0) - core[1] - shiftY)];
-  }
-
-  org.pvp = org.pvp && typeof org.pvp === 'object' ? org.pvp : {};
-  const totalHonor = ((winner?.meta?.honor | 0) + Math.floor(winner?.stats?.kingHonorAcc || 0)) | 0;
-  org.pvp.honor = totalHonor;
-  return { org, totalHonor };
-}
-
-
 function toast(msg) {
   els.hudStatus.textContent = msg;
   console.log('[arena]', msg);
@@ -522,7 +384,40 @@ els.btnExportWinner.addEventListener('click', async () => {
     const winner = arena.winnerId === 'A' ? arena.fighters[0] : arena.fighters[1];
     if (!winner) return;
 
-    const { org, totalHonor } = rebuildWinnerOrganismForCapsule(winner);
+    const org = structuredClone(winner.organismState);
+    org.body = org.body || {};
+
+    const shifted = winner.geom.cells.map(c => ({ x: c.x, y: c.y, type: c.type || 'body' }));
+    const tmpGeom = { cells: shifted, center: { x: 0, y: 0 }, radius: 0, bbox: null };
+    recomputeGeom(tmpGeom);
+    const shiftX = Math.round(tmpGeom.center.x);
+    const shiftY = Math.round(tmpGeom.center.y);
+    for (const c of shifted) {
+      c.x = (c.x - shiftX) | 0;
+      c.y = (c.y - shiftY) | 0;
+    }
+
+    const asPairs = Array.isArray(org?.body?.cells) && Array.isArray(org.body.cells[0]);
+    const pack = (lst) => asPairs ? lst.map(c => [c.x, c.y]) : lst.map(c => ({ x: c.x, y: c.y }));
+
+    const bodyCells = shifted.filter(c => String(c.type || 'body').toLowerCase() === 'body');
+    org.body.cells = pack(bodyCells);
+    org.body.core = [0, 0];
+
+    const byType = new Map();
+    for (const c of shifted) {
+      const t = String(c.type || 'body').toLowerCase();
+      if (t === 'body') continue;
+      let arr = byType.get(t);
+      if (!arr) {
+        arr = [];
+        byType.set(t, arr);
+      }
+      arr.push(c);
+    }
+    org.modules = Array.from(byType.entries()).map(([type, cells]) => ({ type, cells: pack(cells) }));
+
+    const totalHonor = winner.meta.honor | 0;
     const meta = {
       name: winner.name,
       blocks: winner.geom.cells.length,

@@ -22,6 +22,20 @@
       <div class="arena-frame">
         <canvas id="arenaCanvas" width="900" height="600"></canvas>
 
+        <div class="fighter-overlay fighter-overlay-left">
+          <div class="info-line"><span class="info-key">name</span><span id="aName" class="info-name">—</span></div>
+          <div class="info-line"><span class="info-key">blocks</span><span id="aBlocks" class="info-value">—</span></div>
+          <div class="info-line"><span class="info-key">wins</span><span id="aWins" class="info-value">—</span></div>
+          <div class="info-line"><span class="info-key">honor</span><span id="aHonor" class="info-value">—</span></div>
+        </div>
+
+        <div class="fighter-overlay fighter-overlay-right">
+          <div class="info-line"><span id="bName" class="info-name">—</span><span class="info-key">name</span></div>
+          <div class="info-line"><span id="bBlocks" class="info-value">—</span><span class="info-key">blocks</span></div>
+          <div class="info-line"><span id="bWins" class="info-value">—</span><span class="info-key">wins</span></div>
+          <div class="info-line"><span id="bHonor" class="info-value">—</span><span class="info-key">honor</span></div>
+        </div>
+
         <div class="bottom-hud">
           <div class="bottom-slot bottom-slot-left">
             <button id="btnImportA" class="btn primary">Import .sbh</button>

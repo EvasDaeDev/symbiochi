@@ -11,6 +11,26 @@ import { TEETH } from "./organs/teeth.js";
 import { MOUTH } from "./organs/mouth.js";
 import { FIN } from "./organs/fin.js";
 
+function clamp01Local(v){
+  return Math.max(0, Math.min(1, Number(v) || 0));
+}
+
+function getStateMorphProfile(state){
+  const b = state?.bars || {};
+  const food = Number(b.food ?? 0);
+  const clean = Number(b.clean ?? 0);
+  const hp = Number(b.hp ?? 0);
+  const mood = Number(b.mood ?? 0);
+  const coreMin = Math.min(food, clean, hp);
+  const coreAvg = (food + clean + hp) / 3;
+  const stress = clamp01Local(1 - coreMin);
+
+  return {
+    wiggle: clamp01Local(stress),
+    symmetry: clamp01Local(coreAvg * 0.85 + mood * 0.15)
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Back-compat shims for legacy code paths
 // ---------------------------------------------------------------------------
@@ -294,16 +314,6 @@ export function newGame(){
   const eyeCfg = getOrganDef("eye");
   const eyeShape = pickWeighted(rng, eyeCfg?.shapeOptions, eyeCfg?.shapeWeights) || "sphere";
 
- const plan = {
-    // предпочитаемое направление роста (силуэт)
-    axisDir: pick(rng, DIR8),
-    // 0..1: стремление к симметрии (парные органы)
-    symmetry: rng(),
-    // 0..1: насколько "кривые" будут отростки (прямые/зигзаг/дуга)
-    wiggle: rng(),
-    // простой "экотип" — даёт разный стиль тела
-    ecotype: pick(rng, ["crawler","swimmer","sentinel","tank","sprinter","lurker","seer","fortress","bloomer"])
-  };
   const state = {
     version: 6,
     seed,
@@ -314,7 +324,6 @@ export function newGame(){
     evoIntervalMin: 2,
     name: pick(rng, ["Пип", "Зуз", "Крош", "Мок", "Люм", "Флин", "Бип", "Руф", "Тик", "Нок", "Плюм", "Зо", "Мип", "Фло", "Нюк", "Бру", "Топ", "Луф", "Кеп", "Мокси", "Рум", "Ик"]),
     palette: pal,
-	plan,
     care: { feed: 0, wash: 0, heal: 0, neglect: 0 },
     bars: { food: 0.85, clean: 0.85, hp: 0.85, mood: 1.00 },
     body,
@@ -802,7 +811,7 @@ export function addModule(state, type, rng, target=null){
   };
 
  // ----- growth style (straight / zigzag / curve) -----
-  const wiggle = state?.plan?.wiggle ?? 0.0;
+  const { wiggle } = getStateMorphProfile(state);
   let growStyle = "straight";
   if (movable || type === "spike" || type === "teeth"){
     if (wiggle > 0.56) growStyle = "curve";
@@ -845,7 +854,7 @@ export function addModule(state, type, rng, target=null){
     ...styleParams
   });
     // ----- symmetry: sometimes spawn a mirrored twin organ -----
-  const sym = state?.plan?.symmetry ?? 0;
+  const { symmetry: sym } = getStateMorphProfile(state);
   const canMirror = sym > 0.55 && rng() < 0.45;
   // Note: claw is no longer a simple line appendage; it grows as a symmetric patch.
   // Mirroring the old linear claw logic would create broken half-claws.
@@ -896,7 +905,8 @@ export function growPlannedModules(state, rng, options = {}){
     maxGrows = Infinity,
     strength = null,
     shuffle = false,
-    grownModules = null
+    grownModules = null,
+    trappedModules = null
   } = options;
   const useTarget = Array.isArray(target);
   const bodySet = bodyCellSet(state.body);
@@ -983,6 +993,17 @@ export function growPlannedModules(state, rng, options = {}){
     const base = Number.isFinite(strength) ? strength : 1;
     const scaled = Math.max(0, Math.min(1, 1 - dist / 45));
     return Math.pow(scaled, 2) * Math.max(0, Math.min(1, base));
+  }
+
+  function countBodyNeighbors8(x, y){
+    let blocked = 0;
+    for (let dy = -1; dy <= 1; dy++){
+      for (let dx = -1; dx <= 1; dx++){
+        if (dx === 0 && dy === 0) continue;
+        if (bodySet.has(key(x + dx, y + dy))) blocked++;
+      }
+    }
+    return blocked;
   }
 
   let grew = 0;
@@ -1311,8 +1332,13 @@ if (m.type === "claw"){
       break;
     }
 
-    // ❌ если совсем некуда — прекращаем рост этого модуля
+    // ❌ если почти замуровало орган телом — просим внешний код выкатить его к коже.
+    // Порог 7/8 нужен раньше полного захлопывания, иначе орган уже остаётся внутри.
     if (!placed){
+      const blocked8 = countBodyNeighbors8(growPos[0], growPos[1]);
+      if (blocked8 >= 7 && Array.isArray(trappedModules) && !trappedModules.includes(entry.i)){
+        trappedModules.push(entry.i);
+      }
       continue;
     }
   }
