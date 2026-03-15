@@ -171,7 +171,44 @@ function ensureInventoryDefaults(state){
   }
 }
 
+export function refreshInventoryUI(state, els){
+  if (!state) return;
+  ensureInventoryDefaults(state);
+
+  const inv = state.inv || {};
+
+  const food  = Number.isFinite(inv.food)  ? (inv.food  | 0) : 0;
+  const water = Number.isFinite(inv.water) ? (inv.water | 0) : 0;
+  const heal  = Number.isFinite(inv.heal)  ? (inv.heal  | 0) : 0;
+  const coins = Number.isFinite(inv.coins) ? (inv.coins | 0) : 0;
+
+  if (els?.foodValue)  els.foodValue.textContent  = String(food);
+  if (els?.waterValue) els.waterValue.textContent = String(water);
+  if (els?.healValue)  els.healValue.textContent  = String(heal);
+  if (els?.coinsValue) els.coinsValue.textContent = String(coins);
+
+  const noCoins = coins < 1;
+  if (els?.exchangeFood)  els.exchangeFood.disabled  = noCoins;
+  if (els?.exchangeWater) els.exchangeWater.disabled = noCoins;
+  if (els?.exchangeHeal)  els.exchangeHeal.disabled  = noCoins;
+
+  if (els?.equippedRowInv){
+    const eq = state.cosmetics?.equipped || {};
+    const slotOrder = ["eyes", "hat", "jewel"];
+    els.equippedRowInv.innerHTML = "";
+
+    for (const slot of slotOrder){
+      const pill = document.createElement("div");
+      pill.className = "equipPill";
+      pill.textContent = `${slot}: ${eq[slot] || "—"}`;
+      els.equippedRowInv.appendChild(pill);
+    }
+  }
+}
+
 export function attachSettings(view, els, toast){
+  if (els?.__settingsBound) return;
+  if (els) els.__settingsBound = true;
   // Some UI elements may be moved between panels; fall back to DOM lookups.
   els = els || {};
   els.foodValue ||= document.getElementById("foodValue");
@@ -189,53 +226,6 @@ export function attachSettings(view, els, toast){
   els.rulesBtn ||= document.getElementById("rulesBtn");
   els.rulesOverlay ||= document.getElementById("rulesOverlay");
   els.closeRules ||= document.getElementById("closeRules");
- function getActiveOrg(state){
-    // Selection model:
-    // - state.active === -1 OR null/undefined -> parent
-    // - 0..N-1 -> bud index
-    const a = state?.active;
-    if (Number.isFinite(a) && a >= 0 && Array.isArray(state.buds) && a < state.buds.length){
-      return state.buds[a];
-    }
-    return state;
-  }
-
-
-function refreshInventoryUI(state){
-  if (!state) return;
-
-  const inv = state.inv || {};
-
-  const food  = Number.isFinite(inv.food)  ? (inv.food  | 0) : 0;
-  const water = Number.isFinite(inv.water) ? (inv.water | 0) : 0;
-  const heal  = Number.isFinite(inv.heal)  ? (inv.heal  | 0) : 0;
-  const coins = Number.isFinite(inv.coins) ? (inv.coins | 0) : 0;
-
-  if (els.foodValue)  els.foodValue.textContent  = String(food);
-  if (els.waterValue) els.waterValue.textContent = String(water);
-  if (els.healValue)  els.healValue.textContent  = String(heal);
-  if (els.coinsValue) els.coinsValue.textContent = String(coins);
-
-  // Покупка ресурсов за монеты
-  const noCoins = coins < 1;
-  if (els.exchangeFood)  els.exchangeFood.disabled  = noCoins;
-  if (els.exchangeWater) els.exchangeWater.disabled = noCoins;
-  if (els.exchangeHeal)  els.exchangeHeal.disabled  = noCoins;
-
-  // Экипировка в инвентаре (если есть отдельный контейнер)
-  if (els.equippedRowInv){
-    const eq = state.cosmetics?.equipped || {};
-    const slotOrder = ["eyes", "hat", "jewel"];
-    els.equippedRowInv.innerHTML = "";
-
-    for (const slot of slotOrder){
-      const pill = document.createElement("div");
-      pill.className = "equipPill";
-      pill.textContent = `${slot}: ${eq[slot] || "—"}`;
-      els.equippedRowInv.appendChild(pill);
-    }
-  }
-}
 
   function openSettings(state){
     if (!state) return;
@@ -384,18 +374,18 @@ const doExchange = (kind)=>{
   }
   if (kind === "water"){
     inv.coins = coins - 1;
-    inv.water = ((inv.water ?? 0) | 0) + 15;
-    toast("Покупка: +15 воды.");
+    inv.water = ((inv.water ?? 0) | 0) + 10;
+    toast("Покупка: +10 воды.");
   }
   if (kind === "heal"){
     inv.coins = coins - 1;
-    inv.heal = ((inv.heal ?? 0) | 0) + 15;
-    toast("Покупка: +15 лечения.");
+    inv.heal = ((inv.heal ?? 0) | 0) + 10;
+    toast("Покупка: +10 лечения.");
   }
 
   view.state.lastSeen = nowSec();
   saveGame(view.state);
-  refreshInventoryUI(view.state); // ← важно: обновляем вкладку, а не settings
+  refreshInventoryUI(view.state, els); // ← важно: обновляем вкладку, а не settings
 };
   if (els.exchangeFood) els.exchangeFood.addEventListener("click", ()=>doExchange("food"));
   if (els.exchangeWater) els.exchangeWater.addEventListener("click", ()=>doExchange("water"));
@@ -498,7 +488,7 @@ const doExchange = (kind)=>{
     }
 
     // keep Inventory tab numbers in sync when shop changes coins/equipment
-    refreshInventoryUI(view.state);
+    refreshInventoryUI(view.state, els);
   };
 
   if (els.cosmeticsBtn) els.cosmeticsBtn.addEventListener("click", openCosmetics);
@@ -515,7 +505,7 @@ const doExchange = (kind)=>{
   if (els.rulesOverlay) els.rulesOverlay.addEventListener("click", (e)=>{ if (e.target === els.rulesOverlay) closeRules(); });
 
   // Initial sync for inventory fields (now live in Inventory tab)
-  refreshInventoryUI(view.state);
+  refreshInventoryUI(view.state, els);
 }
 
 export function attachCapsuleUI(view, els, toast){
@@ -524,25 +514,19 @@ export function attachCapsuleUI(view, els, toast){
   const open = (mode)=>{
     els.capsuleOverlay.style.display = "grid";
     els.capsuleOverlay.dataset.mode = mode || "export";
-	const open = (mode) => {
-  els.capsuleOverlay.style.display = "grid";
-  els.capsuleOverlay.dataset.mode = mode || "export";
 
-  // NEW: prefill export name input from selected bud
-  const nameInput = document.getElementById("capsuleNameInput");
-  if (nameInput) {
-    nameInput.value = "";
-    if ((mode || "export") === "export") {
-      const s = view?.state;
-      const idx = Number.isFinite(s?.active) ? s.active : -1;
-      // экспорт матки запрещён, но на всякий случай:
-      const bud = (idx >= 0 && Array.isArray(s?.buds)) ? s.buds[idx] : null;
-      if (bud?.name) nameInput.value = String(bud.name).slice(0, 20);
+    // prefill export name input from selected bud
+    const nameInput = document.getElementById("capsuleNameInput");
+    if (nameInput) {
+      nameInput.value = "";
+      if ((mode || "export") === "export") {
+        const s = view?.state;
+        const idx = Number.isFinite(s?.active) ? s.active : -1;
+        const bud = (idx >= 0 && Array.isArray(s?.buds)) ? s.buds[idx] : null;
+        if (bud?.name) nameInput.value = String(bud.name).slice(0, 20);
+      }
     }
-  }
 
-  refresh();
-};
     refresh();
   };
   
@@ -733,23 +717,37 @@ export function attachCapsuleUI(view, els, toast){
   refresh();
 }
 
-export function attachInfoTabs(els){
+export function attachInfoTabs(view, els){
   const root = els.infoTabs;
   if (!root) return;
+  if (root.__tabsBound) return;
+  root.__tabsBound = true;
+
   root.addEventListener("click", (e)=>{
     const btn = e.target?.closest?.(".tabBtn");
     if (!btn) return;
+
     const tab = btn.dataset.tab;
-    for (const b of root.querySelectorAll(".tabBtn")) b.classList.toggle("isActive", b === btn);
+
+    for (const b of root.querySelectorAll(".tabBtn")) {
+      b.classList.toggle("isActive", b === btn);
+    }
+
     const bodies = [
       ["org", els.tabOrg || document.getElementById("tab-org")],
       ["inv", els.tabInv || document.getElementById("tab-inv")],
       ["legend", els.tabLegend || document.getElementById("tab-legend")],
       ["log", els.tabLog || document.getElementById("tab-log")],
     ];
+
     for (const [name, el] of bodies){
       if (!el) continue;
       el.classList.toggle("isActive", name === tab);
+    }
+
+    // обновляем данные инвентаря при входе на вкладку
+    if (tab === "inv" && view?.state){
+      refreshInventoryUI(view.state, els);
     }
   });
 }
@@ -806,6 +804,8 @@ export function attachLegendHuePicker(view, els, rerenderAll){
 
 export function attachCarrotHudInput(view, els, rerenderAll){
   if (!els.carrotHudInput) return;
+  if (els.carrotHudInput.__bound) return;
+  els.carrotHudInput.__bound = true;
   els.carrotHudInput.addEventListener("input", ()=>{
     if (!view.state) return;
     const v = parseInt(els.carrotHudInput.value, 10);
@@ -819,6 +819,8 @@ export function attachCarrotHudInput(view, els, rerenderAll){
 
 export function attachCoinHudInput(view, els, rerenderAll){
   if (!els.coinHudInput) return;
+  if (els.coinHudInput.__bound) return;
+  els.coinHudInput.__bound = true;
   els.coinHudInput.addEventListener("input", ()=>{
     if (!view.state) return;
     const v = parseInt(els.coinHudInput.value, 10);
@@ -831,6 +833,8 @@ export function attachCoinHudInput(view, els, rerenderAll){
 }
 
 export function attachActions(view, els, toast, rerenderAll, spawnFx){
+	  if (els.__actionsBound) return;
+  els.__actionsBound = true;
   els.feed.addEventListener("click", ()=>{
     if (!view.state) return;
     // Feeding is now interactive: click "КОРМ" to enter carrot-throw mode,

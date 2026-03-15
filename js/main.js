@@ -1197,39 +1197,39 @@ function attachOrgListClicks() {
   });
 }
 
+let gameStarted = false;
+
 async function startGame(){
+  if (gameStarted) return;
+  gameStarted = true;
+
   view.state = migrateOrNew();
   view.lastActive = view.state?.active ?? null;
-  
-  // --- Bio Handpan: init + фильтр состояний организмов ---
-  // Создаём AudioContext и мастер-цепочку (gain + компрессор)
+
   initBioHandpan();
 
-  // --- Sound enabled toggle ---
-  const sndDefault = (view.state?.settings?.soundEnabled !== false); // default ON
+  const sndDefault = (view.state?.settings?.soundEnabled !== false);
+
   if (els.soundEnabled){
     els.soundEnabled.checked = sndDefault;
     setBioHandpanEnabled(els.soundEnabled.checked);
 
-    els.soundEnabled.addEventListener("change", () => {
-      const on = !!els.soundEnabled.checked;
-      view.state.settings = view.state.settings || {};
-      view.state.settings.soundEnabled = on;
+    if (!els.soundEnabled.__boundChange){
+      els.soundEnabled.__boundChange = true;
 
-      setBioHandpanEnabled(on);
-      saveGame(view.state);
-    });
+      els.soundEnabled.addEventListener("change", () => {
+        const on = !!els.soundEnabled.checked;
+        view.state.settings = view.state.settings || {};
+        view.state.settings.soundEnabled = on;
+
+        setBioHandpanEnabled(on);
+        saveGame(view.state);
+      });
+    }
   } else {
-    // если чекбокса нет — просто включаем по умолчанию
     setBioHandpanEnabled(sndDefault);
   }
-  // --- end sound toggle ---
 
-  // Организм звучит только если он "живой":
-  // не в анабиозе и не в усыхании.
-  //
-  // Логика совпадает с mkBarsRow: там minBar <= 0.01 → "усыхание",
-  // <= 0.10 → "анабиоз". Мы вырубаем звук для обоих случаев.
   setOrganismFilter((org) => {
     if (!org) return false;
 
@@ -1240,38 +1240,33 @@ async function startGame(){
     const mood  = Number.isFinite(b.mood)  ? b.mood  : 1;
 
     const minBar = Math.min(food, clean, hp, mood);
-
-    // minBar <= 0.01  → усыхание
-    // minBar <= 0.10  → анабиоз
     if (minBar <= 0.10) return false;
 
     return true;
   });
-  // --- конец блока Bio Handpan ---
 
   ensureMoving(view);
-  
-  view.canvas = els.canvas;  
+
+  view.canvas = els.canvas;
   const fx = getFxPipeline(view, els.canvas);
   fx.enabled = (view.state?.settings?.fxEnabled !== false);
 
   const c = view.state?.body?.core || [0, 0];
-  view.cam = { ox: (c[0]||0), oy: (c[1]||0) };
+  view.cam = { ox: (c[0] || 0), oy: (c[1] || 0) };
   view.camTarget = null;
 
   if (els.startOverlay){
     els.startOverlay.classList.remove("show");
-    setTimeout(()=>{ els.startOverlay.style.display = "none"; }, 200);
+    setTimeout(() => { els.startOverlay.style.display = "none"; }, 200);
   }
 
-  // hooks
   attachDebugPanel(view, els);
   attachSettings(view, els, toast);
   attachActions(view, els, toast, rerenderAll, spawnFx);
   attachDragPan(els.grid, view);
   attachZoomWheel(els.grid, view);
   attachDisableDoubleTapZoom(els);
-  attachInfoTabs(els);
+  attachInfoTabs(view, els);
   attachLogFlash(view, els, rerenderAll);
   attachLegendHuePicker(view, els, rerenderAll);
   attachCarrotHudInput(view, els, rerenderAll);

@@ -1586,24 +1586,7 @@ export function actOn(rootState, org, kind){
     if (prevTag === undefined) delete target.__orgTag; else target.__orgTag = prevTag;
   };
 
-  // Inventory cost (v2.2)
-  const inv = rootState.inv || (rootState.inv = {});
-  if (kind === "wash"){
-    inv.water = inv.water|0;
-    if (inv.water <= 0){
-      pushLog(rootState, `Нет воды для мытья.${label}`, "care");
-      return;
-    }
-    inv.water -= 1;
-  }
-  if (kind === "heal"){
-    inv.heal = inv.heal|0;
-    if (inv.heal <= 0){
-      pushLog(rootState, `Нет лечения.${label}`, "care");
-      return;
-    }
-    inv.heal -= 1;
-  }
+
 
   applyCareAction(rootState, target, kind, rng, withTargetLog, label);
 
